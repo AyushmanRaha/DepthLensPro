@@ -1,52 +1,214 @@
-# DepthLens Pro: Advanced Monocular Depth Estimation
+# DepthLensPro
+**AI-Powered 2D to 3D Depth Map Generation Web Application**
 
-## Overview
-DepthLens Pro is a comprehensive, full-stack machine vision application that transforms 2D images into detailed 3D depth maps. It provides a professional dashboard for comparing three distinct MiDaS model architectures (Small, Hybrid, and Large) to analyze the trade-off between inference speed and accuracy. 
+DepthLensPro is an intelligent web-based system that transforms 2D images into high-quality 3D depth maps using state-of-the-art deep learning models. Designed as a fast, modular, and scalable project, it enables users to upload images and visualize depth information seamlessly in a browser.
 
-The application supports simultaneous processing of multiple images and features a highly interactive, animated, and responsive frontend with real-time performance tracking.
+---
 
-## Architecture
-* **Frontend:** A modern, single-page application built with HTML, CSS, and JavaScript. Features asynchronous multi-file handling, a sophisticated dark-themed dashboard, CSS animations, and Chart.js for data visualization.
-* **Backend:** A FastAPI server built with Python. Handles multi-file CORS requests, image decoding via OpenCV, and model inference.
-* **Machine Learning:** PyTorch implementation of MiDaS via Torch Hub.
-    * `MiDaS_small`: High speed, lightweight.
-    * `DPT_Hybrid`: Balanced performance.
-    * `DPT_Large`: High accuracy, high computational cost.
+## Features
 
-## Installation and Setup
+* AI-powered monocular depth estimation
+* Web-based interface (runs on localhost)
+* Fast image processing pipeline
+* Supports common image formats (JPG, PNG)
+* Depth visualization (grayscale / colormap)
+* Modular architecture for easy extension
+* API-ready backend for future scalability
 
-### 1. Backend Setup
-1.  Navigate to the backend directory:
-    ```bash
-    cd ~/Downloads/DepthLensPro/backend
-    ```
-2.  Install dependencies:
-    ```bash
-    pip3 install -r requirements.txt
-    ```
-3.  Start the server:
-    ```bash
-    uvicorn app:app --reload --host 127.0.0.1 --port 8000
-    ```
-    *Note: The first run will automatically download model weights from Torch Hub.*
+---
 
-### 2. Frontend Setup
-1.  Navigate to the frontend directory:
-    ```bash
-    cd ~/Downloads/DepthLensPro/frontend
-    ```
-2.  Start a local HTTP server:
-    ```bash
-    python3 -m http.server 3000
-    ```
+## Project Structure
 
-### Accessing the Application
-Once both servers are running, open Google Chrome and navigate to:
-`http://localhost:3000`
+```text
+DepthLensPro/
+│
+├── backend/           # Core AI + server logic
+│   ├── models/        # Pretrained depth models
+│   ├── utils/         # Helper functions
+│   ├── app.py         # Main backend server
+│   └── requirements.txt
+│
+├── frontend/          # Web UI
+│   ├── index.html
+│   ├── styles.css
+│   └── script.js
+│
+├── assets/            # Sample images / outputs
+├── README.md
+└── .gitignore
+```
 
-## System Usage
-1.  Select a model architecture from the control panel.
-2.  Click "Browse Files" or drag & drop to upload images.
-3.  Review the file queue.
-4.  Click "Generate Depth Maps". The progress bar provides real-time feedback.
-5.  View the generated depth maps in the results gallery and track performance in the dashboard.
+---
+
+## Tech Stack
+
+* **Backend:** Python, Flask / FastAPI  
+* **AI Models:** MiDaS / Depth Estimation Models  
+* **Frontend:** HTML, CSS, JavaScript  
+* **Libraries:** OpenCV, PyTorch, NumPy  
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+
+Make sure you have installed:
+
+* Python 3.8+
+* pip
+* Git
+
+---
+
+## Setup Instructions (OS-Specific)
+
+### macOS
+
+```bash
+# Clone repository
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Run backend server
+python backend/app.py
+```
+
+### Windows
+
+```bash
+# Clone repository
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# Create virtual environment
+python -m venv venv
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Run backend server
+python backend/app.py
+```
+
+### Linux
+
+```bash
+# Clone repository
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Run backend server
+python3 backend/app.py
+```
+
+---
+
+## Running the Application
+
+**1. Start the backend server:**
+
+```bash
+python backend/app.py
+```
+
+**2. Open frontend:**
+
+Open `frontend/index.html` in your browser OR serve via a local server:
+
+```bash
+cd frontend
+python -m http.server 5500
+```
+
+**3. Visit:**
+`http://localhost:5500`
+
+---
+
+## Workflow
+
+1.  Upload a 2D image
+2.  Backend processes image using AI model
+3.  Depth map is generated
+4.  Result is displayed in browser
+
+---
+
+## Example Output
+
+* **Input Image** -> RGB Image
+* **Output** -> Depth Map (Grayscale / Heatmap)
+
+---
+
+## Future Enhancements
+
+* Video depth estimation
+* Full 3D reconstruction (point clouds)
+* Cloud deployment (AWS / GCP)
+* GPU acceleration support
+* Mobile-friendly UI
+
+---
+
+## Contribution
+
+Contributions are welcome!
+
+1.  Fork the repo
+2.  Create a new branch: `git checkout -b feature/your-feature-name`
+3.  Commit changes: `git commit -m "Add new feature"`
+4.  Push and create PR: `git push origin feature/your-feature-name`
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+| :--- | :--- |
+| Module not found | Ensure virtual environment is activated |
+| Slow performance | Use GPU (if supported) |
+| Port already in use | Change port in backend config |
+
+---
+
+## License
+
+This project is licensed under the MIT License.
+
+---
+
+## Author
+
+**Ayushman Raha** GitHub: [https://github.com/AyushmanRaha](https://github.com/AyushmanRaha)
+
+---
+
+## Acknowledgements
+
+* MiDaS Depth Estimation Models
+* OpenCV & PyTorch communities
+
+---
+
+## Notes
+
+* This project is optimized for local development
+* Ensure proper dependencies are installed before running
+* GPU support requires additional configuration
