@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.env
+
+# PyTorch Local Model Weights
+*.pt
+*.pth
+
+# IDE / Editor
+.vscode/
+.idea/

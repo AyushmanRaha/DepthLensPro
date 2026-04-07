@@ -1,0 +1,235 @@
+/* --- Global Resets (Crucial for preventing overlapping and scrolling bugs) --- */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg-color: #0b0d12;
+    --panel-color: #161925;
+    --card-color: #1f2333;
+    --primary-color: #6366f1; 
+    --primary-hover: #4f46e5;
+    --text-color: #f3f4f6;
+    --text-muted: #9ca3af;
+    --border-color: #2d3748;
+    --success-color: #10b981;
+    --danger-color: #ef4444;
+    --danger-hover: #dc2626;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    line-height: 1.6;
+    overflow-x: hidden; /* Prevents janky horizontal scrolling */
+}
+
+/* --- Header Layout --- */
+header {
+    background-color: var(--panel-color);
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.header-content {
+    max-width: 1600px;
+    margin: 0 auto;
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+}
+
+.logo { font-size: 1.5rem; font-weight: 800; color: var(--primary-color); letter-spacing: -0.05em; }
+.tagline { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; }
+
+/* --- Main Layout --- */
+.dashboard-container {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr); /* minmax(0, 1fr) prevents grid blowout and overlap */
+    gap: 2rem;
+    padding: 2rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    align-items: start;
+}
+
+/* --- Control Panel (Sidebar) --- */
+.control-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    position: sticky;
+    top: 90px;
+}
+
+.card {
+    background-color: var(--panel-color);
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    transition: box-shadow 0.2s ease-in-out, transform 0.2s ease;
+    will-change: transform; /* Hardware acceleration prevents UI bouncing */
+}
+
+.card:hover {
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+    transform: translateY(-2px);
+}
+
+.control-panel h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem; }
+.control-panel label { color: var(--text-muted); font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; display: block; }
+
+select {
+    width: 100%;
+    padding: 0.75rem;
+    background-color: var(--card-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    outline: none;
+    cursor: pointer;
+}
+
+/* --- Upload Area --- */
+.upload-area { text-align: center; }
+.upload-icon { width: 48px; height: 48px; color: var(--primary-color); margin-bottom: 0.5rem; }
+.upload-area.highlight { border-color: var(--primary-color); background-color: rgba(99, 102, 241, 0.1); }
+.guidance { color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem; font-style: italic; }
+.drop-text { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.75rem; }
+
+.file-queue { margin-top: 1rem; text-align: left; max-height: 150px; overflow-y: auto; padding-right: 5px;}
+.queue-item {
+    background-color: var(--card-color);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+}
+.queue-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.btn-remove { background: none; border: none; color: var(--danger-color); cursor: pointer; font-size: 1.2rem; display: flex; align-items: center;}
+
+/* --- Buttons --- */
+.action-buttons { display: flex; gap: 0.5rem; }
+.btn { padding: 0.75rem 1rem; border-radius: 8px; border: none; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: all 0.2s; width: 100%; text-align: center;}
+.btn-browse { background-color: var(--card-color); border: 1px solid var(--border-color); color: var(--text-color); }
+.btn-browse:hover { background-color: var(--border-color); }
+.btn-primary { background-color: var(--primary-color); color: #fff; flex: 2; }
+.btn-primary:hover { background-color: var(--primary-hover); }
+.btn-primary:disabled { background-color: var(--card-color); color: var(--text-muted); cursor: not-allowed; border: 1px solid var(--border-color); }
+.btn-danger { background-color: var(--danger-color); color: white; flex: 2; }
+.btn-danger:hover { background-color: var(--danger-hover); }
+.btn-secondary { background-color: var(--card-color); border: 1px solid var(--border-color); color: var(--text-color); flex: 1; }
+.btn-secondary:hover { background-color: var(--border-color); }
+
+/* --- Progress Feedback --- */
+.processing-feedback {
+    background-color: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    padding: 1.5rem;
+    border-radius: 12px;
+    text-align: center;
+    margin-bottom: 2rem;
+}
+#processingText { color: #fbbf24; font-weight: 700; font-size: 1.1rem; }
+.timer-text { font-family: monospace; color: #fcd34d; font-size: 0.9rem; margin-top: 0.5rem; }
+.progress-bar-container { height: 8px; background-color: var(--card-color); border-radius: 4px; overflow: hidden; margin-top: 1rem; }
+.progress-bar { height: 100%; background-color: var(--success-color); width: 0%; transition: width 0.1s linear; }
+
+/* --- Results Gallery (Fixed Image Fitting) --- */
+.results-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.result-card {
+    background-color: var(--panel-color);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.image-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background-color: #000; /* Dark background behind images */
+    border-bottom: 1px solid var(--border-color);
+}
+
+.image-comparison img {
+    width: 100%;
+    aspect-ratio: 4/3; /* Forces a consistent height without breaking layout */
+    object-fit: contain; /* CRITICAL: Ensures the entire depth map is visible, no cropping */
+    display: block;
+}
+
+.image-comparison img:first-child { border-right: 1px solid var(--border-color); }
+
+.card-content {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex-grow: 1;
+}
+
+.card-content h4 { font-size: 1.05rem; word-break: break-all; } /* Prevents long filenames from overlapping */
+.card-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.btn-download {
+    margin-top: auto;
+    display: inline-block;
+    padding: 0.6rem;
+    background-color: rgba(99, 102, 241, 0.1);
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+    transition: all 0.2s;
+}
+.btn-download:hover { background-color: var(--primary-color); color: #fff; }
+
+/* --- Dashboard Metrics --- */
+.performance-metrics h3 { margin-bottom: 1rem; font-size: 1.25rem; }
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+}
+.metric-card { background-color: var(--panel-color); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border-color); text-align: center; }
+.metric-card h4 { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.metric-card h2 { font-size: 2rem; color: var(--primary-color); font-weight: 800; }
+.chart-container { grid-column: 1 / -1; height: 250px; padding: 1rem; }
+
+.hidden { display: none !important; }
+
+/* --- Responsive Optimization --- */
+@media (max-width: 1024px) {
+    .dashboard-container { grid-template-columns: 1fr; }
+    .control-panel { position: static; }
+    .results-gallery { grid-template-columns: 1fr; }
+}
