@@ -1,83 +1,363 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DepthLens Pro Dashboard</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DepthLens Pro — Monocular Depth Estimation</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&family=Exo+2:ital,wght@0,300;0,400;0,700;1,300&display=swap" rel="stylesheet" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
+
 <body>
-    <header>
-        <div class="header-content">
-            <div class="logo">DepthLens Pro</div>
-            <p class="tagline">Advanced Monocular Depth Estimation</p>
+  <!-- Ambient grid background -->
+  <canvas id="bgCanvas" aria-hidden="true"></canvas>
+
+  <!-- ─── HEADER ─────────────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo-group">
+        <div class="logo-icon" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="18" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="20" cy="20" r="10" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3"/>
+            <circle cx="20" cy="20" r="3"  fill="currentColor"/>
+            <line x1="20" y1="2"  x2="20" y2="8"  stroke="currentColor" stroke-width="1.5"/>
+            <line x1="20" y1="32" x2="20" y2="38" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="2"  y1="20" x2="8"  y2="20" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="32" y1="20" x2="38" y2="20" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
         </div>
-    </header>
+        <div class="logo-text">
+          <span class="logo-main">DepthLens<em>Pro</em></span>
+          <span class="logo-sub">Monocular Depth Estimation v2.0</span>
+        </div>
+      </div>
 
-    <div class="dashboard-container">
-        <aside class="control-panel">
-            <div class="card">
-                <h3>System Configuration</h3>
-                <label for="modelSelect">Select AI Architecture</label>
-                <select id="modelSelect">
-                    <option value="MiDaS_small">MiDaS Small (Speed-Optimized)</option>
-                    <option value="DPT_Hybrid">DPT Hybrid (Balanced)</option>
-                    <option value="DPT_Large">DPT Large (Accuracy-Optimized)</option>
-                </select>
-            </div>
+      <nav class="header-nav">
+        <button class="nav-btn active" data-panel="main"    aria-label="Main panel">WORKSPACE</button>
+        <button class="nav-btn"        data-panel="compare" aria-label="Compare panel">COMPARE</button>
+        <button class="nav-btn"        data-panel="about"   aria-label="About panel">ABOUT</button>
+      </nav>
 
-            <div class="card upload-area" id="dropZone">
-                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                </svg>
-                
-                <h3>Image Upload Queue</h3>
-                <p class="guidance">Max: 5 Files | PNG/JPG | Max Res: 4K</p>
-                <input type="file" id="fileInput" accept="image/jpeg, image/png" multiple hidden>
-                <button class="btn btn-browse" onclick="document.getElementById('fileInput').click()">Browse Files</button>
-                <p class="drop-text">or drag & drop images here</p>
-                <div id="fileQueue" class="file-queue"></div>
-            </div>
-
-            <div class="action-buttons">
-                <button id="processBtn" class="btn btn-primary" disabled>Generate</button>
-                <button id="stopBtn" class="btn btn-danger hidden">Stop</button>
-                <button id="refreshBtn" class="btn btn-secondary">Refresh</button>
-            </div>
-        </aside>
-
-        <main class="results-visualizer">
-            <div id="loadingState" class="processing-feedback hidden">
-                <p id="processingText">Initializing model inference...</p>
-                <p id="progressTimer" class="timer-text">Estimated time: --s</p>
-                <div class="progress-bar-container">
-                    <div id="progressBar" class="progress-bar"></div>
-                </div>
-            </div>
-
-            <section class="results-gallery" id="resultsGallery"></section>
-
-            <section class="performance-metrics">
-                <h3>Performance Analytics</h3>
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <h4>Total Inference Time</h4>
-                        <h2 id="metricTime">--</h2>
-                    </div>
-                    <div class="metric-card">
-                        <h4>Images Processed</h4>
-                        <h2 id="metricRes">--</h2>
-                    </div>
-                    <div class="metric-card chart-container">
-                        <canvas id="performanceChart"></canvas>
-                    </div>
-                </div>
-            </section>
-        </main>
+      <div class="header-status">
+        <span class="status-dot" id="statusDot" aria-live="polite"></span>
+        <span class="status-label" id="statusLabel">Connecting…</span>
+      </div>
     </div>
-    <script src="script.js"></script>
+  </header>
+
+  <!-- ─── TOAST ──────────────────────────────────────────────────── -->
+  <div id="toastContainer" class="toast-container" role="alert" aria-live="assertive"></div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PANEL: MAIN (WORKSPACE)
+  ═══════════════════════════════════════════════════════════════════ -->
+  <main class="panel active" id="panel-main">
+    <div class="workspace-grid">
+
+      <!-- ── LEFT COLUMN: Controls ─────────────────────────────── -->
+      <aside class="control-panel">
+
+        <!-- Model Selection -->
+        <section class="card" aria-labelledby="modelHeading">
+          <h2 class="card-title" id="modelHeading">
+            <span class="card-icon">◈</span> Model Architecture
+          </h2>
+
+          <div class="model-grid" role="radiogroup" aria-label="Select model">
+            <label class="model-card" data-model="MiDaS_small">
+              <input type="radio" name="model" value="MiDaS_small" checked />
+              <div class="model-card-inner">
+                <span class="model-badge">SMALL</span>
+                <span class="model-name">MiDaS Small</span>
+                <span class="model-detail">~30 ms · Fastest</span>
+                <div class="model-bars">
+                  <div class="bar-row"><span>Speed</span><div class="bar"><div class="bar-fill" style="width:95%"></div></div></div>
+                  <div class="bar-row"><span>Accuracy</span><div class="bar"><div class="bar-fill" style="width:55%"></div></div></div>
+                </div>
+              </div>
+            </label>
+
+            <label class="model-card" data-model="DPT_Hybrid">
+              <input type="radio" name="model" value="DPT_Hybrid" />
+              <div class="model-card-inner">
+                <span class="model-badge accent2">HYBRID</span>
+                <span class="model-name">DPT Hybrid</span>
+                <span class="model-detail">~120 ms · Balanced</span>
+                <div class="model-bars">
+                  <div class="bar-row"><span>Speed</span><div class="bar"><div class="bar-fill" style="width:60%"></div></div></div>
+                  <div class="bar-row"><span>Accuracy</span><div class="bar"><div class="bar-fill" style="width:80%"></div></div></div>
+                </div>
+              </div>
+            </label>
+
+            <label class="model-card" data-model="DPT_Large">
+              <input type="radio" name="model" value="DPT_Large" />
+              <div class="model-card-inner">
+                <span class="model-badge accent3">LARGE</span>
+                <span class="model-name">DPT Large</span>
+                <span class="model-detail">~400 ms · Max accuracy</span>
+                <div class="model-bars">
+                  <div class="bar-row"><span>Speed</span><div class="bar"><div class="bar-fill" style="width:25%"></div></div></div>
+                  <div class="bar-row"><span>Accuracy</span><div class="bar"><div class="bar-fill" style="width:97%"></div></div></div>
+                </div>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <!-- Colormap Selection -->
+        <section class="card" aria-labelledby="cmapHeading">
+          <h2 class="card-title" id="cmapHeading">
+            <span class="card-icon">◈</span> Colormap
+          </h2>
+          <div class="colormap-grid" role="radiogroup" aria-label="Select colormap">
+            <label class="cmap-swatch" data-cmap="inferno"  title="Inferno"><input type="radio" name="colormap" value="inferno" checked /><span class="cmap-preview cmap-inferno"></span><span>Inferno</span></label>
+            <label class="cmap-swatch" data-cmap="plasma"   title="Plasma"><input type="radio" name="colormap" value="plasma"   /><span class="cmap-preview cmap-plasma"></span><span>Plasma</span></label>
+            <label class="cmap-swatch" data-cmap="viridis"  title="Viridis"><input type="radio" name="colormap" value="viridis"  /><span class="cmap-preview cmap-viridis"></span><span>Viridis</span></label>
+            <label class="cmap-swatch" data-cmap="magma"    title="Magma"><input type="radio" name="colormap" value="magma"    /><span class="cmap-preview cmap-magma"></span><span>Magma</span></label>
+            <label class="cmap-swatch" data-cmap="turbo"    title="Turbo"><input type="radio" name="colormap" value="turbo"    /><span class="cmap-preview cmap-turbo"></span><span>Turbo</span></label>
+            <label class="cmap-swatch" data-cmap="jet"      title="Jet"><input type="radio" name="colormap" value="jet"      /><span class="cmap-preview cmap-jet"></span><span>Jet</span></label>
+            <label class="cmap-swatch" data-cmap="hot"      title="Hot"><input type="radio" name="colormap" value="hot"      /><span class="cmap-preview cmap-hot"></span><span>Hot</span></label>
+            <label class="cmap-swatch" data-cmap="bone"     title="Bone"><input type="radio" name="colormap" value="bone"     /><span class="cmap-preview cmap-bone"></span><span>Bone</span></label>
+          </div>
+        </section>
+
+        <!-- Performance Dashboard (live metrics) -->
+        <section class="card" aria-labelledby="metricsHeading">
+          <h2 class="card-title" id="metricsHeading">
+            <span class="card-icon">◈</span> Session Metrics
+          </h2>
+          <div class="metrics-grid">
+            <div class="metric-cell">
+              <span class="metric-value" id="metricTotal">0</span>
+              <span class="metric-label">Images Processed</span>
+            </div>
+            <div class="metric-cell">
+              <span class="metric-value" id="metricAvgLatency">—</span>
+              <span class="metric-label">Avg Latency (ms)</span>
+            </div>
+            <div class="metric-cell">
+              <span class="metric-value" id="metricCached">0</span>
+              <span class="metric-label">Cache Hits</span>
+            </div>
+            <div class="metric-cell">
+              <span class="metric-value" id="metricErrors">0</span>
+              <span class="metric-label">Errors</span>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="latencyChart" aria-label="Latency history chart"></canvas>
+          </div>
+        </section>
+
+      </aside><!-- /control-panel -->
+
+      <!-- ── RIGHT COLUMN: Upload + Results ─────────────────────── -->
+      <section class="main-content">
+
+        <!-- Upload Zone -->
+        <div class="card upload-card" id="uploadCard">
+          <h2 class="card-title">
+            <span class="card-icon">◈</span> Image Queue
+          </h2>
+
+          <div
+            class="drop-zone"
+            id="dropZone"
+            role="button"
+            tabindex="0"
+            aria-label="Drop images here or click to browse"
+            aria-describedby="dropHint"
+          >
+            <div class="drop-zone-inner">
+              <div class="drop-icon" aria-hidden="true">
+                <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="8"  y="16" width="48" height="36" rx="4" stroke="currentColor" stroke-width="2"/>
+                  <path d="M8 28 L20 20 L32 30 L44 22 L56 28" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                  <circle cx="44" cy="26" r="5" stroke="currentColor" stroke-width="2"/>
+                  <path d="M32 44 L32 52 M28 48 L32 44 L36 48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <p class="drop-headline">Drop images here</p>
+              <p class="drop-sub" id="dropHint">PNG · JPG · WEBP · BMP · up to 20 MB each</p>
+              <button class="btn btn-outline" id="browseBtn" type="button">Browse Files</button>
+            </div>
+            <input type="file" id="fileInput" accept="image/*" multiple hidden aria-hidden="true" />
+          </div>
+
+          <!-- File queue list -->
+          <ul class="file-queue" id="fileQueue" aria-label="Selected files" aria-live="polite"></ul>
+
+          <!-- Action row -->
+          <div class="action-row">
+            <button class="btn btn-ghost" id="clearBtn" type="button" disabled>Clear All</button>
+            <button class="btn btn-primary" id="runBtn" type="button" disabled>
+              <span class="btn-icon">▶</span> Generate Depth Maps
+            </button>
+          </div>
+
+          <!-- Progress bar -->
+          <div class="progress-wrap" id="progressWrap" hidden>
+            <div class="progress-bar-bg" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="progressBar" aria-label="Processing progress">
+              <div class="progress-bar-fill" id="progressFill"></div>
+            </div>
+            <span class="progress-label" id="progressLabel">Processing…</span>
+          </div>
+        </div>
+
+        <!-- Results Gallery -->
+        <div class="card results-card" id="resultsCard" hidden>
+          <div class="results-header">
+            <h2 class="card-title">
+              <span class="card-icon">◈</span> Results Gallery
+            </h2>
+            <div class="results-actions">
+              <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">⬇ Download All</button>
+              <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">✕ Clear</button>
+            </div>
+          </div>
+          <div class="gallery" id="gallery" role="list" aria-label="Depth map results"></div>
+        </div>
+
+      </section>
+    </div><!-- /workspace-grid -->
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PANEL: COMPARE
+  ═══════════════════════════════════════════════════════════════════ -->
+  <main class="panel" id="panel-compare" hidden>
+    <div class="compare-layout">
+      <div class="card compare-upload-card">
+        <h2 class="card-title"><span class="card-icon">◈</span> Model Comparison</h2>
+        <p class="compare-desc">Upload a single image to compare all three MiDaS models side by side.</p>
+        <div class="drop-zone drop-zone-sm" id="compareDropZone" role="button" tabindex="0" aria-label="Upload image for comparison">
+          <div class="drop-zone-inner">
+            <p class="drop-headline">Drop or click to upload</p>
+            <button class="btn btn-outline btn-sm" id="compareBrowseBtn" type="button">Browse</button>
+          </div>
+          <input type="file" id="compareFileInput" accept="image/*" hidden />
+        </div>
+        <div class="cmap-row">
+          <label for="compareCmap">Colormap:</label>
+          <select id="compareCmap" class="select-input">
+            <option value="inferno">Inferno</option>
+            <option value="plasma">Plasma</option>
+            <option value="viridis">Viridis</option>
+            <option value="magma">Magma</option>
+            <option value="turbo">Turbo</option>
+            <option value="jet">Jet</option>
+          </select>
+        </div>
+        <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>
+          <span class="btn-icon">▶</span> Run All Models
+        </button>
+        <div class="progress-wrap" id="compareProgressWrap" hidden>
+          <div class="progress-bar-bg" id="compareProgressBar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar-fill" id="compareProgressFill"></div>
+          </div>
+          <span class="progress-label" id="compareProgressLabel"></span>
+        </div>
+      </div>
+
+      <div class="compare-results" id="compareResults">
+        <div class="compare-placeholder">
+          <p>Run comparison to see model outputs side by side</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Performance comparison chart -->
+    <div class="card compare-chart-card" id="compareChartCard" hidden>
+      <h2 class="card-title"><span class="card-icon">◈</span> Performance Comparison</h2>
+      <div class="compare-chart-wrap">
+        <canvas id="compareChart" aria-label="Model performance comparison chart"></canvas>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PANEL: ABOUT
+  ═══════════════════════════════════════════════════════════════════ -->
+  <main class="panel" id="panel-about" hidden>
+    <div class="about-layout">
+      <div class="card about-card">
+        <h2 class="card-title"><span class="card-icon">◈</span> About DepthLens Pro</h2>
+        <div class="about-content">
+          <p>DepthLens Pro is a full-stack machine vision application for monocular depth estimation, built as a course project for Machine Vision. It transforms 2D images into detailed depth maps using the <strong>MiDaS</strong> family of neural networks.</p>
+
+          <h3>Architecture</h3>
+          <div class="arch-grid">
+            <div class="arch-cell">
+              <span class="arch-label">Frontend</span>
+              <p>Vanilla HTML/CSS/JS with Chart.js. Responsive dark UI with CSS animations and drag-and-drop file handling.</p>
+            </div>
+            <div class="arch-cell">
+              <span class="arch-label">Backend</span>
+              <p>FastAPI (Python) with async request handling, input validation, result caching, and structured JSON responses.</p>
+            </div>
+            <div class="arch-cell">
+              <span class="arch-label">ML Models</span>
+              <p>PyTorch MiDaS via Torch Hub. Supports MiDaS Small, DPT-Hybrid, and DPT-Large with 8 colourmap options.</p>
+            </div>
+          </div>
+
+          <h3>Model Comparison</h3>
+          <table class="about-table" aria-label="Model comparison">
+            <thead>
+              <tr><th>Model</th><th>Type</th><th>Speed</th><th>Accuracy</th><th>Best For</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>MiDaS Small</td><td>CNN</td><td>~30 ms</td><td>Moderate</td><td>Real-time, mobile</td></tr>
+              <tr><td>DPT-Hybrid</td><td>ViT + CNN</td><td>~120 ms</td><td>Good</td><td>General use</td></tr>
+              <tr><td>DPT-Large</td><td>ViT-Large</td><td>~400 ms</td><td>Excellent</td><td>Research, high quality</td></tr>
+            </tbody>
+          </table>
+
+          <h3>How to Run</h3>
+          <div class="code-block">
+            <span class="code-comment"># 1. Start the backend</span>
+            cd backend &amp;&amp; pip install -r requirements.txt
+            uvicorn app:app --reload --host 127.0.0.1 --port 8000
+
+            <span class="code-comment"># 2. Start the frontend</span>
+            cd frontend &amp;&amp; python3 -m http.server 3000
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ─── LIGHTBOX ───────────────────────────────────────────────── -->
+  <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Image preview">
+    <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
+    <div class="lightbox-inner">
+      <div class="lightbox-pane" id="lbOriginal">
+        <span class="lightbox-label">Original</span>
+        <img id="lbOrigImg" alt="Original image" />
+      </div>
+      <div class="lightbox-slider-wrap">
+        <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend slider" />
+      </div>
+      <div class="lightbox-pane" id="lbDepth">
+        <span class="lightbox-label">Depth Map</span>
+        <img id="lbDepthImg" alt="Depth map" />
+      </div>
+    </div>
+    <div class="lightbox-stats" id="lbStats"></div>
+    <div class="lightbox-download-row">
+      <button class="btn btn-outline btn-sm" id="lbDownloadDepth">⬇ Depth Map</button>
+      <button class="btn btn-outline btn-sm" id="lbDownloadGray">⬇ Grayscale</button>
+    </div>
+  </div>
+  <div class="lightbox-backdrop" id="lightboxBackdrop" hidden></div>
+
+  <script src="script.js"></script>
 </body>
 </html>
