@@ -1,19 +1,21 @@
 # DepthLensPro
 **AI-Powered 2D to 3D Depth Map Generation Web Application**
 
-DepthLensPro is an intelligent web-based system that transforms 2D images into high-quality 3D depth maps using state-of-the-art deep learning models. Designed as a fast, modular, and scalable project, it enables users to upload images and visualize depth information seamlessly in a browser.
+DepthLensPro is an intelligent web-based system that transforms 2D images into high-quality depth visualizations using state-of-the-art monocular depth estimation (MiDaS family). It includes a FastAPI backend and a polished browser UI for batch inference, model/device selection, result exploration, and runtime metrics.
 
 ---
 
 ## Features
 
-* AI-powered monocular depth estimation
-* Web-based interface (runs on localhost)
-* Fast image processing pipeline
-* Supports common image formats (JPG, PNG)
-* Depth visualization (grayscale / colormap)
-* Modular architecture for easy extension
-* API-ready backend for future scalability
+* AI-powered monocular depth estimation with multiple MiDaS models
+* Web-based interface (runs locally)
+* Batch processing (up to 10 images per request)
+* Supports common image formats (PNG, JPG, WEBP, BMP)
+* Depth visualization (grayscale + selectable colormaps)
+* Compute-device selection (Auto / CPU / CUDA GPU when available)
+* Session analytics (latency, throughput, cache hits, errors)
+* Built-in inference result caching for repeated inputs
+* API-ready backend for extension and deployment
 
 ---
 
@@ -22,30 +24,27 @@ DepthLensPro is an intelligent web-based system that transforms 2D images into h
 ```text
 DepthLensPro/
 │
-├── backend/           # Core AI + server logic
-│   ├── models/        # Pretrained depth models
-│   ├── utils/         # Helper functions
-│   ├── app.py         # Main backend server
-│   └── requirements.txt
+├── backend/                  # FastAPI + depth inference engine
+│   ├── app.py                # Main API server (v3)
+│   ├── depth_models.py       # Auxiliary depth model loader class
+│   └── requirements.txt      # Python dependencies
 │
-├── frontend/          # Web UI
+├── frontend/                 # Web UI
 │   ├── index.html
-│   ├── styles.css
+│   ├── style.css
 │   └── script.js
 │
-├── assets/            # Sample images / outputs
-├── README.md
-└── .gitignore
+└── README.md
 ```
 
 ---
 
 ## Tech Stack
 
-* **Backend:** Python, Flask / FastAPI  
-* **AI Models:** MiDaS / Depth Estimation Models  
-* **Frontend:** HTML, CSS, JavaScript  
-* **Libraries:** OpenCV, PyTorch, NumPy  
+* **Backend:** Python, FastAPI, Uvicorn
+* **AI Models:** MiDaS (`MiDaS_small`, `DPT_Hybrid`, `DPT_Large`)
+* **Frontend:** HTML, CSS, JavaScript
+* **Libraries:** PyTorch, OpenCV, NumPy, Chart.js
 
 ---
 
@@ -55,9 +54,11 @@ DepthLensPro/
 
 Make sure you have installed:
 
-* Python 3.8+
+* Python 3.10+
 * pip
 * Git
+
+> Note: First-time model loading downloads weights from `intel-isl/MiDaS` via `torch.hub`, so internet access is required during initial run.
 
 ---
 
@@ -78,7 +79,7 @@ source venv/bin/activate
 pip install -r backend/requirements.txt
 
 # Run backend server
-python backend/app.py
+uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### Windows
@@ -96,7 +97,7 @@ venv\Scripts\activate
 pip install -r backend/requirements.txt
 
 # Run backend server
-python backend/app.py
+uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### Linux
@@ -114,7 +115,7 @@ source venv/bin/activate
 pip install -r backend/requirements.txt
 
 # Run backend server
-python3 backend/app.py
+uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ---
@@ -124,12 +125,12 @@ python3 backend/app.py
 **1. Start the backend server:**
 
 ```bash
-python backend/app.py
+uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 **2. Open frontend:**
 
-Open `frontend/index.html` in your browser OR serve via a local server:
+Serve the frontend directory via a local HTTP server:
 
 ```bash
 cd frontend
@@ -139,31 +140,54 @@ python -m http.server 5500
 **3. Visit:**
 `http://localhost:5500`
 
+**4. Verify backend health (optional):**
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
 ---
 
 ## Workflow
 
-1.  Upload a 2D image
-2.  Backend processes image using AI model
-3.  Depth map is generated
-4.  Result is displayed in browser
+1. Upload one or more 2D images.
+2. Select model, colormap, and compute device.
+3. Backend processes images and generates normalized depth maps.
+4. UI displays depth output, grayscale output, and quality/latency metrics.
+5. Re-running identical input/settings returns cached results faster.
+
+---
+
+## API Overview
+
+Base URL: `http://127.0.0.1:8000`
+
+* `GET /health` — Service, device, model, and cache status
+* `GET /devices` — Available compute devices
+* `GET /models` — Supported model list
+* `GET /colormaps` — Supported colormap names
+* `POST /estimate` — Single-image depth estimation
+* `POST /batch` — Batch depth estimation (max 10 images)
+* `DELETE /cache` — Clear in-memory inference cache
 
 ---
 
 ## Example Output
 
 * **Input Image** -> RGB Image
-* **Output** -> Depth Map (Grayscale / Heatmap)
+* **Output 1** -> Depth Map (selected colormap)
+* **Output 2** -> Grayscale Depth Map
+* **Metadata** -> Inference latency, resolution, and MDE metric bundle
 
 ---
 
 ## Future Enhancements
 
-* Video depth estimation
-* Full 3D reconstruction (point clouds)
-* Cloud deployment (AWS / GCP)
-* GPU acceleration support
-* Mobile-friendly UI
+* Video depth estimation pipeline
+* True 3D reconstruction (point clouds / meshes)
+* Persistent cache layer (Redis/disk)
+* Dockerized deployment workflow
+* Mobile-responsive UX improvements
 
 ---
 
@@ -171,10 +195,10 @@ python -m http.server 5500
 
 Contributions are welcome!
 
-1.  Fork the repo
-2.  Create a new branch: `git checkout -b feature/your-feature-name`
-3.  Commit changes: `git commit -m "Add new feature"`
-4.  Push and create PR: `git push origin feature/your-feature-name`
+1. Fork the repo
+2. Create a new branch: `git checkout -b feature/your-feature-name`
+3. Commit changes: `git commit -m "Add new feature"`
+4. Push and create PR: `git push origin feature/your-feature-name`
 
 ---
 
@@ -182,9 +206,12 @@ Contributions are welcome!
 
 | Issue | Solution |
 | :--- | :--- |
-| Module not found | Ensure virtual environment is activated |
-| Slow performance | Use GPU (if supported) |
-| Port already in use | Change port in backend config |
+| `ModuleNotFoundError` | Ensure virtual environment is activated and dependencies are installed |
+| Frontend shows "Engine offline" | Confirm FastAPI is running on `127.0.0.1:8000` |
+| CORS/network issues in browser | Open frontend via local server (`python -m http.server`) instead of file:// |
+| Slow inference | Use `MiDaS_small` or select CUDA GPU device if available |
+| Port already in use | Change with `--port` in uvicorn command |
+| First run is slow | Model weights are downloaded once and then cached locally |
 
 ---
 
@@ -202,13 +229,15 @@ This project is licensed under the MIT License.
 
 ## Acknowledgements
 
-* MiDaS Depth Estimation Models
+* MiDaS Depth Estimation Models (Intel ISL)
 * OpenCV & PyTorch communities
+* FastAPI ecosystem
 
 ---
 
 ## Notes
 
-* This project is optimized for local development
-* Ensure proper dependencies are installed before running
-* GPU support requires additional configuration
+* This project is optimized for local development.
+* Inference cache is in-memory and resets when the backend restarts.
+* Maximum supported image size is 20 MB and max dimension is 2048 px (auto-resized above this).
+* GPU support depends on your local PyTorch/CUDA setup.
