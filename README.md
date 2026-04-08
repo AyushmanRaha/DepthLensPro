@@ -221,9 +221,9 @@ This project is licensed under the MIT License.
 
 ---
 
-## Author
+## Authors
 
-**Ayushman Raha** GitHub: [https://github.com/AyushmanRaha](https://github.com/AyushmanRaha)
+**Primary Author and Maintainer: Ayushman Raha** GitHub: [https://github.com/AyushmanRaha](https://github.com/AyushmanRaha)
 
 ---
 
