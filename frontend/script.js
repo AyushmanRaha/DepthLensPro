@@ -22,6 +22,7 @@ const state = {
   primaryDevice: "cpu",
   deviceFilter: "all",
   timing: { workspace: {}, compare: {} },
+  compareView: { metricKey: "latency_ms", open: true, results: [] },
 };
 
 /* ═══════════════════════════════════════════
@@ -97,6 +98,10 @@ const el = {
   compareProgressText:  $("#compareProgressText"),
   compareProgressEta:   $("#compareProgressEta"),
   compareChartCard:     $("#compareChartCard"),
+  compareChartBody:     $("#compareChartBody"),
+  compareChartToggle:   $("#compareChartToggle"),
+  compareMetricSelect:  $("#compareMetricSelect"),
+  compareMetricGrid:    $("#compareMetricGrid"),
 
   // lightbox
   lightbox:        $("#lightbox"),
@@ -215,6 +220,17 @@ document.addEventListener("change", e => {
 ═══════════════════════════════════════════ */
 let latencyChart, compareChart;
 
+const COMPARE_METRICS = [
+  { key:"latency_ms",    label:"Latency (ms)",         source:"root",    better:"lower",  fmt:v => `${Math.round(v)} ms` },
+  { key:"ssim",          label:"SSIM",                 source:"metrics", better:"higher", fmt:v => Number(v).toFixed(3) },
+  { key:"silog",         label:"SILog",                source:"metrics", better:"lower",  fmt:v => Number(v).toFixed(2) },
+  { key:"psnr",          label:"PSNR (dB)",            source:"metrics", better:"higher", fmt:v => `${Number(v).toFixed(2)} dB` },
+  { key:"gradient_mean", label:"Gradient Mean",        source:"metrics", better:"higher", fmt:v => Number(v).toFixed(3) },
+  { key:"edge_density",  label:"Edge Density",         source:"metrics", better:"higher", fmt:v => `${(Number(v)*100).toFixed(1)}%` },
+  { key:"entropy",       label:"Entropy (bits)",       source:"metrics", better:"higher", fmt:v => Number(v).toFixed(2) },
+  { key:"dynamic_range", label:"Dynamic Range (bits)", source:"metrics", better:"higher", fmt:v => `${Number(v).toFixed(2)} bits` },
+];
+
 function initLatencyChart() {
   latencyChart = new Chart($("#latencyChart").getContext("2d"), {
     type: "line",
@@ -246,7 +262,47 @@ function pushLatency(ms) {
   latencyChart.update("none");
 }
 
-function renderCompareChart(results) {
+function compareMetricValue(result, spec) {
+  return spec.source === "root" ? result?.[spec.key] : result?.metrics?.[spec.key];
+}
+
+function renderCompareSummary(results) {
+  el.compareMetricGrid.innerHTML = "";
+  const summaryMetrics = COMPARE_METRICS.filter(m => ["latency_ms","ssim","silog","psnr","edge_density"].includes(m.key));
+
+  summaryMetrics.forEach(spec => {
+    const valid = results
+      .map(r => ({ model: r.model, value: Number(compareMetricValue(r, spec)) }))
+      .filter(v => Number.isFinite(v.value));
+
+    const cell = document.createElement("div");
+    cell.className = "compare-metric-cell";
+    if (!valid.length) {
+      cell.innerHTML = `<span class="compare-metric-label">${spec.label}</span><span class="compare-metric-values">Unavailable</span>`;
+      el.compareMetricGrid.appendChild(cell);
+      return;
+    }
+
+    const sorted = [...valid].sort((a,b)=>spec.better==="higher" ? b.value-a.value : a.value-b.value);
+    const [best, runnerUp] = sorted;
+    const cleanName = s => s.replace("MiDaS_","").replace("DPT_","DPT ");
+    cell.innerHTML = `
+      <span class="compare-metric-label">${spec.label}</span>
+      <div class="compare-metric-values">
+        <span>Best: ${cleanName(best.model)} <strong>${spec.fmt(best.value)}</strong></span>
+        ${runnerUp ? `<span>2nd: ${cleanName(runnerUp.model)} <strong>${spec.fmt(runnerUp.value)}</strong></span>` : ""}
+      </div>`;
+    el.compareMetricGrid.appendChild(cell);
+  });
+}
+
+function renderCompareChart(results, metricKey = state.compareView.metricKey) {
+  const metric = COMPARE_METRICS.find(m => m.key === metricKey) || COMPARE_METRICS[0];
+  const values = results.map(r => {
+    const v = Number(compareMetricValue(r, metric));
+    return Number.isFinite(v) ? v : null;
+  });
+
   el.compareChartCard.hidden = false;
   const ctx = $("#compareChart").getContext("2d");
   if (compareChart) compareChart.destroy();
@@ -255,20 +311,38 @@ function renderCompareChart(results) {
     data: {
       labels: results.map(r=>r.model.replace("MiDaS_","").replace("DPT_","DPT ")),
       datasets:[{
-        label:"Latency (ms)", data: results.map(r=>r.latency_ms),
-        backgroundColor:["rgba(0,200,255,.55)","rgba(123,92,248,.55)","rgba(255,107,107,.55)"],
-        borderColor:["#00c8ff","#7b5cf8","#ff6b6b"], borderWidth:1.5, borderRadius:4,
+        label: metric.label, data: values,
+        backgroundColor: values.map(v => v === null ? "rgba(127,140,153,.45)" : "rgba(0,200,255,.55)"),
+        borderColor: values.map(v => v === null ? "#5e6f81" : "#00c8ff"), borderWidth:1.5, borderRadius:4,
       }],
     },
     options:{
       responsive:true, maintainAspectRatio:false, animation:{duration:380},
       plugins:{legend:{labels:{color:"#7faac8",font:{family:"JetBrains Mono",size:10}}},
-               tooltip:{backgroundColor:"#101e2e",borderColor:"#00c8ff",borderWidth:1,titleColor:"#7faac8",bodyColor:"#dff0ff"}},
+               tooltip:{backgroundColor:"#101e2e",borderColor:"#00c8ff",borderWidth:1,titleColor:"#7faac8",bodyColor:"#dff0ff",
+                 callbacks:{label:c=>c.raw === null ? "Not available" : metric.fmt(c.raw)}}},
       scales:{
         x:{ticks:{color:"#7faac8",font:{family:"Rajdhani",size:12,weight:"600"}}, grid:{color:"rgba(0,200,255,.07)"}},
-        y:{ticks:{color:"#3a5a72",font:{family:"JetBrains Mono",size:9},callback:v=>`${v}ms`}, grid:{color:"rgba(0,200,255,.07)"}},
+        y:{ticks:{color:"#3a5a72",font:{family:"JetBrains Mono",size:9},callback:v=>metric.fmt(v)}, grid:{color:"rgba(0,200,255,.07)"}},
       },
     },
+  });
+}
+
+function initCompareControls() {
+  el.compareMetricSelect.innerHTML = COMPARE_METRICS.map(m => `<option value="${m.key}">${m.label}</option>`).join("");
+  el.compareMetricSelect.value = state.compareView.metricKey;
+
+  el.compareMetricSelect.addEventListener("change", () => {
+    state.compareView.metricKey = el.compareMetricSelect.value;
+    if (state.compareView.results.length) renderCompareChart(state.compareView.results, state.compareView.metricKey);
+  });
+
+  el.compareChartToggle.addEventListener("click", () => {
+    state.compareView.open = !state.compareView.open;
+    el.compareChartBody.hidden = !state.compareView.open;
+    el.compareChartToggle.textContent = state.compareView.open ? "Hide Graph" : "Show Graph";
+    el.compareChartToggle.setAttribute("aria-expanded", String(state.compareView.open));
   });
 }
 
@@ -970,6 +1044,8 @@ async function runComparison() {
   el.compareCancelBtn.hidden    = false;
   el.compareProgressBlock.hidden = false;
   el.compareResults.innerHTML   = "";
+  el.compareChartCard.hidden    = true;
+  el.compareMetricGrid.innerHTML = "";
 
   const results = [];
   const t0 = Date.now();
@@ -1013,7 +1089,12 @@ async function runComparison() {
   el.compareCancelBtn.hidden = true;
   state.compareAbort = null;
 
-  if (results.length) { renderCompareChart(results); toast("Comparison complete!","success"); }
+  if (results.length) {
+    state.compareView.results = results;
+    renderCompareSummary(results);
+    renderCompareChart(results, state.compareView.metricKey);
+    toast("Comparison complete!","success");
+  }
 }
 
 function renderCompareCard(r) {
@@ -1063,6 +1144,7 @@ async function init() {
   if (el.appShell) el.appShell.classList.remove("ready");
   loadPrefs();
   initLatencyChart();
+  initCompareControls();
   switchPanel("main");
   syncQueueControls();
   await checkHealth();
