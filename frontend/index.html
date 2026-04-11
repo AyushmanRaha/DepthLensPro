@@ -430,31 +430,37 @@ python3 -m http.server 3000
 
   <!-- ─── LIGHTBOX ──────────────────────────────────────────────────── -->
   <div class="lightbox-backdrop" id="lightboxBackdrop" hidden role="dialog" aria-modal="true" aria-label="Depth map detail view">
-    <div class="lightbox" id="lightbox">
+    <div class="lightbox" id="lightbox" aria-labelledby="lightboxTitle">
       <div class="lightbox-head">
-        <p class="lightbox-title">Depth Preview</p>
+        <p class="lightbox-title" id="lightboxTitle">Depth Inspector</p>
         <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
       </div>
 
       <div class="lightbox-body">
-        <div class="lightbox-images">
-          <div class="lb-pane">
-            <span class="lb-label">Original</span>
-            <img id="lbOrigImg" alt="Original image" />
-          </div>
-          <div class="lb-divider">
+        <section class="lightbox-preview-card" aria-label="Image preview">
+          <div class="lb-preview-toolbar">
+            <span class="lb-label">Overlay Blend</span>
             <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
-            <span class="lb-divider-label">BLEND</span>
+            <span class="lb-range-value" id="lbRangeValue">50%</span>
           </div>
-          <div class="lb-pane">
-            <span class="lb-label">Depth Map</span>
+          <div class="lb-preview-stage">
+            <img id="lbOrigImg" alt="Original image" />
             <img id="lbDepthImg" alt="Depth map" />
           </div>
-        </div>
+          <div class="lb-preview-legend">
+            <span>Base: Original image</span>
+            <span>Overlay: Depth map</span>
+          </div>
+        </section>
 
-        <div class="lightbox-metrics" id="lightboxMetrics">
+        <section class="lightbox-metrics-card" aria-label="Metrics">
+          <div class="lb-metrics-head">
+            <span class="lb-label">Depth Metrics</span>
+          </div>
+          <div class="lightbox-metrics" id="lightboxMetrics">
           <!-- Populated by JS -->
-        </div>
+          </div>
+        </section>
       </div>
 
       <div class="lightbox-footer">
