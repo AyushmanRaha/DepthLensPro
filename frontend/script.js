@@ -31,6 +31,10 @@ const $  = (s, ctx = document) => ctx.querySelector(s);
 const $$ = (s, ctx = document) => [...ctx.querySelectorAll(s)];
 
 const el = {
+  welcomeScreen: $("#welcomeScreen"),
+  getStartedBtn: $("#getStartedBtn"),
+  appShell:      $("#appShell"),
+
   // header
   statusDot:    $("#statusDot"),
   statusLabel:  $("#statusLabel"),
@@ -109,6 +113,18 @@ const el = {
   toastContainer: $("#toastContainer"),
   bgCanvas:       $("#bgCanvas"),
 };
+
+function enterWorkspace() {
+  if (!el.welcomeScreen || !el.appShell) return;
+  el.getStartedBtn?.setAttribute("disabled", "true");
+  el.welcomeScreen.classList.add("is-exiting");
+  setTimeout(() => {
+    el.welcomeScreen.hidden = true;
+    el.appShell.classList.add("ready");
+  }, 620);
+}
+
+el.getStartedBtn?.addEventListener("click", enterWorkspace);
 
 /* ═══════════════════════════════════════════
    PERSISTENCE (localStorage)
@@ -1044,6 +1060,7 @@ function esc(s) {
    INIT
 ═══════════════════════════════════════════ */
 async function init() {
+  if (el.appShell) el.appShell.classList.remove("ready");
   loadPrefs();
   initLatencyChart();
   switchPanel("main");
