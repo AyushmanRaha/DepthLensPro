@@ -355,9 +355,19 @@
     </div>
 
     <div class="card compare-chart-card" id="compareChartCard" hidden>
-      <h2 class="card-title"><span class="card-icon">▣</span> Performance Comparison</h2>
-      <div class="compare-chart-wrap">
-        <canvas id="compareChart" aria-label="Model comparison chart"></canvas>
+      <div class="compare-chart-head">
+        <h2 class="card-title"><span class="card-icon">▣</span> Performance Comparison</h2>
+        <button class="btn btn-ghost btn-sm" id="compareChartToggle" type="button" aria-expanded="true" aria-controls="compareChartBody">Hide Graph</button>
+      </div>
+      <div class="compare-chart-body" id="compareChartBody">
+        <div class="compare-controls">
+          <label for="compareMetricSelect" class="cmap-label">Metric</label>
+          <select id="compareMetricSelect" class="select-input"></select>
+        </div>
+        <div class="compare-metric-grid" id="compareMetricGrid" aria-live="polite"></div>
+        <div class="compare-chart-wrap">
+          <canvas id="compareChart" aria-label="Model comparison chart"></canvas>
+        </div>
       </div>
     </div>
   </main>
