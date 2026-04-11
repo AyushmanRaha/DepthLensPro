@@ -104,7 +104,6 @@ const el = {
   compareMetricGrid:    $("#compareMetricGrid"),
 
   // lightbox
-  lightbox:        $("#lightbox"),
   lightboxBackdrop:$("#lightboxBackdrop"),
   lightboxClose:   $("#lightboxClose"),
   lbOrigImg:       $("#lbOrigImg"),
@@ -983,21 +982,20 @@ function openLightbox(r) {
 
   renderMetricsAccordion(r.metrics);
 
-  el.lightbox.hidden = false;
   el.lightboxBackdrop.hidden = false;
+  el.lightboxBackdrop.scrollTop = 0;
   document.body.style.overflow = "hidden";
   el.lightboxClose.focus();
 }
 
 function closeLightbox() {
-  el.lightbox.hidden = true;
   el.lightboxBackdrop.hidden = true;
   document.body.style.overflow = "";
   state.lb.current = null;
 }
 
 el.lightboxClose.addEventListener("click", closeLightbox);
-el.lightboxBackdrop.addEventListener("click", closeLightbox);
+el.lightboxBackdrop.addEventListener("click", e => { if (e.target === el.lightboxBackdrop) closeLightbox(); });
 document.addEventListener("keydown", e => { if(e.key==="Escape") closeLightbox(); });
 
 el.lbSlider.addEventListener("input", () => {
