@@ -4,6 +4,7 @@ FastAPI + PyTorch MiDaS · GPU/CPU selection · Full MDE metric suite
 """
 
 import time, base64, logging, hashlib, math
+import subprocess, platform
 from contextlib import asynccontextmanager
 
 import cv2
@@ -58,6 +59,32 @@ TRANSFORMS: dict = {}
 
 
 # ── Device helpers ─────────────────────────────────────────────────────────────
+def _get_apple_chip() -> str | None:
+    """Return e.g. 'M2 Pro', 'M3 Max', 'M1' if on Apple Silicon, else None."""
+    if platform.system() != "Darwin":
+        return None
+    try:
+        out = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True, text=True, timeout=3
+        ).stdout.strip()
+        if out.startswith("Apple "):
+            return out[6:]          # "M2 Pro", "M3 Max", etc.
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(
+            ["system_profiler", "SPHardwareDataType"],
+            capture_output=True, text=True, timeout=5
+        ).stdout
+        for line in out.splitlines():
+            if "Chip" in line and "Apple" in line:
+                chip = line.split(":", 1)[-1].strip()
+                return chip.replace("Apple ", "")
+    except Exception:
+        pass
+    return None
+
 def _available_devices() -> dict:
     devs = {"cpu": {"name": "CPU (System)", "type": "cpu", "available": True}}
     if torch.cuda.is_available():
@@ -70,15 +97,27 @@ def _available_devices() -> dict:
                 "memory_gb": round(p.total_memory / 1024**3, 1),
                 "available": True,
             }
+    if torch.backends.mps.is_available():
+        chip = _get_apple_chip() or "Apple Silicon"
+        devs["mps"] = {
+            "name":       f"Apple {chip} (MPS)",
+            "type":       "mps",
+            "chip":       chip,
+            "available":  True,
+        }
     return devs
 
 
 def _resolve(requested: str) -> torch.device:
     avail = _available_devices()
     if requested == "auto":
-        return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():   return torch.device("cuda:0")
+        if torch.backends.mps.is_available(): return torch.device("mps")
+        return torch.device("cpu")
     if requested not in avail:
         raise ValueError(f"Device '{requested}' unavailable. Options: {list(avail)}")
+    if requested == "mps":
+        return torch.device("mps")
     return torch.device(requested)
 
 
@@ -117,6 +156,8 @@ def _load_model(model_name: str, device_str: str):
     log.info(f"Loading '{model_name}' → {device} …")
     model = torch.hub.load("intel-isl/MiDaS", model_name, trust_repo=True)
     model.to(device).eval()
+    if device.type == "mps":
+        model = model.float()   # MPS requires float32
 
     if model_name not in TRANSFORMS:
         mt = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
