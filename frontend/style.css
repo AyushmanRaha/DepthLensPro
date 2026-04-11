@@ -582,13 +582,15 @@ a      { color: var(--accent); }
 /* Lightbox panel — normal block that grows with content */
 .lightbox {
   position: relative;
-  width: 100%; max-width: 1100px;
-  margin: auto;                         /* centres vertically when content is short */
+  width: min(1160px, 100%);
+  max-height: calc(100dvh - 3rem);
+  margin: auto;
   background: var(--bg-card); border: 1px solid var(--border-hi);
   border-radius: var(--r-lg);
   display: flex; flex-direction: column; gap: .9rem;
   padding: 1.1rem; box-shadow: 0 24px 80px rgba(0,0,0,.7);
-  flex-shrink: 0;                       /* don't compress; let backdrop scroll instead */
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .lightbox-head {
@@ -615,21 +617,84 @@ a      { color: var(--accent); }
 .lightbox-close:hover { background: rgba(255,77,77,.2); border-color: var(--error); color: var(--error); }
 
 .lightbox-body {
-  display: flex; flex-direction: column; gap: .8rem;
+  display: grid;
+  grid-template-columns: minmax(320px, 1.2fr) minmax(270px, .8fr);
+  gap: .85rem;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.lightbox-images {
-  display: grid; grid-template-columns: 1fr auto 1fr; gap: .75rem;
+.lightbox-preview-card,
+.lightbox-metrics-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: .65rem;
+  min-height: 0;
 }
-.lb-pane { display: flex; flex-direction: column; gap: .35rem; }
-.lb-label { font-family: var(--ff-mono); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); text-align: center; }
-.lb-pane img { width: 100%; object-fit: contain; border-radius: var(--r); border: 1px solid var(--border); max-height: 380px; }
-.lb-divider { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .4rem; }
-.lb-range { writing-mode: vertical-lr; direction: rtl; height: 160px; width: 22px; accent-color: var(--accent); cursor: pointer; }
-.lb-divider-label { font-family: var(--ff-mono); font-size: .52rem; color: var(--text-dim); letter-spacing: .1em; writing-mode: horizontal-tb; }
+
+.lightbox-preview-card { display: flex; flex-direction: column; gap: .6rem; }
+.lb-preview-toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: .65rem;
+  align-items: center;
+}
+.lb-label {
+  font-family: var(--ff-mono);
+  font-size: .6rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.lb-range {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.lb-range-value {
+  font-family: var(--ff-mono);
+  font-size: .66rem;
+  color: var(--accent);
+}
+.lb-preview-stage {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: #000;
+  min-height: 330px;
+  height: min(60dvh, 560px);
+  overflow: hidden;
+}
+.lb-preview-stage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: opacity .2s ease;
+}
+.lb-preview-legend {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .35rem .6rem;
+  font-family: var(--ff-mono);
+  font-size: .58rem;
+  color: var(--text-dim);
+}
+.lightbox-metrics-card { display: flex; flex-direction: column; gap: .45rem; }
+.lb-metrics-head { display: flex; align-items: center; justify-content: space-between; }
 
 /* ── Metrics Accordion ──────────────────────────────────── */
-.lightbox-metrics { display: flex; flex-direction: column; gap: .5rem; }
+.lightbox-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: .2rem;
+}
 
 .metric-group { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
 .metric-group-header {
@@ -649,7 +714,7 @@ a      { color: var(--accent); }
 }
 .metric-group.open .metric-group-body {
   max-height: 3000px;   /* large enough for any group; allows CSS transition from 0 */
-  overflow: hidden;
+  overflow: visible;
 }
 .metric-group-content { padding: .6rem .8rem 0.8rem; display: flex; flex-direction: column; gap: .35rem; }
 
@@ -688,9 +753,11 @@ a      { color: var(--accent); }
   .logo-sub, .header-status .status-sub { display: none; }
   .panel { padding: .85rem; }
   .lightbox-backdrop { padding: .4rem; }
-  .lightbox { border-radius: var(--r); }
-  .lightbox-images { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
-  .lb-range { writing-mode: horizontal-tb; direction: ltr; width: 100%; height: 22px; }
+  .lightbox { border-radius: var(--r); max-height: calc(100dvh - .8rem); padding: .8rem; }
+  .lightbox-body { grid-template-columns: 1fr; overflow-y: auto; }
+  .lightbox-metrics { max-height: 40dvh; }
+  .lb-preview-stage { min-height: 240px; height: min(42dvh, 360px); }
+  .lb-preview-toolbar { grid-template-columns: 1fr; }
   .colormap-grid { grid-template-columns: repeat(4,1fr); }
   .metrics-grid { grid-template-columns: 1fr; }
 }
