@@ -69,9 +69,9 @@
 
         <!-- Compute Device Selector -->
         <section class="card" id="deviceCard" aria-labelledby="deviceHeading">
-          <h2 class="card-title" id="deviceHeading"><span class="card-icon">[SYS]</span> Compute Device</h2>
+          <h2 class="card-title" id="deviceHeading"><span class="card-icon">◉</span> Compute Device</h2>
           <div class="device-info-banner" id="deviceInfoBanner">
-            <span class="device-info-icon">[INFO]</span>
+            <span class="device-info-icon">ℹ</span>
             <span>Connect the inference engine to detect GPU/CPU</span>
           </div>
           <div class="device-type-toggle" id="deviceTypeToggle" hidden></div>
@@ -80,7 +80,7 @@
             <label class="device-opt selected" data-device="auto">
               <input type="radio" name="device" value="auto" checked />
               <div class="device-opt-inner">
-                <span class="device-opt-icon">[AUTO]</span>
+                <span class="device-opt-icon">◎</span>
                 <div>
                   <span class="device-opt-name">Auto</span>
                   <span class="device-opt-sub">Best available</span>
@@ -97,7 +97,7 @@
 
         <!-- Model Selection -->
         <section class="card" aria-labelledby="modelHeading">
-          <h2 class="card-title" id="modelHeading"><span class="card-icon">[SECTION]</span> Model Architecture</h2>
+          <h2 class="card-title" id="modelHeading"><span class="card-icon">▣</span> Model Architecture</h2>
           <div class="model-grid" role="radiogroup" aria-label="Select model">
 
             <label class="model-card" data-model="MiDaS_small">
@@ -144,7 +144,7 @@
 
         <!-- Colormap -->
         <section class="card" aria-labelledby="cmapHeading">
-          <h2 class="card-title" id="cmapHeading"><span class="card-icon">[SECTION]</span> Colormap</h2>
+          <h2 class="card-title" id="cmapHeading"><span class="card-icon">▣</span> Colormap</h2>
           <div class="colormap-grid" role="radiogroup" aria-label="Select colormap">
             <label class="cmap-swatch" title="Inferno — dark purple to bright yellow via red"><input type="radio" name="colormap" value="inferno" checked /><span class="cmap-preview cmap-inferno"></span><span>Inferno</span></label>
             <label class="cmap-swatch" title="Plasma — purple to yellow via pink"><input type="radio" name="colormap" value="plasma" /><span class="cmap-preview cmap-plasma"></span><span>Plasma</span></label>
@@ -159,7 +159,7 @@
 
         <!-- Session Metrics -->
         <section class="card" aria-labelledby="metricsHeading">
-          <h2 class="card-title" id="metricsHeading"><span class="card-icon">[SECTION]</span> Session Dashboard</h2>
+          <h2 class="card-title" id="metricsHeading"><span class="card-icon">▣</span> Session Dashboard</h2>
 
           <div class="metrics-grid">
             <div class="metric-cell" title="Total number of images fully processed this session">
@@ -217,7 +217,7 @@
 
         <!-- Upload Card -->
         <div class="card upload-card" id="uploadCard">
-          <h2 class="card-title"><span class="card-icon">[SECTION]</span> Image Queue</h2>
+          <h2 class="card-title"><span class="card-icon">▣</span> Image Queue</h2>
 
           <!-- Drop Zone — label trick for reliable cross-browser file browsing -->
           <div class="drop-zone" id="dropZone" role="button" tabindex="0"
@@ -248,9 +248,9 @@
           <!-- Action row -->
           <div class="action-row">
             <button class="btn btn-ghost" id="clearBtn" type="button" disabled>Clear All</button>
-            <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>[CLOSE] Cancel</button>
+            <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>✕ Cancel</button>
             <button class="btn btn-primary" id="runBtn" type="button" disabled>
-              <span class="btn-icon">[RUN]</span> Generate Depth Maps
+              <span class="btn-icon">▶</span> Generate Depth Maps
             </button>
           </div>
 
@@ -277,10 +277,10 @@
         <!-- Results Gallery -->
         <div class="card results-card" id="resultsCard" hidden>
           <div class="results-header">
-            <h2 class="card-title"><span class="card-icon">[SECTION]</span> Results Gallery</h2>
+            <h2 class="card-title"><span class="card-icon">▣</span> Results Gallery</h2>
             <div class="results-actions">
-              <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">[DOWNLOAD] Download All</button>
-              <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">[CLOSE] Clear</button>
+              <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">⇩ Download All</button>
+              <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">✕ Clear</button>
             </div>
           </div>
           <div class="gallery" id="gallery" role="list" aria-label="Depth map results"></div>
@@ -296,7 +296,7 @@
   <main class="panel" id="panel-compare" hidden>
     <div class="compare-layout">
       <div class="card compare-upload-card">
-        <h2 class="card-title"><span class="card-icon">[SECTION]</span> Model Comparison</h2>
+        <h2 class="card-title"><span class="card-icon">▣</span> Model Comparison</h2>
         <p class="compare-desc">Upload one image to run all three MiDaS models side-by-side and compare quality vs. speed.</p>
 
         <div class="drop-zone drop-zone-sm" id="compareDropZone" role="button" tabindex="0" aria-label="Upload image for comparison">
@@ -326,9 +326,9 @@
         </div>
 
         <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>
-          <span class="btn-icon">[RUN]</span> Run All Models
+          <span class="btn-icon">▶</span> Run All Models
         </button>
-        <button class="btn btn-danger btn-sm w-full" id="compareCancelBtn" type="button" hidden>[CLOSE] Cancel Comparison</button>
+        <button class="btn btn-danger btn-sm w-full" id="compareCancelBtn" type="button" hidden>✕ Cancel Comparison</button>
 
         <div class="progress-block" id="compareProgressBlock" hidden>
           <div class="progress-timer-row">
@@ -348,7 +348,7 @@
     </div>
 
     <div class="card compare-chart-card" id="compareChartCard" hidden>
-      <h2 class="card-title"><span class="card-icon">[SECTION]</span> Performance Comparison</h2>
+      <h2 class="card-title"><span class="card-icon">▣</span> Performance Comparison</h2>
       <div class="compare-chart-wrap">
         <canvas id="compareChart" aria-label="Model comparison chart"></canvas>
       </div>
@@ -361,7 +361,7 @@
   <main class="panel" id="panel-about" hidden>
     <div class="about-layout">
       <div class="card about-card">
-        <h2 class="card-title"><span class="card-icon">[SECTION]</span> About DepthLens Pro</h2>
+        <h2 class="card-title"><span class="card-icon">▣</span> About DepthLens Pro</h2>
         <div class="about-content">
           <p>DepthLens Pro is a full-stack machine vision application for monocular depth estimation. Built for the <strong>Machine Vision</strong> course, it transforms 2D images into 3D depth maps using the <strong>MiDaS</strong> neural network family.</p>
 
@@ -413,7 +413,7 @@ python3 -m http.server 3000
 
   <!-- ─── LIGHTBOX ──────────────────────────────────────────────────── -->
   <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Depth map detail view">
-    <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">[CLOSE]</button>
+    <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
     <div class="lightbox-body">
       <div class="lightbox-images">
         <div class="lb-pane">
@@ -438,8 +438,8 @@ python3 -m http.server 3000
     <div class="lightbox-footer">
       <div class="lb-tags" id="lbTags"></div>
       <div class="lb-downloads">
-        <button class="btn btn-outline btn-sm" id="lbDlDepth">[DOWNLOAD] Depth Map</button>
-        <button class="btn btn-outline btn-sm" id="lbDlGray">[DOWNLOAD] Grayscale</button>
+        <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
+        <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
       </div>
     </div>
   </div>
