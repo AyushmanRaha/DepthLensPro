@@ -13,7 +13,14 @@
 
 <body>
   <canvas id="bgCanvas" aria-hidden="true"></canvas>
+  <section class="welcome-screen" id="welcomeScreen" aria-label="Welcome to DepthLensPro">
+    <div class="welcome-content">
+      <h1 class="welcome-brand">DepthLens<em>Pro</em></h1>
+      <button class="btn btn-primary welcome-btn" id="getStartedBtn" type="button">Get Started</button>
+    </div>
+  </section>
 
+  <div class="app-shell" id="appShell">
   <!-- ─── HEADER ───────────────────────────────────────────────────── -->
   <header class="site-header">
     <div class="header-inner">
@@ -444,6 +451,7 @@ python3 -m http.server 3000
     </div>
   </div>
   <div class="lightbox-backdrop" id="lightboxBackdrop" hidden aria-hidden="true"></div>
+  </div>
 
   <script src="script.js"></script>
 </body>

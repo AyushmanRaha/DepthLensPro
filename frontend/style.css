@@ -63,6 +63,80 @@ a      { color: var(--accent); }
   pointer-events: none; opacity: .3;
 }
 
+.app-shell {
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+  transform: translateY(12px) scale(.995);
+  filter: blur(3px);
+  transition: opacity .65s cubic-bezier(.22,1,.36,1), transform .65s cubic-bezier(.22,1,.36,1), filter .65s ease;
+}
+.app-shell.ready {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+.welcome-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 30%, rgba(0,200,255,.08), rgba(7,13,23,.85) 60%);
+  backdrop-filter: blur(5px);
+  transition: opacity .6s ease, transform .65s cubic-bezier(.22,1,.36,1), visibility 0s linear .6s;
+}
+.welcome-screen.is-exiting {
+  opacity: 0;
+  transform: scale(1.02);
+  visibility: hidden;
+}
+.welcome-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  animation: welcomeIn .9s cubic-bezier(.16,1,.3,1) both;
+}
+.welcome-brand {
+  font-family: var(--ff-display);
+  font-size: clamp(2.8rem, 9vw, 5.8rem);
+  font-weight: 700;
+  letter-spacing: .05em;
+  line-height: 1;
+  color: var(--text);
+  text-shadow: 0 0 28px rgba(0,200,255,.22);
+}
+.welcome-brand em {
+  color: var(--accent);
+  font-style: normal;
+}
+.welcome-btn {
+  font-size: .95rem;
+  padding: .62rem 1.5rem;
+  letter-spacing: .12em;
+  border-radius: 999px;
+  box-shadow: 0 0 0 0 rgba(0,200,255,.35);
+  transition: transform .18s ease, box-shadow .22s ease, background .22s ease;
+}
+.welcome-btn:hover,
+.welcome-btn:focus-visible {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 0 22px rgba(0,200,255,.42);
+}
+.welcome-btn:active {
+  transform: translateY(1px) scale(.99);
+  box-shadow: 0 0 12px rgba(0,200,255,.28);
+}
+
+@keyframes welcomeIn {
+  0% { opacity: 0; transform: translateY(30px) scale(.94); }
+  55% { opacity: 1; transform: translateY(-8px) scale(1.02); }
+  78% { transform: translateY(3px) scale(.995); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* ── Header ────────────────────────────────────────────── */
 .site-header {
   position: sticky; top: 0; z-index: 100;
