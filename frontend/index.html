@@ -432,23 +432,34 @@ python3 -m http.server 3000
   <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Depth map detail view">
     <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
     <div class="lightbox-body">
-      <div class="lightbox-images">
-        <div class="lb-pane">
-          <span class="lb-label">Original</span>
-          <img id="lbOrigImg" alt="Original image" />
-        </div>
-        <div class="lb-divider">
-          <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
-          <span class="lb-divider-label">BLEND</span>
-        </div>
-        <div class="lb-pane">
-          <span class="lb-label">Depth Map</span>
-          <img id="lbDepthImg" alt="Depth map" />
-        </div>
+      <div class="lightbox-tabs" role="tablist" aria-label="Detail sections">
+        <button class="lb-tab active" id="lbTabPreview" type="button" role="tab" aria-selected="true" aria-controls="lbPanelPreview">Preview</button>
+        <button class="lb-tab" id="lbTabMetrics" type="button" role="tab" aria-selected="false" aria-controls="lbPanelMetrics">Metrics</button>
       </div>
 
-      <div class="lightbox-metrics" id="lightboxMetrics">
-        <!-- Populated by JS -->
+      <div class="lightbox-panel-wrap">
+        <section class="lightbox-panel active" id="lbPanelPreview" role="tabpanel" aria-labelledby="lbTabPreview">
+          <div class="lightbox-images">
+            <div class="lb-pane">
+              <span class="lb-label">Original</span>
+              <img id="lbOrigImg" alt="Original image" />
+            </div>
+            <div class="lb-divider">
+              <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
+              <span class="lb-divider-label">BLEND</span>
+            </div>
+            <div class="lb-pane">
+              <span class="lb-label">Depth Map</span>
+              <img id="lbDepthImg" alt="Depth map" />
+            </div>
+          </div>
+        </section>
+
+        <section class="lightbox-panel" id="lbPanelMetrics" role="tabpanel" aria-labelledby="lbTabMetrics" hidden>
+          <div class="lightbox-metrics" id="lightboxMetrics">
+            <!-- Populated by JS -->
+          </div>
+        </section>
       </div>
     </div>
 

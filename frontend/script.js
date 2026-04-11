@@ -107,6 +107,10 @@ const el = {
   lightbox:        $("#lightbox"),
   lightboxBackdrop:$("#lightboxBackdrop"),
   lightboxClose:   $("#lightboxClose"),
+  lbTabPreview:    $("#lbTabPreview"),
+  lbTabMetrics:    $("#lbTabMetrics"),
+  lbPanelPreview:  $("#lbPanelPreview"),
+  lbPanelMetrics:  $("#lbPanelMetrics"),
   lbOrigImg:       $("#lbOrigImg"),
   lbDepthImg:      $("#lbDepthImg"),
   lightboxMetrics: $("#lightboxMetrics"),
@@ -966,6 +970,19 @@ function toggleAccordion(div) {
   div.querySelector(".metric-group-header").setAttribute("aria-expanded", String(!isOpen));
 }
 
+function setLightboxTab(tab) {
+  const showPreview = tab === "preview";
+  el.lbTabPreview.classList.toggle("active", showPreview);
+  el.lbTabPreview.setAttribute("aria-selected", String(showPreview));
+  el.lbPanelPreview.classList.toggle("active", showPreview);
+  el.lbPanelPreview.hidden = !showPreview;
+
+  el.lbTabMetrics.classList.toggle("active", !showPreview);
+  el.lbTabMetrics.setAttribute("aria-selected", String(!showPreview));
+  el.lbPanelMetrics.classList.toggle("active", !showPreview);
+  el.lbPanelMetrics.hidden = showPreview;
+}
+
 function openLightbox(r) {
   state.lb.current = r;
   el.lbOrigImg.src  = r.originalSrc || "";
@@ -982,6 +999,7 @@ function openLightbox(r) {
   ].filter(Boolean).map(t=>`<span class="lb-tag">${esc(t)}</span>`).join("");
 
   renderMetricsAccordion(r.metrics);
+  setLightboxTab("preview");
 
   el.lightbox.hidden = false;
   el.lightboxBackdrop.hidden = false;
@@ -1008,6 +1026,8 @@ el.lbSlider.addEventListener("input", () => {
 
 el.lbDlDepth.addEventListener("click", () => { const r=state.lb.current; if(r) dlB64(`depth_${r.filename}`, r.depth_map); });
 el.lbDlGray.addEventListener("click",  () => { const r=state.lb.current; if(r) dlB64(`gray_${r.filename}`,  r.grayscale);  });
+el.lbTabPreview.addEventListener("click", ()=>setLightboxTab("preview"));
+el.lbTabMetrics.addEventListener("click", ()=>setLightboxTab("metrics"));
 
 /* ═══════════════════════════════════════════
    COMPARE PANEL
