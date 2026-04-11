@@ -1009,21 +1009,6 @@ el.lbSlider.addEventListener("input", () => {
 el.lbDlDepth.addEventListener("click", () => { const r=state.lb.current; if(r) dlB64(`depth_${r.filename}`, r.depth_map); });
 el.lbDlGray.addEventListener("click",  () => { const r=state.lb.current; if(r) dlB64(`gray_${r.filename}`,  r.grayscale);  });
 
-// Ensure mouse-wheel/trackpad scrolling always works inside lightbox metric panes.
-el.lightbox.addEventListener("wheel", e => {
-  if (el.lightbox.hidden) return;
-  const scrollHost = e.target.closest(".metric-group-body, .lightbox-body");
-  if (!scrollHost) return;
-  if (scrollHost.scrollHeight <= scrollHost.clientHeight) return;
-
-  const nextTop = scrollHost.scrollTop + e.deltaY;
-  const maxTop = scrollHost.scrollHeight - scrollHost.clientHeight;
-  if (nextTop < 0 || nextTop > maxTop) return;
-
-  e.preventDefault();
-  scrollHost.scrollTop = nextTop;
-}, { passive: false });
-
 /* ═══════════════════════════════════════════
    COMPARE PANEL
 ═══════════════════════════════════════════ */
