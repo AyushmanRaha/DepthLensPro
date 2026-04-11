@@ -430,33 +430,39 @@ python3 -m http.server 3000
 
   <!-- ─── LIGHTBOX ──────────────────────────────────────────────────── -->
   <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Depth map detail view">
-    <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
-    <div class="lightbox-body">
-      <div class="lightbox-images">
-        <div class="lb-pane">
-          <span class="lb-label">Original</span>
-          <img id="lbOrigImg" alt="Original image" />
-        </div>
-        <div class="lb-divider">
-          <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
-          <span class="lb-divider-label">BLEND</span>
-        </div>
-        <div class="lb-pane">
-          <span class="lb-label">Depth Map</span>
-          <img id="lbDepthImg" alt="Depth map" />
-        </div>
-      </div>
-
-      <div class="lightbox-metrics" id="lightboxMetrics">
-        <!-- Populated by JS -->
-      </div>
+    <div class="lightbox-head">
+      <p class="lightbox-title">Depth Preview</p>
+      <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
     </div>
 
-    <div class="lightbox-footer">
-      <div class="lb-tags" id="lbTags"></div>
-      <div class="lb-downloads">
-        <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
-        <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
+    <div class="lightbox-scroll">
+      <div class="lightbox-body">
+        <div class="lightbox-images">
+          <div class="lb-pane">
+            <span class="lb-label">Original</span>
+            <img id="lbOrigImg" alt="Original image" />
+          </div>
+          <div class="lb-divider">
+            <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
+            <span class="lb-divider-label">BLEND</span>
+          </div>
+          <div class="lb-pane">
+            <span class="lb-label">Depth Map</span>
+            <img id="lbDepthImg" alt="Depth map" />
+          </div>
+        </div>
+
+        <div class="lightbox-metrics" id="lightboxMetrics">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+  
+      <div class="lightbox-footer">
+        <div class="lb-tags" id="lbTags"></div>
+        <div class="lb-downloads">
+          <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
+          <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
+        </div>
       </div>
     </div>
   </div>
