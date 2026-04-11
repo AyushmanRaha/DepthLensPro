@@ -1021,14 +1021,20 @@ function openLightbox(r) {
 
   renderMetricsAccordion(r.metrics);
 
+  el.lightboxBackdrop.classList.remove("is-open");
   el.lightboxBackdrop.hidden = false;
+  requestAnimationFrame(() => el.lightboxBackdrop.classList.add("is-open"));
   el.lightboxBackdrop.scrollTop = 0;
   document.body.style.overflow = "hidden";
   el.lightboxClose.focus();
 }
 
 function closeLightbox() {
-  el.lightboxBackdrop.hidden = true;
+  if (el.lightboxBackdrop.hidden) return;
+  el.lightboxBackdrop.classList.remove("is-open");
+  setTimeout(() => {
+    el.lightboxBackdrop.hidden = true;
+  }, 280);
   document.body.style.overflow = "";
   state.lb.current = null;
 }
