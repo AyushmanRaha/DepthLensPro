@@ -583,7 +583,11 @@ a      { color: var(--accent); }
 }
 .lightbox-close:hover { background: rgba(255,77,77,.2); border-color: var(--error); color: var(--error); }
 
-.lightbox-body { display: flex; flex-direction: column; gap: .8rem; flex: 1; min-height: 0; overflow-y: auto; }
+.lightbox-body {
+  display: flex; flex-direction: column; gap: .8rem; flex: 1; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 
 .lightbox-images {
   display: grid; grid-template-columns: 1fr auto 1fr; gap: .75rem;
@@ -618,6 +622,8 @@ a      { color: var(--accent); }
 .metric-group.open .metric-group-body {
   max-height: min(420px, 55vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .metric-group-content { padding: .6rem .8rem 0.8rem; display: flex; flex-direction: column; gap: .35rem; }
 
