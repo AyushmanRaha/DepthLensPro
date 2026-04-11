@@ -20,6 +20,8 @@ const state = {
   compareFile:  null,
   devices: {},
   primaryDevice: "cpu",
+  deviceFilter: "all",
+  timing: { workspace: {}, compare: {} },
 };
 
 /* ═══════════════════════════════════════════
@@ -39,6 +41,7 @@ const el = {
 
   // device card
   deviceInfoBanner: $("#deviceInfoBanner"),
+  deviceTypeToggle: $("#deviceTypeToggle"),
   deviceSelector:   $("#deviceSelector"),
 
   // upload
@@ -147,13 +150,20 @@ document.addEventListener("change", e => {
   const cv = el.bgCanvas, ctx = cv.getContext("2d");
   let W, H, pts = [];
   const N = 50;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function mkP() {
     return { x: Math.random()*W, y: Math.random()*H,
              vx: (Math.random()-.5)*.28, vy: (Math.random()-.5)*.28,
              r: Math.random()*1.3+.3, a: Math.random() };
   }
-  function resize() { W = cv.width = window.innerWidth; H = cv.height = window.innerHeight; }
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
+    cv.style.width = `${W}px`; cv.style.height = `${H}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
   function reset()  { resize(); pts = Array.from({length:N}, mkP); }
 
   function draw() {
@@ -177,7 +187,7 @@ document.addEventListener("change", e => {
       ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
       ctx.fillStyle=`rgba(0,200,255,${p.a*.55})`; ctx.fill();
     }
-    requestAnimationFrame(draw);
+    if (!reduce) requestAnimationFrame(draw);
   }
 
   window.addEventListener("resize", resize);
@@ -310,18 +320,70 @@ async function loadDevices(devs, primaryFromHealth = null) {
     ? primaryFromHealth
     : (devs.mps ? "mps" : keys.includes("cuda:0") ? "cuda:0" : keys[0]);
   state.primaryDevice = primary;
+  const savedRaw = window._savedDevice;
+  const saved = savedRaw === "auto" ? primary : savedRaw;
 
-  // Workspace device selector
-  el.deviceSelector.innerHTML = "";
+  const withKinds = Object.entries(devs).map(([key, info]) => ({
+    key,
+    info,
+    kinds: Array.isArray(info.compute_classes)
+      ? info.compute_classes.map(k => String(k).toLowerCase())
+      : [String(info.type || "cpu").toLowerCase()],
+  }));
+
+  const kindsPresent = {
+    cpu: withKinds.some(d => d.kinds.includes("cpu")),
+    gpu: withKinds.some(d => d.kinds.includes("gpu") || d.kinds.includes("cuda") || d.kinds.includes("mps")),
+    npu: withKinds.some(d => d.kinds.includes("npu") || d.kinds.includes("ane")),
+  };
+
+  const filters = [
+    { id: "all", label: "All" },
+    ...(kindsPresent.cpu ? [{ id: "cpu", label: "CPU" }] : []),
+    ...(kindsPresent.gpu ? [{ id: "gpu", label: "GPU" }] : []),
+    ...(kindsPresent.npu ? [{ id: "npu", label: "NPU" }] : []),
+  ];
+  if (!filters.find(f => f.id === state.deviceFilter)) state.deviceFilter = "all";
+
+  el.deviceTypeToggle.hidden = filters.length <= 1;
+  el.deviceTypeToggle.innerHTML = "";
+  filters.forEach(f => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `device-filter-btn ${state.deviceFilter === f.id ? "active" : ""}`;
+    b.textContent = f.label;
+    b.addEventListener("click", () => {
+      state.deviceFilter = f.id;
+      renderDeviceSelector(withKinds, primary, saved);
+      [...el.deviceTypeToggle.children].forEach(ch => ch.classList.remove("active"));
+      b.classList.add("active");
+    });
+    el.deviceTypeToggle.appendChild(b);
+  });
+
+  renderDeviceSelector(withKinds, primary, saved);
+
+  // Compare panel device dropdown
+  el.compareDevice.innerHTML = "";
   Object.entries(devs).forEach(([key, info]) => {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = info.name || key;
+    opt.selected = key === primary;
+    el.compareDevice.appendChild(opt);
+  });
+}
+
+function renderDeviceSelector(deviceEntries, primary, saved) {
+  el.deviceSelector.innerHTML = "";
+  deviceEntries.forEach(({ key, info, kinds }) => {
+    if (state.deviceFilter !== "all" && !kinds.includes(state.deviceFilter)) return;
     const isCuda = info.type === "cuda";
     const isMps  = info.type === "mps";
     const icon   = isCuda ? "🎮" : isMps ? "🍎" : "🖥";
     const sub    = isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
-             : isMps  ? `Apple ${info.chip} · Metal Performance Shaders + ANE`
-             : "System processor";
-    const savedRaw = window._savedDevice;
-    const saved = savedRaw === "auto" ? primary : savedRaw;
+             : isMps  ? `Apple ${info.chip || "Silicon"} · Metal + Neural Engine`
+             : (info.hardware_name || "System processor");
     const checked = (saved && saved === key) || (!saved && key === primary);
 
     const lbl = document.createElement("label");
@@ -346,16 +408,6 @@ async function loadDevices(devs, primaryFromHealth = null) {
       inp.closest(".device-opt").classList.add("selected");
       savePrefs();
     });
-  });
-
-  // Compare panel device dropdown
-  el.compareDevice.innerHTML = "";
-  Object.entries(devs).forEach(([key, info]) => {
-    const opt = document.createElement("option");
-    opt.value = key;
-    opt.textContent = info.name || key;
-    opt.selected = key === primary;
-    el.compareDevice.appendChild(opt);
   });
 }
 
@@ -478,6 +530,18 @@ function setProgress(pct, status, eta, currentFile, countStr) {
   if (countStr    !== undefined) el.progressItemCount.textContent   = countStr;
 }
 
+function timingKey(model, device) { return `${model}::${device || "cpu"}`; }
+function getEstimate(mode, model, device) {
+  return state.timing[mode]?.[timingKey(model, device)] || state.timing[mode]?.default || 1300;
+}
+function updateEstimate(mode, model, device, ms) {
+  const key = timingKey(model, device);
+  const prev = state.timing[mode][key];
+  state.timing[mode][key] = prev ? (prev * 0.65 + ms * 0.35) : ms;
+  const vals = Object.values(state.timing[mode]).filter(v => typeof v === "number");
+  if (vals.length) state.timing[mode].default = vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+
 function fmtDuration(ms) {
   const s = Math.round(ms / 1000);
   if (s < 60)  return `${s}s`;
@@ -503,7 +567,7 @@ async function runBatch() {
   el.clearBtn.disabled = true;
   el.cancelBtn.hidden  = false;
   el.progressBlock.hidden = false;
-  setProgress(0, "Initialising…", "", "", `0 / ${pending.length}`);
+  setProgress(0, "Starting batch…", "", "", `0 / ${pending.length}`);
 
   const batchStart = Date.now();
   const model    = selModel();
@@ -515,26 +579,28 @@ async function runBatch() {
 
     const entry = pending[i];
     setFileSt(entry.id, "running", "Running…");
-    const pct = (i / pending.length) * 100;
-
-    // ETA calculation
-    let eta = "";
-    if (i > 0) {
-      const elapsed = Date.now() - batchStart;
-      const rate    = elapsed / i;
-      const rem     = rate * (pending.length - i);
-      eta = `ETA: ${fmtDuration(rem)}`;
-    }
-
-    setProgress(
-      pct, `Processing ${i+1} of ${pending.length}…`,
-      eta,
-      esc(entry.file.name),
-      `${i+1} / ${pending.length}`
-    );
+    const estCurrent = getEstimate("workspace", model, device);
+    const estRemainingStatic = pending
+      .slice(i + 1)
+      .reduce((acc) => acc + getEstimate("workspace", model, device), 0);
+    const itemStart = Date.now();
+    const tick = setInterval(() => {
+      const elapsedCurrent = Date.now() - itemStart;
+      const unitDone = i + Math.min(elapsedCurrent / estCurrent, 0.98);
+      const pct = Math.min((unitDone / pending.length) * 100, 99);
+      const rem = Math.max(0, (estCurrent - elapsedCurrent) + estRemainingStatic);
+      setProgress(
+        pct, `Processing ${i+1} of ${pending.length}…`,
+        `ETA: ${fmtDuration(rem)}`,
+        esc(entry.file.name),
+        `${i+1} / ${pending.length}`
+      );
+    }, 120);
 
     try {
       const result = await inferOne(entry.file, model, colormap, device, state.abort.signal);
+      clearInterval(tick);
+      updateEstimate("workspace", model, device, result.latency_ms);
       entry.result = result; entry.status = "done";
       setFileSt(entry.id, "done", `✓ ${result.latency_ms}ms`);
 
@@ -550,6 +616,7 @@ async function runBatch() {
       el.resultsCard.hidden = false;
 
     } catch (err) {
+      clearInterval(tick);
       if (err.name === "AbortError") { setFileSt(entry.id, "pending", "Cancelled"); break; }
       entry.status = "error";
       setFileSt(entry.id, "error", "Error");
@@ -894,20 +961,29 @@ async function runComparison() {
   for (let i=0; i<models.length; i++) {
     if (state.compareAbort.signal.aborted) break;
     const model = models[i];
-    const pct   = Math.round((i/models.length)*100);
-    el.compareProgressFill.style.width = `${pct}%`;
-    el.compareProgressPct.textContent  = `${pct}%`;
-    el.compareProgressText.textContent = `Running ${model}…`;
-    if (i>0) {
-      const elapsed = Date.now()-t0;
-      const rem     = (elapsed/i)*(models.length-i);
-      el.compareProgressEta.textContent = `ETA: ${fmtDuration(rem)}`;
-    }
+    const estCurrent = getEstimate("compare", model, device);
+    const estRemainingStatic = models
+      .slice(i + 1)
+      .reduce((acc, m) => acc + getEstimate("compare", m, device), 0);
+    const modelStart = Date.now();
+    const tick = setInterval(() => {
+      const elapsedCurrent = Date.now() - modelStart;
+      const unitDone = i + Math.min(elapsedCurrent / estCurrent, 0.98);
+      const pct = Math.min((unitDone / models.length) * 100, 99);
+      const rem = Math.max(0, (estCurrent - elapsedCurrent) + estRemainingStatic);
+      el.compareProgressFill.style.width = `${pct}%`;
+      el.compareProgressPct.textContent  = `${Math.round(pct)}%`;
+      el.compareProgressText.textContent = `Running ${model}…`;
+      el.compareProgressEta.textContent  = `ETA: ${fmtDuration(rem)}`;
+    }, 120);
     try {
       const r = await inferOne(state.compareFile, model, cmap, device, state.compareAbort.signal);
+      clearInterval(tick);
+      updateEstimate("compare", model, device, r.latency_ms);
       results.push(r);
       renderCompareCard(r);
     } catch(err) {
+      clearInterval(tick);
       if (err.name!=="AbortError") toast(`${model} failed: ${err.message}`, "error");
     }
   }
