@@ -18,6 +18,8 @@ const state = {
   abort:   null,      // AbortController for current batch
   compareAbort: null,
   compareFile:  null,
+  devices: {},
+  primaryDevice: "cpu",
 };
 
 /* ═══════════════════════════════════════════
@@ -271,6 +273,8 @@ async function checkHealth() {
     // Build device badge text
     const devs    = data.devices || {};
     const primary = data.primary_device || "cpu";
+    state.devices = devs;
+    state.primaryDevice = primary;
     const info    = devs[primary];
     let badge = "CPU";
     if (info?.type === "cuda") badge = `GPU: ${info.name} (${info.memory_gb} GB)`;
@@ -279,7 +283,7 @@ async function checkHealth() {
     setStatus("online", "Depth Engine: Online", `PyTorch ${data.torch_version} · ${primary}`, badge);
 
     // Populate device selector
-    await loadDevices(devs);
+    await loadDevices(devs, primary);
     updateDeviceInfoBanner(badge);
     return true;
   } catch {
@@ -290,7 +294,7 @@ async function checkHealth() {
   }
 }
 
-async function loadDevices(devs) {
+async function loadDevices(devs, primaryFromHealth = null) {
   if (!devs || !Object.keys(devs).length) {
     try {
       const r = await fetch(`${API}/devices`, { signal: AbortSignal.timeout(3000) });
@@ -298,19 +302,27 @@ async function loadDevices(devs) {
     } catch { return; }
   }
 
+  const keys = Object.keys(devs);
+  if (!keys.length) return;
+
+  state.devices = devs;
+  const primary = (primaryFromHealth && devs[primaryFromHealth])
+    ? primaryFromHealth
+    : (devs.mps ? "mps" : keys.includes("cuda:0") ? "cuda:0" : keys[0]);
+  state.primaryDevice = primary;
+
   // Workspace device selector
   el.deviceSelector.innerHTML = "";
-  const all = { auto: { name: "Auto (Best Available)", type: "auto" }, ...devs };
-  Object.entries(all).forEach(([key, info]) => {
+  Object.entries(devs).forEach(([key, info]) => {
     const isCuda = info.type === "cuda";
     const isMps  = info.type === "mps";
-    const icon   = key === "auto" ? "🔀" : isCuda ? "🎮" : isMps ? "🍎" : "🖥";
-    const sub    = key === "auto"  ? "Picks best: MPS > CUDA > CPU"
-             : isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
+    const icon   = isCuda ? "🎮" : isMps ? "🍎" : "🖥";
+    const sub    = isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
              : isMps  ? `Apple ${info.chip} · Metal Performance Shaders + ANE`
              : "System processor";
-    const saved  = window._savedDevice;
-    const checked = (saved && saved === key) || (!saved && key === "auto");
+    const savedRaw = window._savedDevice;
+    const saved = savedRaw === "auto" ? primary : savedRaw;
+    const checked = (saved && saved === key) || (!saved && key === primary);
 
     const lbl = document.createElement("label");
     lbl.className = "device-opt" + (checked ? " selected" : "");
@@ -338,9 +350,11 @@ async function loadDevices(devs) {
 
   // Compare panel device dropdown
   el.compareDevice.innerHTML = "";
-  Object.entries(all).forEach(([key, info]) => {
+  Object.entries(devs).forEach(([key, info]) => {
     const opt = document.createElement("option");
-    opt.value = key; opt.textContent = info.name || key;
+    opt.value = key;
+    opt.textContent = info.name || key;
+    opt.selected = key === primary;
     el.compareDevice.appendChild(opt);
   });
 }
@@ -447,7 +461,7 @@ el.clearBtn.addEventListener("click", ()=>{ state.files=[]; el.fileQueue.innerHT
 ═══════════════════════════════════════════ */
 function selModel()   { return $('input[name="model"]:checked')?.value || "MiDaS_small"; }
 function selCmap()    { return $('input[name="colormap"]:checked')?.value || "inferno"; }
-function selDevice()  { return $('input[name="device"]:checked')?.value || "auto"; }
+function selDevice()  { return $('input[name="device"]:checked')?.value || state.primaryDevice || "cpu"; }
 
 function setProgress(pct, status, eta, currentFile, countStr) {
   el.progressFill.style.width = `${pct}%`;
