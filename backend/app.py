@@ -4,7 +4,7 @@ FastAPI + PyTorch MiDaS · GPU/CPU selection · Full MDE metric suite
 """
 
 import time, base64, logging, hashlib, math
-import subprocess, platform
+import subprocess, platform, os
 from contextlib import asynccontextmanager
 
 import cv2
@@ -86,13 +86,22 @@ def _get_apple_chip() -> str | None:
     return None
 
 def _available_devices() -> dict:
-    devs = {"cpu": {"name": "CPU (System)", "type": "cpu", "available": True}}
+    cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or "System CPU"
+    devs = {"cpu": {
+        "name": f"CPU · {cpu_name}",
+        "hardware_name": cpu_name,
+        "type": "cpu",
+        "compute_classes": ["cpu"],
+        "available": True,
+    }}
     if torch.cuda.is_available():
         for i in range(torch.cuda.device_count()):
             p = torch.cuda.get_device_properties(i)
             devs[f"cuda:{i}"] = {
-                "name":      p.name,
+                "name":      f"GPU · {p.name}",
+                "hardware_name": p.name,
                 "type":      "cuda",
+                "compute_classes": ["gpu"],
                 "index":     i,
                 "memory_gb": round(p.total_memory / 1024**3, 1),
                 "available": True,
@@ -100,8 +109,10 @@ def _available_devices() -> dict:
     if torch.backends.mps.is_available():
         chip = _get_apple_chip() or "Apple Silicon"
         devs["mps"] = {
-            "name":       f"Apple {chip} (MPS)",
+            "name":       f"GPU/NPU · Apple {chip}",
+            "hardware_name": f"Apple {chip}",
             "type":       "mps",
+            "compute_classes": ["gpu", "npu"],
             "chip":       chip,
             "available":  True,
         }
@@ -345,6 +356,12 @@ async def health():
         "cache_entries":   len(CACHE),
         "torch_version":   torch.__version__,
         "cuda_available":  torch.cuda.is_available(),
+        "system": {
+            "os": platform.platform(),
+            "machine": platform.machine(),
+            "cpu": devs["cpu"]["hardware_name"],
+            "accelerators": [d["name"] for k, d in devs.items() if k != "cpu"],
+        },
     }
 
 

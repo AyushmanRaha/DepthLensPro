@@ -55,6 +55,7 @@ img    { display: block; max-width: 100%; }
 button { cursor: pointer; font-family: inherit; }
 ul     { list-style: none; }
 a      { color: var(--accent); }
+[hidden] { display: none !important; }
 
 /* ── Background canvas ─────────────────────────────────── */
 #bgCanvas {
@@ -148,6 +149,21 @@ a      { color: var(--accent); }
   border-radius: var(--r); font-family: var(--ff-mono); font-size: .65rem; color: var(--text-muted);
 }
 .device-info-icon { color: var(--accent); font-size: .85rem; }
+.device-type-toggle { display: flex; gap: .35rem; margin: .45rem 0 .65rem; flex-wrap: wrap; }
+.device-filter-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: .2rem .65rem;
+  font-family: var(--ff-mono);
+  font-size: .58rem;
+}
+.device-filter-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
 .device-selector { display: flex; flex-direction: column; gap: .5rem; }
 .device-opt { position: relative; cursor: pointer; }
 .device-opt input { position: absolute; opacity: 0; width: 0; height: 0; }
