@@ -380,7 +380,7 @@ function renderDeviceSelector(deviceEntries, primary, saved) {
     if (state.deviceFilter !== "all" && !kinds.includes(state.deviceFilter)) return;
     const isCuda = info.type === "cuda";
     const isMps  = info.type === "mps";
-    const icon   = isCuda ? "🎮" : isMps ? "🍎" : "🖥";
+    const icon   = isCuda ? "[GPU]" : isMps ? "[NPU]" : "[CPU]";
     const sub    = isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
              : isMps  ? `Apple ${info.chip || "Silicon"} · Metal + Neural Engine`
              : (info.hardware_name || "System processor");
@@ -472,7 +472,7 @@ function renderFileItem(entry) {
       <div class="file-size">${fmtSize(entry.file.size)}</div>
     </div>
     <span class="file-status pending" id="fst-${entry.id}">Pending</span>
-    <button class="file-remove" data-id="${entry.id}" aria-label="Remove ${esc(entry.file.name)}">✕</button>`;
+    <button class="file-remove" data-id="${entry.id}" aria-label="Remove ${esc(entry.file.name)}">[CLOSE]</button>`;
   el.fileQueue.appendChild(li);
   $(".file-remove", li).addEventListener("click", () => removeFile(entry.id));
 }
@@ -690,7 +690,7 @@ function appendGalleryItem(r) {
   item.innerHTML = `
     <div class="gallery-img-wrap">
       <img src="data:image/png;base64,${r.depth_map}" alt="Depth map — ${esc(r.filename)}" loading="lazy"/>
-      <div class="gallery-overlay">🔍</div>
+      <div class="gallery-overlay">[VIEW]</div>
     </div>
     <div class="gallery-meta">
       <div class="gallery-filename" title="${esc(r.filename)}">${esc(r.filename)}</div>
@@ -729,7 +729,7 @@ el.downloadAllBtn.addEventListener("click",  ()=>{
 const METRIC_GROUPS = [
   {
     id: "error",
-    icon: "📏",
+    icon: "[ERR]",
     label: "Core Error Metrics",
     note: "Computed from predicted depth distribution only (no ground truth required). Values reflect self-consistency of the depth map.",
     metrics: [
@@ -742,7 +742,7 @@ const METRIC_GROUPS = [
   },
   {
     id: "accuracy",
-    icon: "📐",
+    icon: "[ACC]",
     label: "Threshold Accuracy",
     note: "δ metrics require ground-truth depth maps and cannot be computed here. They measure the fraction of pixels where max(pred/GT, GT/pred) < threshold.",
     metrics: [
@@ -753,7 +753,7 @@ const METRIC_GROUPS = [
   },
   {
     id: "scaleinv",
-    icon: "🧭",
+    icon: "[SCL]",
     label: "Scale-Invariant Metrics",
     metrics: [
       { key:"silog",         label:"SILog (Scale-Invariant Log Error)", unit:"",   desc:"Measures log-depth variance after removing global scale. Lower = better structure preservation. Commonly used on KITTI / NYU benchmarks.", needsGT:false },
@@ -764,7 +764,7 @@ const METRIC_GROUPS = [
   },
   {
     id: "structural",
-    icon: "🧱",
+    icon: "[GEO]",
     label: "Structural & Geometric Metrics",
     metrics: [
       { key:"ssim",           label:"SSIM (Structural Similarity)",  unit:"",  desc:"Compares depth map structure to grayscale input. Range 0–1; higher means the depth map preserves the luminance structure of the scene (edges, textures).", needsGT:false },
@@ -777,7 +777,7 @@ const METRIC_GROUPS = [
   },
   {
     id: "perceptual",
-    icon: "👁",
+    icon: "[VIS]",
     label: "Perceptual & Consistency Metrics",
     metrics: [
       { key:"psnr",  label:"PSNR (Peak Signal-to-Noise Ratio)", unit:" dB", desc:"Signal quality of the depth map relative to its own mean. Higher = less self-noise. Computed in depth space; not directly comparable to image PSNR.", needsGT:false },
@@ -786,7 +786,7 @@ const METRIC_GROUPS = [
   },
   {
     id: "ranking",
-    icon: "🧪",
+    icon: "[RANK]",
     label: "Ranking / Relative Depth Metrics",
     metrics: [
       { key:"ordinal_error", label:"Ordinal Error",          unit:"", desc:"Fraction of pixel pairs where the relative ordering of pred depth disagrees with GT. Key metric for monocular methods. Requires GT.", needsGT:true },
