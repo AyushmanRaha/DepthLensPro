@@ -110,6 +110,7 @@ const el = {
   lbDepthImg:      $("#lbDepthImg"),
   lightboxMetrics: $("#lightboxMetrics"),
   lbSlider:        $("#lbSlider"),
+  lbRangeValue:    $("#lbRangeValue"),
   lbTags:          $("#lbTags"),
   lbDlDepth:       $("#lbDlDepth"),
   lbDlGray:        $("#lbDlGray"),
@@ -393,6 +394,15 @@ async function checkHealth() {
   }
 }
 
+function autoDeviceLabel(devs, primary) {
+  const preferred = devs?.[primary];
+  if (!preferred) return "Best available compute";
+  if (preferred.type === "cuda") return `Prefers GPU · ${preferred.name || primary}`;
+  if (preferred.type === "mps") return `Prefers Apple acceleration · ${preferred.name || primary}`;
+  if ((preferred.compute_classes || []).includes("npu")) return `Prefers NPU · ${preferred.name || primary}`;
+  return `Prefers CPU · ${preferred.name || primary}`;
+}
+
 async function loadDevices(devs, primaryFromHealth = null) {
   if (!devs || !Object.keys(devs).length) {
     try {
@@ -409,8 +419,8 @@ async function loadDevices(devs, primaryFromHealth = null) {
     ? primaryFromHealth
     : (devs.mps ? "mps" : keys.includes("cuda:0") ? "cuda:0" : keys[0]);
   state.primaryDevice = primary;
-  const savedRaw = window._savedDevice;
-  const saved = savedRaw === "auto" ? primary : savedRaw;
+  const savedRaw = window._savedDevice || "auto";
+  const saved = savedRaw === "auto" || devs[savedRaw] ? savedRaw : "auto";
 
   const withKinds = Object.entries(devs).map(([key, info]) => ({
     key,
@@ -443,28 +453,49 @@ async function loadDevices(devs, primaryFromHealth = null) {
     b.textContent = f.label;
     b.addEventListener("click", () => {
       state.deviceFilter = f.id;
-      renderDeviceSelector(withKinds, primary, saved);
+      const current = $('input[name="device"]:checked')?.value || saved;
+      renderDeviceSelector(withKinds, primary, current, devs);
       [...el.deviceTypeToggle.children].forEach(ch => ch.classList.remove("active"));
       b.classList.add("active");
     });
     el.deviceTypeToggle.appendChild(b);
   });
 
-  renderDeviceSelector(withKinds, primary, saved);
+  renderDeviceSelector(withKinds, primary, saved, devs);
 
   // Compare panel device dropdown
   el.compareDevice.innerHTML = "";
+  const autoOpt = document.createElement("option");
+  autoOpt.value = "auto";
+  autoOpt.textContent = `Auto (${autoDeviceLabel(devs, primary)})`;
+  autoOpt.selected = saved === "auto";
+  el.compareDevice.appendChild(autoOpt);
   Object.entries(devs).forEach(([key, info]) => {
     const opt = document.createElement("option");
     opt.value = key;
     opt.textContent = info.name || key;
-    opt.selected = key === primary;
+    opt.selected = saved !== "auto" && key === saved;
     el.compareDevice.appendChild(opt);
   });
 }
 
-function renderDeviceSelector(deviceEntries, primary, saved) {
+function renderDeviceSelector(deviceEntries, primary, saved, devs) {
   el.deviceSelector.innerHTML = "";
+  const autoChecked = saved === "auto" || !saved;
+  const auto = document.createElement("label");
+  auto.className = "device-opt" + (autoChecked ? " selected" : "");
+  auto.dataset.device = "auto";
+  auto.innerHTML = `
+    <input type="radio" name="device" value="auto" ${autoChecked ? "checked" : ""} />
+    <div class="device-opt-inner">
+      <span class="device-opt-icon">◎</span>
+      <div>
+        <span class="device-opt-name">Auto Select</span>
+        <span class="device-opt-sub">${esc(autoDeviceLabel(devs, primary))}</span>
+      </div>
+    </div>`;
+  el.deviceSelector.appendChild(auto);
+
   deviceEntries.forEach(({ key, info, kinds }) => {
     if (state.deviceFilter !== "all" && !kinds.includes(state.deviceFilter)) return;
     const isCuda = info.type === "cuda";
@@ -473,7 +504,7 @@ function renderDeviceSelector(deviceEntries, primary, saved) {
     const sub    = isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
              : isMps  ? `Apple ${info.chip || "Silicon"} · Metal + Neural Engine`
              : (info.hardware_name || "System processor");
-    const checked = (saved && saved === key) || (!saved && key === primary);
+    const checked = saved === key;
 
     const lbl = document.createElement("label");
     lbl.className = "device-opt" + (checked ? " selected" : "");
@@ -965,11 +996,19 @@ function toggleAccordion(div) {
   div.querySelector(".metric-group-header").setAttribute("aria-expanded", String(!isOpen));
 }
 
+function updateBlendPreview() {
+  const v = Number(el.lbSlider.value || 50) / 100;
+  el.lbOrigImg.style.opacity  = (1 - (v * 0.85)).toFixed(2);
+  el.lbDepthImg.style.opacity = (0.2 + (v * 0.8)).toFixed(2);
+  if (el.lbRangeValue) el.lbRangeValue.textContent = `${Math.round(v * 100)}%`;
+}
+
 function openLightbox(r) {
   state.lb.current = r;
   el.lbOrigImg.src  = r.originalSrc || "";
   el.lbDepthImg.src = `data:image/png;base64,${r.depth_map}`;
   el.lbSlider.value = 50;
+  updateBlendPreview();
 
   // Tags
   el.lbTags.innerHTML = [
@@ -999,9 +1038,7 @@ el.lightboxBackdrop.addEventListener("click", e => { if (e.target === el.lightbo
 document.addEventListener("keydown", e => { if(e.key==="Escape") closeLightbox(); });
 
 el.lbSlider.addEventListener("input", () => {
-  const v = el.lbSlider.value / 100;
-  el.lbOrigImg.style.opacity  = 1 - v*.65;
-  el.lbDepthImg.style.opacity = .35 + v*.65;
+  updateBlendPreview();
 });
 
 el.lbDlDepth.addEventListener("click", () => { const r=state.lb.current; if(r) dlB64(`depth_${r.filename}`, r.depth_map); });

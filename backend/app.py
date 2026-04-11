@@ -94,7 +94,14 @@ def _available_devices() -> dict:
         "compute_classes": ["cpu"],
         "available": True,
     }}
+    cuda_ok = False
     if torch.cuda.is_available():
+        try:
+            _ = torch.cuda.device_count()
+            cuda_ok = True
+        except Exception:
+            cuda_ok = False
+    if cuda_ok:
         for i in range(torch.cuda.device_count()):
             p = torch.cuda.get_device_properties(i)
             devs[f"cuda:{i}"] = {
@@ -104,6 +111,21 @@ def _available_devices() -> dict:
                 "compute_classes": ["gpu"],
                 "index":     i,
                 "memory_gb": round(p.total_memory / 1024**3, 1),
+                "available": True,
+            }
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        try:
+            count = torch.xpu.device_count()
+        except Exception:
+            count = 0
+        for i in range(count):
+            name = torch.xpu.get_device_name(i) if hasattr(torch.xpu, "get_device_name") else f"XPU {i}"
+            devs[f"xpu:{i}"] = {
+                "name": f"NPU/GPU · {name}",
+                "hardware_name": name,
+                "type": "xpu",
+                "compute_classes": ["npu", "gpu"],
+                "index": i,
                 "available": True,
             }
     if torch.backends.mps.is_available():
@@ -121,10 +143,14 @@ def _available_devices() -> dict:
 
 def _default_device_key() -> str:
     """Best available compute target for this host."""
-    if torch.backends.mps.is_available():
-        return "mps"
-    if torch.cuda.is_available():
+    devs = _available_devices()
+    npu_keys = [k for k, v in devs.items() if "npu" in v.get("compute_classes", [])]
+    if npu_keys:
+        return npu_keys[0]
+    if any(k.startswith("cuda:") for k in devs):
         return "cuda:0"
+    if "mps" in devs:
+        return "mps"
     return "cpu"
 
 
@@ -136,6 +162,8 @@ def _resolve(requested: str) -> torch.device:
         raise ValueError(f"Device '{requested}' unavailable. Options: {list(avail)}")
     if requested == "mps":
         return torch.device("mps")
+    if requested.startswith("xpu:"):
+        return torch.device(requested)
     return torch.device(requested)
 
 
@@ -348,6 +376,7 @@ async def root():
 @app.get("/health")
 async def health():
     devs = _available_devices()
+    accelerators = {k: v for k, v in devs.items() if k != "cpu"}
     return {
         "status":          "ok",
         "primary_device":  _default_device_key(),
@@ -355,12 +384,14 @@ async def health():
         "loaded_models":   list(MODELS.keys()),
         "cache_entries":   len(CACHE),
         "torch_version":   torch.__version__,
-        "cuda_available":  torch.cuda.is_available(),
+        "cuda_available":  any(k.startswith("cuda:") for k in devs),
+        "npu_available":   any("npu" in d.get("compute_classes", []) for d in devs.values()),
+        "acceleration_ok": bool(accelerators),
         "system": {
             "os": platform.platform(),
             "machine": platform.machine(),
             "cpu": devs["cpu"]["hardware_name"],
-            "accelerators": [d["name"] for k, d in devs.items() if k != "cpu"],
+            "accelerators": [d["name"] for d in accelerators.values()],
         },
     }
 
