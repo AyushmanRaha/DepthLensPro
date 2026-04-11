@@ -108,12 +108,19 @@ def _available_devices() -> dict:
     return devs
 
 
+def _default_device_key() -> str:
+    """Best available compute target for this host."""
+    if torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda:0"
+    return "cpu"
+
+
 def _resolve(requested: str) -> torch.device:
     avail = _available_devices()
     if requested == "auto":
-        if torch.cuda.is_available():   return torch.device("cuda:0")
-        if torch.backends.mps.is_available(): return torch.device("mps")
-        return torch.device("cpu")
+        return torch.device(_default_device_key())
     if requested not in avail:
         raise ValueError(f"Device '{requested}' unavailable. Options: {list(avail)}")
     if requested == "mps":
@@ -332,7 +339,7 @@ async def health():
     devs = _available_devices()
     return {
         "status":          "ok",
-        "primary_device":  "cuda:0" if torch.cuda.is_available() else "cpu",
+        "primary_device":  _default_device_key(),
         "devices":         devs,
         "loaded_models":   list(MODELS.keys()),
         "cache_entries":   len(CACHE),
