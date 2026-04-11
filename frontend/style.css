@@ -563,78 +563,122 @@ a      { color: var(--accent); }
 @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(18px); } }
 
 /* ── Lightbox ───────────────────────────────────────────── */
-/* Backdrop is the full-screen scroll container */
 .lightbox-backdrop {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(0,0,0,.82);
-  backdrop-filter: blur(8px);
-  overflow-y: auto;
+  background:
+    radial-gradient(circle at 16% 14%, rgba(0,200,255,.09), transparent 42%),
+    radial-gradient(circle at 84% 86%, rgba(123,92,248,.10), transparent 40%),
+    rgba(3,8,14,.85);
+  backdrop-filter: blur(12px);
+  overflow: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(.6rem, 2.2vh, 1.5rem);
-  animation: fadeUp .22s ease;
+  display: grid;
+  place-items: center;
+  padding: clamp(.65rem, 2.6vw, 1.75rem);
+  opacity: 0;
+  transition: opacity .3s ease;
 }
 .lightbox-backdrop[hidden] { display: none !important; }
+.lightbox-backdrop.is-open { opacity: 1; }
 
-/* Lightbox panel — normal block that grows with content */
+.lightbox-frame {
+  width: min(1320px, 100%);
+  min-height: min(780px, calc(100dvh - 2 * clamp(.65rem, 2.6vw, 1.75rem)));
+  display: grid;
+  align-items: center;
+}
+
 .lightbox {
   position: relative;
-  width: min(1160px, 100%);
-  max-height: calc(100dvh - 2 * clamp(.6rem, 2.2vh, 1.5rem));
-  margin: auto;
-  background: var(--bg-card); border: 1px solid var(--border-hi);
+  width: 100%;
+  height: min(820px, calc(100dvh - 2 * clamp(.65rem, 2.6vw, 1.75rem)));
+  max-height: calc(100dvh - 2 * clamp(.65rem, 2.6vw, 1.75rem));
+  background: linear-gradient(180deg, rgba(16,30,46,.98), rgba(8,16,27,.98));
+  border: 1px solid var(--border-hi);
   border-radius: var(--r-lg);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: .9rem;
-  padding: 1.1rem; box-shadow: 0 24px 80px rgba(0,0,0,.7);
-  flex-shrink: 0;
+  gap: .95rem;
+  padding: clamp(.85rem, 1.4vw, 1.2rem);
+  box-shadow: 0 28px 95px rgba(0,0,0,.72);
   overflow: hidden;
+  transform: translateY(26px) scale(.975);
+  opacity: 0;
+  transition: transform .44s cubic-bezier(.22,1,.36,1), opacity .34s ease;
+}
+.lightbox-backdrop.is-open .lightbox {
+  transform: translateY(0) scale(1);
+  opacity: 1;
 }
 
 .lightbox-head {
-  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
-  position: sticky; top: 0; z-index: 1;
-  background: var(--bg-card);
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-  padding-bottom: .5rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+  background: linear-gradient(180deg, rgba(7,13,23,.65), rgba(7,13,23,.25));
+  border-radius: calc(var(--r-lg) - 4px);
   border-bottom: 1px solid var(--border);
-  margin: -.1rem -.1rem 0;
-  padding: .6rem .1rem .5rem;
+  padding: .68rem .7rem .6rem;
+}
+.lightbox-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: .16rem;
+  min-width: 0;
 }
 .lightbox-title {
-  font-family: var(--ff-display); font-size: .95rem; font-weight: 700;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);
+  font-family: var(--ff-display);
+  font-size: clamp(.92rem, 1.1vw, 1.08rem);
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.lightbox-subtitle {
+  font-family: var(--ff-mono);
+  font-size: .62rem;
+  color: var(--text-dim);
+  letter-spacing: .03em;
 }
 .lightbox-close {
-  background: rgba(255,255,255,.07); border: 1px solid var(--border);
+  background: rgba(255,255,255,.07); border: 1px solid var(--border-hi);
   color: var(--text-muted); width: 30px; height: 30px;
   border-radius: 50%; font-size: .8rem;
   display: flex; align-items: center; justify-content: center;
-  transition: var(--t); flex-shrink: 0;
+  transition: transform var(--t), background var(--t), border-color var(--t), color var(--t);
+  flex-shrink: 0;
 }
-.lightbox-close:hover { background: rgba(255,77,77,.2); border-color: var(--error); color: var(--error); }
+.lightbox-close:hover {
+  background: rgba(255,77,77,.2); border-color: var(--error); color: var(--error);
+  transform: rotate(90deg);
+}
 
 .lightbox-body {
   display: grid;
-  grid-template-columns: minmax(320px, 1.2fr) minmax(270px, .8fr);
-  gap: .85rem;
+  grid-template-columns: minmax(340px, 1.25fr) minmax(300px, .75fr);
+  gap: .95rem;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   align-items: start;
 }
 
 .lightbox-preview-card,
 .lightbox-metrics-card {
-  background: var(--bg-surface);
+  background: linear-gradient(180deg, rgba(12,21,33,.95), rgba(8,15,25,.95));
   border: 1px solid var(--border);
   border-radius: var(--r);
-  padding: .65rem;
+  padding: .72rem;
   min-height: 0;
   max-height: 100%;
+  transition: border-color var(--t), box-shadow var(--t);
+}
+
+.lightbox-preview-card:hover,
+.lightbox-metrics-card:hover {
+  border-color: var(--border-hi);
+  box-shadow: inset 0 0 0 1px rgba(0,200,255,.08);
 }
 
 .lightbox-preview-card { display: flex; flex-direction: column; gap: .6rem; }
@@ -666,8 +710,8 @@ a      { color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: var(--r);
   background: #000;
-  min-height: 330px;
-  height: min(60dvh, 560px);
+  min-height: 300px;
+  height: clamp(280px, 47vh, 620px);
   overflow: hidden;
 }
 .lb-preview-stage img {
@@ -697,7 +741,7 @@ a      { color: var(--accent); }
   gap: .5rem;
   overflow-y: auto;
   min-height: 0;
-  padding-right: .2rem;
+  padding-right: .28rem;
 }
 
 .metric-group { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
@@ -756,8 +800,14 @@ a      { color: var(--accent); }
   .header-inner { padding: 0 .85rem; gap: .85rem; }
   .logo-sub, .header-status .status-sub { display: none; }
   .panel { padding: .85rem; }
-  .lightbox-backdrop { padding: .4rem; }
-  .lightbox { border-radius: var(--r); max-height: calc(100dvh - .8rem); padding: .8rem; }
+  .lightbox-backdrop { padding: .45rem; }
+  .lightbox-frame { min-height: auto; }
+  .lightbox {
+    border-radius: var(--r);
+    height: calc(100dvh - .9rem);
+    max-height: calc(100dvh - .9rem);
+    padding: .78rem;
+  }
   .lightbox-body { grid-template-columns: 1fr; overflow-y: auto; }
   .lightbox-metrics { max-height: none; }
   .lb-preview-stage { min-height: 240px; height: min(42dvh, 360px); }

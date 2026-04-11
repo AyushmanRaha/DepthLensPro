@@ -430,44 +430,49 @@ python3 -m http.server 3000
 
   <!-- ─── LIGHTBOX ──────────────────────────────────────────────────── -->
   <div class="lightbox-backdrop" id="lightboxBackdrop" hidden role="dialog" aria-modal="true" aria-label="Depth map detail view">
-    <div class="lightbox" id="lightbox" aria-labelledby="lightboxTitle">
-      <div class="lightbox-head">
-        <p class="lightbox-title" id="lightboxTitle">Depth Inspector</p>
-        <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
-      </div>
+    <div class="lightbox-frame">
+      <div class="lightbox" id="lightbox" aria-labelledby="lightboxTitle">
+        <div class="lightbox-head">
+          <div class="lightbox-title-wrap">
+            <p class="lightbox-title" id="lightboxTitle">Depth Inspector</p>
+            <p class="lightbox-subtitle">Interactive depth blend + full diagnostic metrics</p>
+          </div>
+          <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
+        </div>
 
-      <div class="lightbox-body">
-        <section class="lightbox-preview-card" aria-label="Image preview">
-          <div class="lb-preview-toolbar">
-            <span class="lb-label">Overlay Blend</span>
-            <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
-            <span class="lb-range-value" id="lbRangeValue">50%</span>
-          </div>
-          <div class="lb-preview-stage">
-            <img id="lbOrigImg" alt="Original image" />
-            <img id="lbDepthImg" alt="Depth map" />
-          </div>
-          <div class="lb-preview-legend">
-            <span>Base: Original image</span>
-            <span>Overlay: Depth map</span>
-          </div>
-        </section>
+        <div class="lightbox-body">
+          <section class="lightbox-preview-card" aria-label="Image preview">
+            <div class="lb-preview-toolbar">
+              <span class="lb-label">Overlay Blend</span>
+              <input type="range" id="lbSlider" class="lb-range" min="0" max="100" value="50" aria-label="Blend between original and depth" />
+              <span class="lb-range-value" id="lbRangeValue">50%</span>
+            </div>
+            <div class="lb-preview-stage">
+              <img id="lbOrigImg" alt="Original image" />
+              <img id="lbDepthImg" alt="Depth map" />
+            </div>
+            <div class="lb-preview-legend">
+              <span>Base: Original image</span>
+              <span>Overlay: Depth map</span>
+            </div>
+          </section>
 
-        <section class="lightbox-metrics-card" aria-label="Metrics">
-          <div class="lb-metrics-head">
-            <span class="lb-label">Depth Metrics</span>
-          </div>
-          <div class="lightbox-metrics" id="lightboxMetrics">
-          <!-- Populated by JS -->
-          </div>
-        </section>
-      </div>
+          <section class="lightbox-metrics-card" aria-label="Metrics">
+            <div class="lb-metrics-head">
+              <span class="lb-label">Depth Metrics</span>
+            </div>
+            <div class="lightbox-metrics" id="lightboxMetrics">
+            <!-- Populated by JS -->
+            </div>
+          </section>
+        </div>
 
-      <div class="lightbox-footer">
-        <div class="lb-tags" id="lbTags"></div>
-        <div class="lb-downloads">
-          <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
-          <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
+        <div class="lightbox-footer">
+          <div class="lb-tags" id="lbTags"></div>
+          <div class="lb-downloads">
+            <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
+            <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
+          </div>
         </div>
       </div>
     </div>
