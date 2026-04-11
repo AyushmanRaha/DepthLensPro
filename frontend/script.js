@@ -274,6 +274,7 @@ async function checkHealth() {
     const info    = devs[primary];
     let badge = "CPU";
     if (info?.type === "cuda") badge = `GPU: ${info.name} (${info.memory_gb} GB)`;
+    else if (info?.type === "mps") badge = `Apple ${info.chip} · Neural Engine`;
 
     setStatus("online", "Depth Engine: Online", `PyTorch ${data.torch_version} · ${primary}`, badge);
 
@@ -302,9 +303,12 @@ async function loadDevices(devs) {
   const all = { auto: { name: "Auto (Best Available)", type: "auto" }, ...devs };
   Object.entries(all).forEach(([key, info]) => {
     const isCuda = info.type === "cuda";
-    const icon   = key === "auto" ? "🔀" : isCuda ? "🎮" : "🖥";
-    const sub    = key === "auto" ? "Picks GPU if available, else CPU"
-                 : isCuda ? `CUDA · ${info.memory_gb} GB VRAM` : "System processor";
+    const isMps  = info.type === "mps";
+    const icon   = key === "auto" ? "🔀" : isCuda ? "🎮" : isMps ? "🍎" : "🖥";
+    const sub    = key === "auto"  ? "Picks best: MPS > CUDA > CPU"
+             : isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
+             : isMps  ? `Apple ${info.chip} · Metal Performance Shaders + ANE`
+             : "System processor";
     const saved  = window._savedDevice;
     const checked = (saved && saved === key) || (!saved && key === "auto");
 
