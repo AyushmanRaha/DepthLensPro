@@ -451,6 +451,11 @@ el.fileInput.addEventListener("change", () => { addFiles(el.fileInput.files); el
 el.dropZone.addEventListener("dragover", e=>{ e.preventDefault(); el.dropZone.classList.add("drag-over"); });
 el.dropZone.addEventListener("dragleave", e=>{ if(!el.dropZone.contains(e.relatedTarget)) el.dropZone.classList.remove("drag-over"); });
 el.dropZone.addEventListener("drop", e=>{ e.preventDefault(); el.dropZone.classList.remove("drag-over"); addFiles(e.dataTransfer.files); });
+// Click-to-browse fallback to ensure file picker opens across browsers/layouts
+el.dropZone.addEventListener("click", e=>{
+  if (e.target.closest("#fileInput")) return;
+  el.fileInput.click();
+});
 // Keyboard accessibility
 el.dropZone.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); el.fileInput.click(); } });
 
