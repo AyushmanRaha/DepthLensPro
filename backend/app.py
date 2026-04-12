@@ -1,6 +1,19 @@
 """
-DepthLens Pro — Backend API v3.0
+DepthLens Pro — Backend API v3.1
 FastAPI + PyTorch MiDaS · GPU/CPU selection · Full MDE metric suite
+
+Fixes over v3.0:
+- _available_devices: MPS correctly classified as GPU only (not NPU).
+  Apple Neural Engine is not accessible via PyTorch/MPS.
+- _available_devices: Intel XPU correctly classified as GPU only (not NPU).
+  Intel AI Boost NPU is accessed via OpenVINO, not torch.xpu.
+- _default_device_key: priority is now CUDA > MPS > XPU > CPU.
+  Previously XPU (labelled NPU) incorrectly beat CUDA.
+- MPS availability: guards with both is_built() AND is_available().
+- _load_model: removed redundant second call to _resolve().
+- Lifespan pre-load: warms up on the best available device, not always CPU.
+- _acceleration_checks: NPU entry removed (no PyTorch NPU backend exists);
+  health endpoint now accurately reports what is actually operational.
 """
 
 import time, base64, logging, hashlib, math
@@ -69,7 +82,7 @@ def _get_apple_chip() -> str | None:
             capture_output=True, text=True, timeout=3
         ).stdout.strip()
         if out.startswith("Apple "):
-            return out[6:]          # "M2 Pro", "M3 Max", etc.
+            return out[6:]
     except Exception:
         pass
     try:
@@ -85,81 +98,139 @@ def _get_apple_chip() -> str | None:
         pass
     return None
 
+
+def _mps_available() -> bool:
+    """
+    MPS requires BOTH is_built() (PyTorch compiled with Metal support)
+    AND is_available() (running on macOS ≥ 12.3 with compatible hardware).
+    """
+    return (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_built()
+        and torch.backends.mps.is_available()
+    )
+
+
 def _available_devices() -> dict:
+    """
+    Returns a dict of device-key → device-info for every compute target
+    this process can actually use.
+
+    Classification notes
+    --------------------
+    • CUDA  → GPU   (NVIDIA hardware via CUDA)
+    • MPS   → GPU   (Apple Silicon GPU via Metal Performance Shaders)
+              NOT "npu": the Apple Neural Engine is a separate chip and is
+              not accessible through PyTorch/MPS.
+    • XPU   → GPU   (Intel Arc / Xe iGPU via torch.xpu)
+              NOT "npu": Intel's AI Boost NPU is accessed via OpenVINO,
+              not torch.xpu. Labelling XPU as NPU was factually wrong and
+              caused XPU to be incorrectly prioritised over CUDA.
+    """
     cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or "System CPU"
-    devs = {"cpu": {
-        "name": f"CPU · {cpu_name}",
-        "hardware_name": cpu_name,
-        "type": "cpu",
-        "compute_classes": ["cpu"],
-        "available": True,
-    }}
-    cuda_ok = False
+    devs = {
+        "cpu": {
+            "name": f"CPU · {cpu_name}",
+            "hardware_name": cpu_name,
+            "type": "cpu",
+            "compute_classes": ["cpu"],
+            "available": True,
+        }
+    }
+
+    # ── NVIDIA CUDA ──────────────────────────────────────────────────────────
     if torch.cuda.is_available():
-        try:
-            _ = torch.cuda.device_count()
-            cuda_ok = True
-        except Exception:
-            cuda_ok = False
-    if cuda_ok:
         for i in range(torch.cuda.device_count()):
             p = torch.cuda.get_device_properties(i)
             devs[f"cuda:{i}"] = {
-                "name":      f"GPU · {p.name}",
-                "hardware_name": p.name,
-                "type":      "cuda",
+                "name":            f"GPU · {p.name}",
+                "hardware_name":   p.name,
+                "type":            "cuda",
                 "compute_classes": ["gpu"],
-                "index":     i,
-                "memory_gb": round(p.total_memory / 1024**3, 1),
-                "available": True,
+                "index":           i,
+                "memory_gb":       round(p.total_memory / 1024**3, 1),
+                "available":       True,
             }
+
+    # ── Intel XPU (Arc / Xe iGPU) ───────────────────────────────────────────
+    # torch.xpu targets Intel GPU silicon, NOT Intel's AI Boost NPU.
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         try:
             count = torch.xpu.device_count()
         except Exception:
             count = 0
         for i in range(count):
-            name = torch.xpu.get_device_name(i) if hasattr(torch.xpu, "get_device_name") else f"XPU {i}"
+            name = (
+                torch.xpu.get_device_name(i)
+                if hasattr(torch.xpu, "get_device_name")
+                else f"Intel XPU {i}"
+            )
             devs[f"xpu:{i}"] = {
-                "name": f"NPU/GPU · {name}",
-                "hardware_name": name,
-                "type": "xpu",
-                "compute_classes": ["npu", "gpu"],
-                "index": i,
-                "available": True,
+                "name":            f"GPU · {name}",
+                "hardware_name":   name,
+                "type":            "xpu",
+                "compute_classes": ["gpu"],   # XPU is a GPU, not an NPU
+                "index":           i,
+                "available":       True,
             }
-    if torch.backends.mps.is_available():
+
+    # ── Apple MPS (Metal Performance Shaders on Apple Silicon GPU) ───────────
+    # MPS uses the GPU cores of Apple Silicon, NOT the Apple Neural Engine.
+    if _mps_available():
         chip = _get_apple_chip() or "Apple Silicon"
         devs["mps"] = {
-            "name":       f"GPU/NPU · Apple {chip}",
-            "hardware_name": f"Apple {chip}",
-            "type":       "mps",
-            "compute_classes": ["gpu", "npu"],
-            "chip":       chip,
-            "available":  True,
+            "name":            f"GPU · Apple {chip} (Metal)",
+            "hardware_name":   f"Apple {chip}",
+            "type":            "mps",
+            "compute_classes": ["gpu"],   # GPU via Metal, not NPU
+            "chip":            chip,
+            "available":       True,
         }
+
     return devs
 
 
 def _default_device_key() -> str:
-    """Best available compute target for this host."""
+    """
+    Pick the best available compute target for deep-learning inference.
+
+    Priority: CUDA > MPS > XPU > CPU
+
+    Rationale:
+    • CUDA has the most mature PyTorch optimisation and broadest op support.
+    • MPS (Apple Silicon GPU) is second-best; well-supported since PyTorch 2.x.
+    • Intel XPU (Arc/Xe) has growing but still more limited PyTorch op coverage.
+    • CPU is the universal fallback.
+
+    Note: there is no PyTorch-accessible NPU backend — Apple ANE and Intel
+    AI Boost are not exposed via torch.device, so they are not considered here.
+    """
     devs = _available_devices()
-    npu_keys = [k for k, v in devs.items() if "npu" in v.get("compute_classes", [])]
-    if npu_keys:
-        return npu_keys[0]
     if any(k.startswith("cuda:") for k in devs):
         return "cuda:0"
     if "mps" in devs:
         return "mps"
+    # XPU: prefer the first Intel GPU if present
+    xpu_keys = [k for k in devs if k.startswith("xpu:")]
+    if xpu_keys:
+        return xpu_keys[0]
     return "cpu"
+
+
 def _acceleration_checks(devs: dict) -> dict:
-    """Run tiny tensor ops on available accelerators to verify runtime usability."""
+    """
+    Run tiny tensor ops on each available accelerator to verify runtime
+    usability beyond mere availability flags.
+
+    Returns only what actually exists — no fake 'npu' entry since no
+    PyTorch NPU backend is available on any current platform.
+    """
     checks = {}
 
     def _probe(device_key: str, label: str):
         try:
             dev = torch.device(device_key)
-            x = torch.randn((8, 8), device=dev)
+            x = torch.randn((16, 16), device=dev)
             y = torch.mm(x, x.transpose(0, 1))
             _ = float(y.mean().detach().cpu().item())
             checks[label] = {"available": True, "operational": True}
@@ -183,23 +254,16 @@ def _acceleration_checks(devs: dict) -> dict:
     else:
         checks["xpu"] = {"available": False, "operational": False}
 
-    checks["npu"] = {
-        "available": any("npu" in d.get("compute_classes", []) for d in devs.values()),
-        "operational": checks["xpu"]["operational"] or checks["mps"]["operational"],
-    }
     return checks
 
 
 def _resolve(requested: str) -> torch.device:
+    """Validate and convert a device string to a torch.device."""
     avail = _available_devices()
     if requested == "auto":
         return torch.device(_default_device_key())
     if requested not in avail:
         raise ValueError(f"Device '{requested}' unavailable. Options: {list(avail)}")
-    if requested == "mps":
-        return torch.device("mps")
-    if requested.startswith("xpu:"):
-        return torch.device(requested)
     return torch.device(requested)
 
 
@@ -207,18 +271,27 @@ def _resolve(requested: str) -> torch.device:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     devs = _available_devices()
-    log.info(f"🚀 DepthLens Pro — devices: {list(devs)}")
+    best = _default_device_key()
+    log.info(f"🚀 DepthLens Pro v3.1 — devices: {list(devs)}  best: {best}")
     try:
-        _load_model("MiDaS_small", "cpu")
-        log.info("✅ MiDaS_small pre-loaded on CPU")
+        # Pre-load MiDaS_small on the best available device so the first
+        # inference request doesn't pay the cold-start penalty.
+        _load_model("MiDaS_small", best)
+        log.info(f"✅ MiDaS_small pre-loaded on {best}")
     except Exception as e:
-        log.warning(f"⚠️  Pre-load skipped: {e}")
+        log.warning(f"⚠️  Pre-load on {best} skipped: {e}")
+        # Fallback: at least warm up on CPU
+        try:
+            _load_model("MiDaS_small", "cpu")
+            log.info("✅ MiDaS_small pre-loaded on CPU (fallback)")
+        except Exception as e2:
+            log.warning(f"⚠️  CPU pre-load also skipped: {e2}")
     yield
     log.info("🛑 Shutting down")
     MODELS.clear(); TRANSFORMS.clear(); CACHE.clear()
 
 
-app = FastAPI(title="DepthLens Pro API", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="DepthLens Pro API", version="3.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True,
@@ -228,18 +301,27 @@ app.add_middleware(
 
 # ── Model loading ──────────────────────────────────────────────────────────────
 def _load_model(model_name: str, device_str: str):
+    """
+    Load (or return cached) a MiDaS model on the specified device.
+
+    `device_str` must already be a resolved device key (e.g. 'cuda:0', 'mps',
+    'cpu') — NOT 'auto'. Callers are responsible for resolving 'auto' before
+    calling this function. This avoids a redundant second call to _resolve().
+    """
     key = f"{model_name}:{device_str}"
     if key in MODELS:
         return MODELS[key], TRANSFORMS[model_name]
     if model_name not in SUPPORTED_MODELS:
         raise ValueError(f"Unknown model: {model_name!r}")
 
-    device = _resolve(device_str)
+    device = torch.device(device_str)   # already validated — no need to _resolve() again
     log.info(f"Loading '{model_name}' → {device} …")
     model = torch.hub.load("intel-isl/MiDaS", model_name, trust_repo=True)
     model.to(device).eval()
+
+    # MPS requires float32; mixed-precision is not yet fully supported
     if device.type == "mps":
-        model = model.float()   # MPS requires float32
+        model = model.float()
 
     if model_name not in TRANSFORMS:
         mt = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
@@ -311,56 +393,45 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict:
     D  = depth.astype(np.float64)
     flat = D.flatten()
 
-    # Basic stats
     d_min, d_max = float(flat.min()), float(flat.max())
     d_mean = float(flat.mean())
     d_std  = float(flat.std())
     d_med  = float(np.median(flat))
 
-    # Dynamic range
     nz  = flat[flat > 1e-6]
     dyn = float(np.log2(nz.max() / nz.min())) if len(nz) > 0 else 0.0
 
-    # Entropy
     hist, _ = np.histogram(flat, bins=256, range=(0.0, 1.0))
     hp      = hist / hist.sum()
     entropy = float(-np.sum(hp[hp > 0] * np.log2(hp[hp > 0])))
-
-    # Coverage
     coverage = float((hp >= hp.max() * 0.01).mean())
 
-    # Gradient / Edge
     D32 = D.astype(np.float32)
     gx  = cv2.Sobel(D32, cv2.CV_64F, 1, 0, ksize=3)
     gy  = cv2.Sobel(D32, cv2.CV_64F, 0, 1, ksize=3)
     gmag = np.sqrt(gx**2 + gy**2)
     grad_mean   = float(gmag.mean())
     grad_std    = float(gmag.std())
-    grad_error  = grad_mean          # proxy: high = more edge detail
+    grad_error  = grad_mean
     edge_thresh = gmag.mean() + gmag.std()
     edge_density = float((gmag > edge_thresh).mean())
 
-    # SSIM vs. grayscale input
     gray_img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float64) / 255.0
     ssim_val = _ssim(gray_img, D)
 
-    # Error vs. mean (intra-map, no GT needed)
     pseudo = np.full_like(D, d_mean)
     eps    = 1e-6
     mae    = float(np.abs(D - pseudo).mean())
     rmse   = float(np.sqrt(np.mean((D - pseudo)**2)))
     log_rmse = float(np.sqrt(np.mean((np.log(D + eps) - np.log(pseudo + eps))**2)))
 
-    # SILog
     log_d = np.log(D + eps)
     ld_mean = log_d.mean()
     silog = float(np.sqrt(np.mean((log_d - ld_mean)**2)) * 100)
 
-    # PSNR
     mse_v = float(np.mean((D - d_mean)**2))
     psnr  = float(10 * math.log10(1.0 / (mse_v + 1e-10))) if mse_v > 1e-10 else 99.0
 
-    # Histogram
     h32, edges = np.histogram(flat, bins=32, range=(0.0, 1.0))
 
     return {
@@ -386,14 +457,13 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict:
         "gradient_error": round(grad_error,    4),
         "edge_density":   round(edge_density,  4),
 
-        # GT-required — not computable without ground truth
-        "abs_rel":             None,
-        "sq_rel":              None,
-        "delta_1":             None,
-        "delta_2":             None,
-        "delta_3":             None,
-        "lpips":               None,
-        "ordinal_error":       None,
+        "abs_rel":              None,
+        "sq_rel":               None,
+        "delta_1":              None,
+        "delta_2":              None,
+        "delta_3":              None,
+        "lpips":                None,
+        "ordinal_error":        None,
         "surface_normal_error": None,
 
         "histogram": {
@@ -406,31 +476,38 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict:
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"service": "DepthLens Pro API", "version": "3.0.0"}
+    return {"service": "DepthLens Pro API", "version": "3.1.0"}
 
 
 @app.get("/health")
 async def health():
-    devs = _available_devices()
-    accelerators = {k: v for k, v in devs.items() if k != "cpu"}
-    accel_checks = _acceleration_checks(devs)
-    accel_operational = any(c.get("operational") for c in accel_checks.values() if c.get("available"))
+    devs  = _available_devices()
+    best  = _default_device_key()
+    accel = {k: v for k, v in devs.items() if k != "cpu"}
+    checks = _acceleration_checks(devs)
+
+    # acceleration_ok: at least one non-CPU device is operational
+    accel_ok = any(c.get("operational") for c in checks.values() if c.get("available"))
+
     return {
         "status":          "ok",
-        "primary_device":  _default_device_key(),
+        "version":         "3.1.0",
+        "primary_device":  best,
         "devices":         devs,
         "loaded_models":   list(MODELS.keys()),
         "cache_entries":   len(CACHE),
         "torch_version":   torch.__version__,
         "cuda_available":  any(k.startswith("cuda:") for k in devs),
-        "npu_available":   any("npu" in d.get("compute_classes", []) for d in devs.values()),
-        "acceleration_ok": bool(accelerators) and accel_operational,
-        "acceleration_checks": accel_checks,
+        "mps_available":   "mps" in devs,
+        "xpu_available":   any(k.startswith("xpu:") for k in devs),
+        # 'npu_available' removed — no PyTorch NPU backend exists on any platform
+        "acceleration_ok": bool(accel) and accel_ok,
+        "acceleration_checks": checks,
         "system": {
-            "os": platform.platform(),
-            "machine": platform.machine(),
-            "cpu": devs["cpu"]["hardware_name"],
-            "accelerators": [d["name"] for d in accelerators.values()],
+            "os":           platform.platform(),
+            "machine":      platform.machine(),
+            "cpu":          devs["cpu"]["hardware_name"],
+            "accelerators": [d["name"] for d in accel.values()],
         },
     }
 
@@ -473,6 +550,7 @@ async def estimate(
     if len(raw) / 1024**2 > MAX_SIZE_MB:
         raise HTTPException(413, f"File exceeds {MAX_SIZE_MB} MB limit")
 
+    # Resolve 'auto' once here; _load_model receives the concrete device string
     resolved = str(_resolve(device))
     ck = _fhash(raw, model, colormap, resolved)
     if ck in CACHE:
