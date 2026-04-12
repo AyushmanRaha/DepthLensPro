@@ -152,6 +152,42 @@ def _default_device_key() -> str:
     if "mps" in devs:
         return "mps"
     return "cpu"
+def _acceleration_checks(devs: dict) -> dict:
+    """Run tiny tensor ops on available accelerators to verify runtime usability."""
+    checks = {}
+
+    def _probe(device_key: str, label: str):
+        try:
+            dev = torch.device(device_key)
+            x = torch.randn((8, 8), device=dev)
+            y = torch.mm(x, x.transpose(0, 1))
+            _ = float(y.mean().detach().cpu().item())
+            checks[label] = {"available": True, "operational": True}
+        except Exception as e:
+            checks[label] = {"available": True, "operational": False, "error": str(e)}
+
+    cuda_keys = [k for k in devs if k.startswith("cuda:")]
+    if cuda_keys:
+        _probe(cuda_keys[0], "cuda")
+    else:
+        checks["cuda"] = {"available": False, "operational": False}
+
+    if "mps" in devs:
+        _probe("mps", "mps")
+    else:
+        checks["mps"] = {"available": False, "operational": False}
+
+    xpu_keys = [k for k in devs if k.startswith("xpu:")]
+    if xpu_keys:
+        _probe(xpu_keys[0], "xpu")
+    else:
+        checks["xpu"] = {"available": False, "operational": False}
+
+    checks["npu"] = {
+        "available": any("npu" in d.get("compute_classes", []) for d in devs.values()),
+        "operational": checks["xpu"]["operational"] or checks["mps"]["operational"],
+    }
+    return checks
 
 
 def _resolve(requested: str) -> torch.device:
@@ -377,6 +413,8 @@ async def root():
 async def health():
     devs = _available_devices()
     accelerators = {k: v for k, v in devs.items() if k != "cpu"}
+    accel_checks = _acceleration_checks(devs)
+    accel_operational = any(c.get("operational") for c in accel_checks.values() if c.get("available"))
     return {
         "status":          "ok",
         "primary_device":  _default_device_key(),
@@ -386,7 +424,8 @@ async def health():
         "torch_version":   torch.__version__,
         "cuda_available":  any(k.startswith("cuda:") for k in devs),
         "npu_available":   any("npu" in d.get("compute_classes", []) for d in devs.values()),
-        "acceleration_ok": bool(accelerators),
+        "acceleration_ok": bool(accelerators) and accel_operational,
+        "acceleration_checks": accel_checks,
         "system": {
             "os": platform.platform(),
             "machine": platform.machine(),
