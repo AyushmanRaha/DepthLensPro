@@ -363,6 +363,33 @@ function setStatus(cls, label, sub, deviceText) {
   }
 }
 
+function classifyKinds(info = {}) {
+  const set = new Set((Array.isArray(info.compute_classes) ? info.compute_classes : [info.type || "cpu"]).map(v => String(v).toLowerCase()));
+  if (set.has("cuda") || set.has("mps") || set.has("xpu")) set.add("gpu");
+  if (set.has("ane")) set.add("npu");
+  return [...set];
+}
+
+function matchesDeviceFilter(kinds, filter) {
+  if (filter === "all") return true;
+  if (filter === "gpu") return kinds.includes("gpu") || kinds.includes("cuda") || kinds.includes("mps") || kinds.includes("xpu");
+  if (filter === "npu") return kinds.includes("npu") || kinds.includes("ane");
+  return kinds.includes(filter);
+}
+
+function accelerationSummary(data = {}) {
+  const checks = data.acceleration_checks || {};
+  const chips = [];
+  const read = (k, label) => {
+    const c = checks[k];
+    if (!c?.available) return `${label}: n/a`;
+    return `${label}: ${c.operational ? "ok" : "fail"}`;
+  };
+  chips.push(read("cuda", "GPU"));
+  chips.push(read("npu", "NPU"));
+  return chips.join(" · ");
+}
+
 async function checkHealth() {
   setStatus("connecting", "Connecting…", "localhost:8000");
   try {
@@ -379,12 +406,18 @@ async function checkHealth() {
     let badge = "CPU";
     if (info?.type === "cuda") badge = `GPU: ${info.name} (${info.memory_gb} GB)`;
     else if (info?.type === "mps") badge = `Apple ${info.chip} · Neural Engine`;
+    else if (info?.type === "xpu") badge = `NPU/GPU: ${info.name || primary}`;
 
-    setStatus("online", "Depth Engine: Online", `PyTorch ${data.torch_version} · ${primary}`, badge);
+    const accelText = accelerationSummary(data);
+    setStatus("online", "Depth Engine: Online", `PyTorch ${data.torch_version} · ${primary} · ${accelText}`, badge);
 
     // Populate device selector
     await loadDevices(devs, primary);
-    updateDeviceInfoBanner(badge);
+    updateDeviceInfoBanner(`${badge} · ${accelText}`);
+
+    if (!data.acceleration_ok) {
+      toast("Acceleration check warning: one or more accelerator backends are unavailable.", "warning");
+    }
     return true;
   } catch {
     setStatus("offline", "Depth Engine: Offline", "Run: uvicorn app:app --reload");
@@ -425,9 +458,7 @@ async function loadDevices(devs, primaryFromHealth = null) {
   const withKinds = Object.entries(devs).map(([key, info]) => ({
     key,
     info,
-    kinds: Array.isArray(info.compute_classes)
-      ? info.compute_classes.map(k => String(k).toLowerCase())
-      : [String(info.type || "cpu").toLowerCase()],
+    kinds: classifyKinds(info),
   }));
 
   const kindsPresent = {
@@ -497,13 +528,16 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs) {
   el.deviceSelector.appendChild(auto);
 
   deviceEntries.forEach(({ key, info, kinds }) => {
-    if (state.deviceFilter !== "all" && !kinds.includes(state.deviceFilter)) return;
+    if (!matchesDeviceFilter(kinds, state.deviceFilter)) return;
     const isCuda = info.type === "cuda";
     const isMps  = info.type === "mps";
-    const icon   = isCuda ? "▦" : isMps ? "⬢" : "◻";
-    const sub    = isCuda ? `CUDA · ${info.memory_gb} GB VRAM`
-             : isMps  ? `Apple ${info.chip || "Silicon"} · Metal + Neural Engine`
-             : (info.hardware_name || "System processor");
+    const isXpu  = info.type === "xpu";
+    const icon   = isCuda ? "▦" : isMps ? "⬢" : isXpu ? "⬣" : "◻";
+    const classLabel = [kinds.includes("gpu") ? "GPU" : null, kinds.includes("npu") ? "NPU" : null, kinds.includes("cpu") ? "CPU" : null].filter(Boolean).join("/");
+    const sub    = isCuda ? `CUDA · ${info.memory_gb} GB VRAM · ${classLabel}`
+             : isMps  ? `Apple ${info.chip || "Silicon"} · Metal + Neural Engine · ${classLabel}`
+             : isXpu  ? `XPU backend · ${classLabel}`
+             : `${info.hardware_name || "System processor"} · ${classLabel || "CPU"}`;
     const checked = saved === key;
 
     const lbl = document.createElement("label");
@@ -1003,6 +1037,21 @@ function updateBlendPreview() {
   if (el.lbRangeValue) el.lbRangeValue.textContent = `${Math.round(v * 100)}%`;
 }
 
+let lightboxCloseTimer = null;
+let bodyScrollY = 0;
+
+function lockBodyScroll() {
+  bodyScrollY = window.scrollY || window.pageYOffset || 0;
+  document.body.classList.add("modal-open");
+  document.body.style.top = `-${bodyScrollY}px`;
+}
+
+function unlockBodyScroll() {
+  document.body.classList.remove("modal-open");
+  document.body.style.top = "";
+  window.scrollTo(0, bodyScrollY);
+}
+
 function openLightbox(r) {
   state.lb.current = r;
   el.lbOrigImg.src  = r.originalSrc || "";
@@ -1021,22 +1070,48 @@ function openLightbox(r) {
 
   renderMetricsAccordion(r.metrics);
 
-  el.lightboxBackdrop.classList.remove("is-open");
+  if (lightboxCloseTimer) {
+    clearTimeout(lightboxCloseTimer);
+    lightboxCloseTimer = null;
+  }
+
   el.lightboxBackdrop.hidden = false;
-  requestAnimationFrame(() => el.lightboxBackdrop.classList.add("is-open"));
-  el.lightboxBackdrop.scrollTop = 0;
-  document.body.style.overflow = "hidden";
+  el.lightboxBackdrop.classList.remove("is-closing", "is-open");
+  el.lightboxBackdrop.classList.add("is-mounted");
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      el.lightboxBackdrop.classList.add("is-open");
+    });
+  });
+
+  el.lightboxMetrics.scrollTop = 0;
+  lockBodyScroll();
   el.lightboxClose.focus();
 }
 
 function closeLightbox() {
-  if (el.lightboxBackdrop.hidden) return;
+  if (el.lightboxBackdrop.hidden || el.lightboxBackdrop.classList.contains("is-closing")) return;
   el.lightboxBackdrop.classList.remove("is-open");
-  setTimeout(() => {
+  el.lightboxBackdrop.classList.add("is-closing");
+
+  const finalize = () => {
     el.lightboxBackdrop.hidden = true;
-  }, 280);
-  document.body.style.overflow = "";
-  state.lb.current = null;
+    el.lightboxBackdrop.classList.remove("is-mounted", "is-closing");
+    unlockBodyScroll();
+    state.lb.current = null;
+  };
+
+  const onDone = (ev) => {
+    if (ev.target !== el.lightboxBackdrop) return;
+    el.lightboxBackdrop.removeEventListener("transitionend", onDone);
+    finalize();
+  };
+  el.lightboxBackdrop.addEventListener("transitionend", onDone);
+  lightboxCloseTimer = setTimeout(() => {
+    el.lightboxBackdrop.removeEventListener("transitionend", onDone);
+    finalize();
+  }, 420);
 }
 
 el.lightboxClose.addEventListener("click", closeLightbox);
