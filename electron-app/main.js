@@ -1,160 +1,99 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
-const path  = require('path');
-const { spawn, exec } = require('child_process');
-const http  = require('http');
-const fs    = require('fs');
-const log   = require('electron-log');
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const path = require("path");
+const { spawn, exec } = require("child_process");
+const http = require("http");
+const fs = require("fs");
+const log = require("electron-log");
 
-// Configure logging
-log.transports.file.level = 'info';
-log.info('DepthLens Pro starting...');
+log.transports.file.level = "info";
+log.info("DepthLens Pro starting...");
 
 // ── Constants ──────────────────────────────────────────────
-const BACKEND_PORT = 8765;   // use a non-standard port to avoid conflicts
-const BACKEND_URL  = `http://127.0.0.1:${BACKEND_PORT}`;
-const isDev        = process.env.NODE_ENV === 'development' || !app.isPackaged;
+const BACKEND_PORT = 8765; // Avoid collisions with common local development ports.
+const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
+const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 // ── State ──────────────────────────────────────────────────
-let mainWindow    = null;
-let splashWindow  = null;
+let mainWindow = null;
+let splashWindow = null;
 let backendProcess = null;
-let backendReady   = false;
+let backendReady = false;
 
-// ── Resource path helper ───────────────────────────────────
-// In development: paths are relative to project root
-// In production:  files are in app.getPath('exe')/../Resources/
+// ── Resource paths ─────────────────────────────────────────
+// Development uses repository-relative paths; packaged builds use resources.
 function getResourcePath(...parts) {
   if (isDev) {
-    return path.join(__dirname, '..', ...parts);
+    return path.join(__dirname, "..", ...parts);
   }
   return path.join(process.resourcesPath, ...parts);
 }
 
 // ── Python executable detection ────────────────────────────
-// On M1 Mac with a venv, the python is inside the venv
-// We ship a venv inside the app bundle for production
-// ── Python executable detection ────────────────────────────
-// On M1 Mac with a venv, the python is inside the venv
-// We ship a venv inside the app bundle for production
+// Both development and packaged builds execute the bundled virtualenv.
 function getPythonPath() {
   if (isDev) {
-    // Dynamically resolves to the venv in your project root during development
-    return path.join(__dirname, '..', 'venv', 'bin', 'python3');
+    return path.join(__dirname, "..", "venv", "bin", "python3");
   }
-  // Dynamically resolves to the packaged resources folder in production
-  return path.join(process.resourcesPath, 'venv', 'bin', 'python3');
+  return path.join(process.resourcesPath, "venv", "bin", "python3");
 }
 
 // ── Start FastAPI Backend ──────────────────────────────────
 function startBackend() {
   return new Promise((resolve, reject) => {
-    // USE DYNAMIC PATHS INSTEAD OF HARDCODED USER DIRECTORIES
-    const pythonPath  = getPythonPath();
-    const backendDir  = getResourcePath('backend');
-    const backendScript = path.join(backendDir, 'app.py');
+    const pythonPath = getPythonPath();
+    const backendDir = getResourcePath("backend");
+    const backendScript = path.join(backendDir, "app.py");
 
     log.info(`Starting backend: ${pythonPath} at ${backendDir}`);
 
-    // We run uvicorn programmatically via python -m uvicorn
-    backendProcess = spawn(pythonPath, [
-      '-m', 'uvicorn',
-      'app:app',
-      '--host', '127.0.0.1',
-      '--port', String(BACKEND_PORT),
-      '--workers', '1'
-    ], {
-      cwd: backendDir, 
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
+    // Launch Uvicorn through the same Python runtime that owns dependencies.
+    backendProcess = spawn(
+      pythonPath,
+      [
+        "-m",
+        "uvicorn",
+        "app:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(BACKEND_PORT),
+        "--workers",
+        "1",
+      ],
+      {
+        cwd: backendDir,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
 
-    backendProcess.stdout.on('data', (data) => {
+    backendProcess.stdout.on("data", (data) => {
       const msg = data.toString();
       log.info(`[Backend] ${msg.trim()}`);
-      if (msg.includes('Application startup complete')) {
+      if (msg.includes("Application startup complete")) {
         backendReady = true;
         resolve(BACKEND_URL);
       }
     });
 
-    backendProcess.stderr.on('data', (data) => {
+    backendProcess.stderr.on("data", (data) => {
       log.error(`[Backend Err] ${data.toString().trim()}`);
     });
 
-    backendProcess.on('close', (code) => {
+    backendProcess.on("close", (code) => {
       log.info(`Backend exited with code ${code}`);
       backendReady = false;
     });
 
-    // Timeout fallback just in case stdout parsing fails
+    // Keep startup resilient when Uvicorn logs readiness on stderr.
     setTimeout(() => {
       if (!backendReady) {
-        log.warn('Backend startup timeout, resolving anyway.');
+        log.warn("Backend startup timeout, resolving anyway.");
         backendReady = true;
         resolve(BACKEND_URL);
       }
     }, 15000);
   });
 }
-// function getPythonPath() {
-//   return '/Users/user/Downloads/DepthLensPro/venv/bin/python3';
-// }
-
-// // ── Start FastAPI Backend ──────────────────────────────────
-// function startBackend() {
-//   return new Promise((resolve, reject) => {
-//     // const pythonPath  = getPythonPath();
-//     // const backendDir  = getResourcePath('backend');
-//     const pythonPath  = '/Users/user/Downloads/DepthLensPro/venv/bin/python3';
-//     const backendDir  = '/Users/user/Downloads/DepthLensPro/backend';
-//     const backendScript = path.join(backendDir, 'app.py');
-
-//     log.info(`Starting backend: ${pythonPath} at ${backendDir}`);
-
-//     // We run uvicorn programmatically via python -m uvicorn
-//     backendProcess = spawn(pythonPath, [
-//       '-m', 'uvicorn',
-//       'app:app',
-//       '--host', '127.0.0.1',
-//       '--port', String(BACKEND_PORT),
-//       '--log-level', 'warning',
-//       '--no-access-log',
-//     ], {
-//       cwd: backendDir,
-//       env: {
-//         ...process.env,
-//         // Tell Python where to find packages if using bundled venv
-//         PYTHONPATH: backendDir,
-//       },
-//     });
-
-//     backendProcess.stdout.on('data', (data) => {
-//       log.info(`[backend] ${data.toString().trim()}`);
-//     });
-
-//     backendProcess.stderr.on('data', (data) => {
-//       const msg = data.toString().trim();
-//       log.warn(`[backend] ${msg}`);
-//       // uvicorn logs startup on stderr — detect ready state
-//       if (msg.includes('Application startup complete')) {
-//         log.info('Backend startup signal detected');
-//       }
-//     });
-
-//     backendProcess.on('error', (err) => {
-//       log.error(`Backend process error: ${err.message}`);
-//       reject(err);
-//     });
-
-//     backendProcess.on('exit', (code) => {
-//       log.warn(`Backend exited with code: ${code}`);
-//       if (!backendReady) reject(new Error(`Backend exited early (code ${code})`));
-//     });
-
-//     // Poll the health endpoint until it responds
-//     pollBackendHealth(30, 800, resolve, reject);
-//   });
-// }
-
 function pollBackendHealth(maxAttempts, intervalMs, resolve, reject) {
   let attempts = 0;
 
@@ -171,8 +110,11 @@ function pollBackendHealth(maxAttempts, intervalMs, resolve, reject) {
       res.resume();
     });
 
-    req.on('error', retry);
-    req.on('timeout', () => { req.destroy(); retry(); });
+    req.on("error", retry);
+    req.on("timeout", () => {
+      req.destroy();
+      retry();
+    });
   };
 
   function retry() {
@@ -183,7 +125,7 @@ function pollBackendHealth(maxAttempts, intervalMs, resolve, reject) {
     setTimeout(check, intervalMs);
   }
 
-  // Start first check after a short delay to give uvicorn time to bind
+  // Delay the first probe until Uvicorn has had a chance to bind the port.
   setTimeout(check, 1200);
 }
 
@@ -199,7 +141,7 @@ function createSplashWindow() {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
 
-  splashWindow.loadFile(path.join(__dirname, 'src', 'splash.html'));
+  splashWindow.loadFile(path.join(__dirname, "src", "splash.html"));
   splashWindow.center();
 }
 
@@ -210,137 +152,130 @@ function createMainWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    show: false,           // shown after backend is ready
-    titleBarStyle: 'hiddenInset',   // native Mac traffic-light buttons
-    vibrancy: 'under-window',       // frosted glass effect on Mac
-    visualEffectState: 'active',
-    backgroundColor: '#070d17',
+    show: false, // Reveal the window only after backend startup completes.
+    titleBarStyle: "hiddenInset",
+    vibrancy: "under-window",
+    visualEffectState: "active",
+    backgroundColor: "#070d17",
     webPreferences: {
-      nodeIntegration: false,        // NEVER true — security
-      contextIsolation: true,        // ALWAYS true — security
-      sandbox: true,                 // extra sandboxing
-      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, "preload.js"),
       webSecurity: true,
     },
   });
 
-  // Load your existing frontend — no changes needed there
-  const frontendPath = getResourcePath('frontend', 'index.html');
+  const frontendPath = getResourcePath("frontend", "index.html");
   mainWindow.loadFile(frontendPath);
 
-  mainWindow.once('ready-to-show', () => {
+  mainWindow.once("ready-to-show", () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.destroy();
     }
     mainWindow.show();
     mainWindow.focus();
-    log.info('Main window shown');
+    log.info("Main window shown");
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 
-  // Open external links in system browser, not Electron
+  // Keep untrusted navigation outside the Electron renderer.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
-    return { action: 'deny' };
+    return { action: "deny" };
   });
 
-  // Dev tools in development only
   if (isDev) {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 }
 
 // ── IPC Handlers ──────────────────────────────────────────
-// These let the frontend call native capabilities safely via preload.js
+ipcMain.handle("get-backend-url", () => BACKEND_URL);
 
-ipcMain.handle('get-backend-url', () => BACKEND_URL);
+ipcMain.handle("get-app-version", () => app.getVersion());
 
-ipcMain.handle('get-app-version', () => app.getVersion());
-
-ipcMain.handle('show-save-dialog', async (event, options) => {
-  const { dialog } = require('electron');
+ipcMain.handle("show-save-dialog", async (event, options) => {
+  const { dialog } = require("electron");
   return dialog.showSaveDialog(mainWindow, options);
 });
 
-ipcMain.handle('show-open-dialog', async (event, options) => {
-  const { dialog } = require('electron');
+ipcMain.handle("show-open-dialog", async (event, options) => {
+  const { dialog } = require("electron");
   return dialog.showOpenDialog(mainWindow, options);
 });
 
 // ── App Lifecycle ──────────────────────────────────────────
 app.whenReady().then(async () => {
-  log.info(`App ready — isDev: ${isDev}, platform: ${process.platform}, arch: ${process.arch}`);
+  log.info(
+    `App ready — isDev: ${isDev}, platform: ${process.platform}, arch: ${process.arch}`,
+  );
 
-  // Show splash while backend loads
   createSplashWindow();
 
   try {
     await startBackend();
-    log.info('Backend started successfully');
+    log.info("Backend started successfully");
     createMainWindow();
   } catch (err) {
     log.error(`Failed to start backend: ${err.message}`);
-    const { dialog } = require('electron');
+    const { dialog } = require("electron");
     dialog.showErrorBox(
-      'DepthLens Pro — Startup Error',
-      `Could not start the inference engine.\n\n${err.message}\n\nPlease check that Python dependencies are installed.\n\nSee logs at: ${log.transports.file.getFile().path}`
+      "DepthLens Pro — Startup Error",
+      `Could not start the inference engine.\n\n${err.message}\n\nPlease check that Python dependencies are installed.\n\nSee logs at: ${log.transports.file.getFile().path}`,
     );
     app.quit();
   }
 
-  app.on('activate', () => {
-    // macOS: re-create window when dock icon is clicked and no windows open
+  app.on("activate", () => {
+    // macOS reopens a window from the dock when no windows remain.
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
 });
 
-app.on('window-all-closed', () => {
-  // On macOS, apps stay "running" until Cmd+Q
-  if (process.platform !== 'darwin') app.quit();
+app.on("window-all-closed", () => {
+  // Match the native macOS convention of staying resident until Cmd+Q.
+  if (process.platform !== "darwin") app.quit();
 });
 
-// app.on('before-quit', () => {
-//   log.info('App quitting — shutting down backend');
-//   if (backendProcess) {
-//     backendProcess.kill('SIGTERM');
-//     // Force kill if graceful shutdown takes too long
-//     setTimeout(() => backendProcess?.kill('SIGKILL'), 3000);
-//   }
-// });
 let isQuitting = false;
 
-app.on('before-quit', (event) => {
+app.on("before-quit", (event) => {
   if (backendProcess && !isQuitting) {
-    // 1. Stop Electron from exiting immediately
-    event.preventDefault(); 
-    log.info('App quitting — shutting down backend');
-    
-    isQuitting = true;
-    backendProcess.kill('SIGTERM');
+    // Defer Electron shutdown until the backend exits or the kill timer fires.
+    event.preventDefault();
+    log.info("App quitting — shutting down backend");
 
-    // 2. Force kill if graceful shutdown takes longer than 3 seconds
+    isQuitting = true;
+    backendProcess.kill("SIGTERM");
+
+    // Bound shutdown so a stuck Python process cannot hang the app.
     const killTimer = setTimeout(() => {
-      log.warn('Backend did not exit gracefully, forcing SIGKILL');
-      if (backendProcess) backendProcess.kill('SIGKILL');
+      log.warn("Backend did not exit gracefully, forcing SIGKILL");
+      if (backendProcess) {
+        backendProcess.kill("SIGKILL");
+      }
       app.quit();
     }, 3000);
 
-    // 3. Wait for the exit signal from Python before finally quitting
-    backendProcess.on('exit', () => {
+    // Exit after Python confirms termination.
+    backendProcess.on("exit", () => {
       clearTimeout(killTimer);
       backendProcess = null;
-      log.info('Backend shut down successfully');
-      app.quit(); 
+      log.info("Backend shut down successfully");
+      app.quit();
     });
   }
 });
 
-// ── Security: block navigation to external URLs ────────────
-app.on('web-contents-created', (event, contents) => {
-  contents.on('will-navigate', (event, url) => {
+// ── Navigation policy ─────────────────────────────────────
+app.on("web-contents-created", (event, contents) => {
+  contents.on("will-navigate", (event, url) => {
     const parsedUrl = new URL(url);
-    const allowedHosts = ['127.0.0.1', 'localhost'];
+    const allowedHosts = ["127.0.0.1", "localhost"];
     if (!allowedHosts.includes(parsedUrl.hostname)) {
       log.warn(`Blocked navigation to: ${url}`);
       event.preventDefault();

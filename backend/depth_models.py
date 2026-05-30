@@ -1,25 +1,23 @@
 import torch
 import cv2
 
+
 class DepthEstimator:
-    # def __init__(self):
-    #     # Prefer Metal (MPS) on Mac for speed, fallback to CPU
-    #     self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    #     self.models = {}
-    #     self.transforms = {}
-    #     self.repo = "intel-isl/MiDaS"
     def __init__(self):
-        # PERFORMANCE FIX: Prioritize CUDA -> MPS -> CPU
-        # This ensures Windows/Linux machines with NVIDIA GPUs don't default to CPU
+        # Prefer discrete GPU backends before falling back to CPU inference.
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_built() and torch.backends.mps.is_available():
+        elif (
+            hasattr(torch.backends, "mps")
+            and torch.backends.mps.is_built()
+            and torch.backends.mps.is_available()
+        ):
             self.device = torch.device("mps")
         elif hasattr(torch, "xpu") and torch.xpu.is_available():
             self.device = torch.device("xpu")
         else:
             self.device = torch.device("cpu")
-            
+
         self.models = {}
         self.transforms = {}
         self.repo = "intel-isl/MiDaS"
@@ -30,13 +28,13 @@ class DepthEstimator:
             self.models[model_name] = torch.hub.load(self.repo, model_name)
             self.models[model_name].to(self.device)
             self.models[model_name].eval()
-            
+
             midas_transforms = torch.hub.load(self.repo, "transforms")
             if model_name == "MiDaS_small":
                 self.transforms[model_name] = midas_transforms.small_transform
             else:
                 self.transforms[model_name] = midas_transforms.dpt_transform
-                
+
         return self.models[model_name], self.transforms[model_name]
 
     def predict(self, img_rgb, model_name):
