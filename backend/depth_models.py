@@ -2,9 +2,24 @@ import torch
 import cv2
 
 class DepthEstimator:
+    # def __init__(self):
+    #     # Prefer Metal (MPS) on Mac for speed, fallback to CPU
+    #     self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    #     self.models = {}
+    #     self.transforms = {}
+    #     self.repo = "intel-isl/MiDaS"
     def __init__(self):
-        # Prefer Metal (MPS) on Mac for speed, fallback to CPU
-        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        # PERFORMANCE FIX: Prioritize CUDA -> MPS -> CPU
+        # This ensures Windows/Linux machines with NVIDIA GPUs don't default to CPU
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_built() and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            self.device = torch.device("xpu")
+        else:
+            self.device = torch.device("cpu")
+            
         self.models = {}
         self.transforms = {}
         self.repo = "intel-isl/MiDaS"

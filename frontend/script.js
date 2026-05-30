@@ -10,14 +10,30 @@
 ═══════════════════════════════════════════ */
 // When running inside Electron, get the backend URL dynamically.
 // When running as a browser-only dev server, fall back to localhost:8000.
+// Replace the top IIFE with this:
 let API = "http://127.0.0.1:8000";
 
-(async () => {
+async function initApp() {
   if (window.electronAPI) {
     API = await window.electronAPI.getBackendUrl();
     console.log(`[DepthLens] Electron mode — backend at ${API}`);
   }
-})();
+  
+  // ANY initial API calls must go inside here (or be called after this resolves)
+  // loadDevices();
+  // loadPrefs();
+}
+
+// Call this immediately to start the app lifecycle safely
+initApp();
+// let API = "http://127.0.0.1:8000";
+
+// (async () => {
+//   if (window.electronAPI) {
+//     API = await window.electronAPI.getBackendUrl();
+//     console.log(`[DepthLens] Electron mode — backend at ${API}`);
+//   }
+// })();
 
 //const API = "http://127.0.0.1:8000";
 

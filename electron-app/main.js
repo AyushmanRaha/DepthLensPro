@@ -33,17 +33,24 @@ function getResourcePath(...parts) {
 // ── Python executable detection ────────────────────────────
 // On M1 Mac with a venv, the python is inside the venv
 // We ship a venv inside the app bundle for production
+// ── Python executable detection ────────────────────────────
+// On M1 Mac with a venv, the python is inside the venv
+// We ship a venv inside the app bundle for production
 function getPythonPath() {
-  return '/Users/user/Downloads/DepthLensPro/venv/bin/python3';
+  if (isDev) {
+    // Dynamically resolves to the venv in your project root during development
+    return path.join(__dirname, '..', 'venv', 'bin', 'python3');
+  }
+  // Dynamically resolves to the packaged resources folder in production
+  return path.join(process.resourcesPath, 'venv', 'bin', 'python3');
 }
 
 // ── Start FastAPI Backend ──────────────────────────────────
 function startBackend() {
   return new Promise((resolve, reject) => {
-    // const pythonPath  = getPythonPath();
-    // const backendDir  = getResourcePath('backend');
-    const pythonPath  = '/Users/user/Downloads/DepthLensPro/venv/bin/python3';
-    const backendDir  = '/Users/user/Downloads/DepthLensPro/backend';
+    // USE DYNAMIC PATHS INSTEAD OF HARDCODED USER DIRECTORIES
+    const pythonPath  = getPythonPath();
+    const backendDir  = getResourcePath('backend');
     const backendScript = path.join(backendDir, 'app.py');
 
     log.info(`Starting backend: ${pythonPath} at ${backendDir}`);
@@ -54,44 +61,99 @@ function startBackend() {
       'app:app',
       '--host', '127.0.0.1',
       '--port', String(BACKEND_PORT),
-      '--log-level', 'warning',
-      '--no-access-log',
+      '--workers', '1'
     ], {
-      cwd: backendDir,
-      env: {
-        ...process.env,
-        // Tell Python where to find packages if using bundled venv
-        PYTHONPATH: backendDir,
-      },
+      cwd: backendDir, 
+      stdio: ['ignore', 'pipe', 'pipe']
     });
 
     backendProcess.stdout.on('data', (data) => {
-      log.info(`[backend] ${data.toString().trim()}`);
-    });
-
-    backendProcess.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-      log.warn(`[backend] ${msg}`);
-      // uvicorn logs startup on stderr — detect ready state
+      const msg = data.toString();
+      log.info(`[Backend] ${msg.trim()}`);
       if (msg.includes('Application startup complete')) {
-        log.info('Backend startup signal detected');
+        backendReady = true;
+        resolve(BACKEND_URL);
       }
     });
 
-    backendProcess.on('error', (err) => {
-      log.error(`Backend process error: ${err.message}`);
-      reject(err);
+    backendProcess.stderr.on('data', (data) => {
+      log.error(`[Backend Err] ${data.toString().trim()}`);
     });
 
-    backendProcess.on('exit', (code) => {
-      log.warn(`Backend exited with code: ${code}`);
-      if (!backendReady) reject(new Error(`Backend exited early (code ${code})`));
+    backendProcess.on('close', (code) => {
+      log.info(`Backend exited with code ${code}`);
+      backendReady = false;
     });
 
-    // Poll the health endpoint until it responds
-    pollBackendHealth(30, 800, resolve, reject);
+    // Timeout fallback just in case stdout parsing fails
+    setTimeout(() => {
+      if (!backendReady) {
+        log.warn('Backend startup timeout, resolving anyway.');
+        backendReady = true;
+        resolve(BACKEND_URL);
+      }
+    }, 15000);
   });
 }
+// function getPythonPath() {
+//   return '/Users/user/Downloads/DepthLensPro/venv/bin/python3';
+// }
+
+// // ── Start FastAPI Backend ──────────────────────────────────
+// function startBackend() {
+//   return new Promise((resolve, reject) => {
+//     // const pythonPath  = getPythonPath();
+//     // const backendDir  = getResourcePath('backend');
+//     const pythonPath  = '/Users/user/Downloads/DepthLensPro/venv/bin/python3';
+//     const backendDir  = '/Users/user/Downloads/DepthLensPro/backend';
+//     const backendScript = path.join(backendDir, 'app.py');
+
+//     log.info(`Starting backend: ${pythonPath} at ${backendDir}`);
+
+//     // We run uvicorn programmatically via python -m uvicorn
+//     backendProcess = spawn(pythonPath, [
+//       '-m', 'uvicorn',
+//       'app:app',
+//       '--host', '127.0.0.1',
+//       '--port', String(BACKEND_PORT),
+//       '--log-level', 'warning',
+//       '--no-access-log',
+//     ], {
+//       cwd: backendDir,
+//       env: {
+//         ...process.env,
+//         // Tell Python where to find packages if using bundled venv
+//         PYTHONPATH: backendDir,
+//       },
+//     });
+
+//     backendProcess.stdout.on('data', (data) => {
+//       log.info(`[backend] ${data.toString().trim()}`);
+//     });
+
+//     backendProcess.stderr.on('data', (data) => {
+//       const msg = data.toString().trim();
+//       log.warn(`[backend] ${msg}`);
+//       // uvicorn logs startup on stderr — detect ready state
+//       if (msg.includes('Application startup complete')) {
+//         log.info('Backend startup signal detected');
+//       }
+//     });
+
+//     backendProcess.on('error', (err) => {
+//       log.error(`Backend process error: ${err.message}`);
+//       reject(err);
+//     });
+
+//     backendProcess.on('exit', (code) => {
+//       log.warn(`Backend exited with code: ${code}`);
+//       if (!backendReady) reject(new Error(`Backend exited early (code ${code})`));
+//     });
+
+//     // Poll the health endpoint until it responds
+//     pollBackendHealth(30, 800, resolve, reject);
+//   });
+// }
 
 function pollBackendHealth(maxAttempts, intervalMs, resolve, reject) {
   let attempts = 0;
@@ -238,12 +300,39 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
-  log.info('App quitting — shutting down backend');
-  if (backendProcess) {
+// app.on('before-quit', () => {
+//   log.info('App quitting — shutting down backend');
+//   if (backendProcess) {
+//     backendProcess.kill('SIGTERM');
+//     // Force kill if graceful shutdown takes too long
+//     setTimeout(() => backendProcess?.kill('SIGKILL'), 3000);
+//   }
+// });
+let isQuitting = false;
+
+app.on('before-quit', (event) => {
+  if (backendProcess && !isQuitting) {
+    // 1. Stop Electron from exiting immediately
+    event.preventDefault(); 
+    log.info('App quitting — shutting down backend');
+    
+    isQuitting = true;
     backendProcess.kill('SIGTERM');
-    // Force kill if graceful shutdown takes too long
-    setTimeout(() => backendProcess?.kill('SIGKILL'), 3000);
+
+    // 2. Force kill if graceful shutdown takes longer than 3 seconds
+    const killTimer = setTimeout(() => {
+      log.warn('Backend did not exit gracefully, forcing SIGKILL');
+      if (backendProcess) backendProcess.kill('SIGKILL');
+      app.quit();
+    }, 3000);
+
+    // 3. Wait for the exit signal from Python before finally quitting
+    backendProcess.on('exit', () => {
+      clearTimeout(killTimer);
+      backendProcess = null;
+      log.info('Backend shut down successfully');
+      app.quit(); 
+    });
   }
 });
 
