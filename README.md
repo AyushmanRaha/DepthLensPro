@@ -1,7 +1,7 @@
 # DepthLensPro
-**AI-Powered 2D to 3D Depth Map Generation Web Application**
+**AI-Powered 2D to 3D Depth Map Generation Desktop Application**
 
-DepthLensPro is an intelligent local web application that converts 2D images into high-quality depth visualizations using monocular depth estimation (MiDaS family). It combines a FastAPI inference backend (v3.1.0) with a production-style browser workspace for batch processing, device-aware execution, model comparison, and runtime analytics.
+DepthLensPro is an intelligent native cross-platform desktop application built with Electron that converts 2D images into high-quality depth visualizations using monocular depth estimation (MiDaS family). It combines a FastAPI inference backend (v4.0.0) with a production-style browser workspace for batch processing, device-aware execution, model comparison, and runtime analytics.
 
 ---
 
@@ -22,9 +22,20 @@ DepthLensPro is an intelligent local web application that converts 2D images int
 
 ---
 
+## Desktop Application
+
+* DepthLens Pro is now a native desktop application built with Electron v42. It ships as a double-clickable .app on macOS and .exe on Windows.
+* The FastAPI inference backend starts and stops automatically as a child process — no manual uvicorn command needed.
+* The app targets arm64 (Apple Silicon) natively, running PyTorch MPS inference via Metal with no Rosetta translation overhead.
+* Distributed as a DMG for macOS. No internet connection required after first model weight download.
+* Security: contextIsolation enabled, nodeIntegration disabled, renderer sandboxed. Backend only accessible on 127.0.0.1.
+
+---
+
 ## What's New (Latest Codebase Updates)
 
-* Backend upgraded to **v3.1.0**.
+* Frontend upgraded to v4.0.0 with Electron desktop shell. App now launches as a native macOS application with automatic backend lifecycle management, native file dialogs, and Metal GPU acceleration on Apple Silicon.
+* Backend upgraded to **v4.0.0**.
 * Device detection and prioritization logic refined:
   * corrected compute-class semantics for Apple MPS and Intel XPU,
   * default device priority now `CUDA > MPS > XPU > CPU`,
@@ -51,7 +62,7 @@ DepthLensPro is an intelligent local web application that converts 2D images int
 DepthLensPro/
 │
 ├── backend/                  # FastAPI + depth inference engine
-│   ├── app.py                # Main API server (v3.1.0)
+│   ├── app.py                # Main API server (v4.0.0)
 │   ├── depth_models.py       # Auxiliary depth model loader class
 │   └── requirements.txt      # Python dependencies
 │
@@ -59,6 +70,14 @@ DepthLensPro/
 │   ├── index.html            # Multi-panel UI (Workspace / Compare / About)
 │   ├── style.css             # Cyber-neon visual design system
 │   └── script.js             # Frontend logic (state, API, charts, metrics)
+│
+├── electron-app/
+│   ├── main.js               # Electron main process + backend lifecycle
+│   ├── preload.js            # Secure contextBridge API surface
+│   ├── package.json          # Electron + electron-builder config
+│   ├── entitlements.mac.plist  # macOS sandbox entitlements
+│   └── src/
+│       └── splash.html       # Loading screen during backend startup
 │
 └── README.md
 ```
@@ -70,6 +89,8 @@ DepthLensPro/
 * **Backend:** Python, FastAPI, Uvicorn
 * **AI Models:** MiDaS (`MiDaS_small`, `DPT_Hybrid`, `DPT_Large`) via PyTorch Hub
 * **Frontend:** HTML, CSS, JavaScript
+* **Desktop Shell:** Electron v42
+* **Build Tool:** electron-builder
 * **Core Libraries:** PyTorch, OpenCV, NumPy, Chart.js
 * **Transport/Data:** Multipart uploads + JSON API responses + base64 output payloads
 
@@ -77,7 +98,29 @@ DepthLensPro/
 
 ## Installation & Setup
 
-### Prerequisites
+### Variant A — Desktop App (Recommended)
+
+Download the latest release from the GitHub Releases page.
+
+#### macOS
+
+Mount the DMG and drag DepthLens Pro to Applications.
+
+If blocked by Gatekeeper, run:
+
+```bash
+xattr -cr "/Applications/DepthLens Pro.app"
+```
+
+Then open normally. The inference engine starts automatically.
+
+---
+
+### Variant B — Manual Setup (Development)
+
+This method requires running both uvicorn and a frontend HTTP server separately.
+
+#### Prerequisites
 
 Make sure you have installed:
 
@@ -89,9 +132,9 @@ Make sure you have installed:
 
 ---
 
-## Setup Instructions (OS-Specific)
+#### Setup Instructions (OS-Specific)
 
-### macOS
+##### macOS
 
 ```bash
 # Clone repository
@@ -109,7 +152,7 @@ pip install -r backend/requirements.txt
 uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Windows
+##### Windows
 
 ```bash
 # Clone repository
@@ -127,7 +170,7 @@ pip install -r backend/requirements.txt
 uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Linux
+##### Linux
 
 ```bash
 # Clone repository
@@ -145,9 +188,7 @@ pip install -r backend/requirements.txt
 uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
----
-
-## Running the Application
+#### Running the Application
 
 **1. Start the backend server:**
 
@@ -249,6 +290,9 @@ Contributions are welcome.
 | Slow inference | Prefer `MiDaS_small` or choose `CUDA`/`MPS`/`XPU` where available |
 | Port already in use | Change port using `--port` in uvicorn command |
 | First run is slow | MiDaS model weights are downloaded once and cached locally |
+| App blocked by macOS Gatekeeper | Run: xattr -cr "/Applications/DepthLens Pro.app" |
+| Inference engine does not start | Check logs at ~/Library/Logs/depthlens-pro/main.log |
+| Duplicate app icon in Applications | Delete old copy: rm -rf "/Applications/DepthLens Pro.app" and reinstall from DMG |
 
 ---
 
