@@ -42,21 +42,21 @@
       "assets/**/*"
     ],
     "extraResources": [
-      {
-        "from": "../backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!venv/**",
-          "!__pycache__/**",
-          "!*.pyc"
-        ]
-      },
-      {
-        "from": "../frontend",
-        "to": "frontend"
-      }
-    ]
+    {
+      "from": "../backend",
+      "to": "backend",
+      "filter": ["**/*", "!__pycache__/**", "!*.pyc"]
+    },
+    {
+      "from": "../venv",
+      "to": "venv",
+      "filter": ["**/*", "!__pycache__/**", "!*.pyc"]
+    },
+    {
+      "from": "../frontend",
+      "to": "frontend"
+    }
+  ]
   },
   "dependencies": {
     "electron-log": "^5.4.4"
