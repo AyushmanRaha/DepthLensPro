@@ -1,0 +1,68 @@
+{
+  "name": "depthlens-pro",
+  "version": "4.0.0",
+  "description": "AI-Powered 2D to 3D Depth Map Generation",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder --mac --win"
+  },
+  "build": {
+    "forceCodeSigning": false,
+    "appId": "com.ayushmanraha.depthlens-pro",
+    "productName": "DepthLens Pro",
+    "copyright": "Copyright © 2025 Ayushman Raha",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "hardenedRuntime": false,
+      "identity": null
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!venv/**",
+          "!__pycache__/**",
+          "!*.pyc"
+        ]
+      },
+      {
+        "from": "../frontend",
+        "to": "frontend"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4"
+  },
+  "devDependencies": {
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1"
+  }
+}

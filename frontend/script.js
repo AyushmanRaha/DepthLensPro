@@ -8,7 +8,18 @@
 /* ═══════════════════════════════════════════
    CONFIG & STATE
 ═══════════════════════════════════════════ */
-const API = "http://127.0.0.1:8000";
+// When running inside Electron, get the backend URL dynamically.
+// When running as a browser-only dev server, fall back to localhost:8000.
+let API = "http://127.0.0.1:8000";
+
+(async () => {
+  if (window.electronAPI) {
+    API = await window.electronAPI.getBackendUrl();
+    console.log(`[DepthLens] Electron mode — backend at ${API}`);
+  }
+})();
+
+//const API = "http://127.0.0.1:8000";
 
 const state = {
   files:   [],        // { id, file, thumb, status, result }
