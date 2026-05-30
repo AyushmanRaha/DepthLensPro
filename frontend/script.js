@@ -11,6 +11,14 @@ async function initApp() {
   if (window.electronAPI) {
     API = await window.electronAPI.getBackendUrl();
     console.log(`[DepthLens] Electron mode — backend at ${API}`);
+
+    // FIX (Issue 4): apply macOS body class so the CSS can shift the header
+    // content rightward to clear the native traffic-light buttons.
+    const platform = window.electronAPI.platform; // synchronous property
+    if (platform === "darwin") {
+      document.body.classList.add("macos");
+      console.log("[DepthLens] macOS detected — traffic-light padding applied");
+    }
   }
 }
 

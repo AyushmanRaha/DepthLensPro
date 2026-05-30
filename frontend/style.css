@@ -2081,3 +2081,39 @@ body.modal-open {
     gap: 0.4rem;
   }
 }
+
+/* ── macOS traffic-light / titlebar fix (Issue 4) ───────────────────────────
+   When titleBarStyle is "hidden" the traffic-light buttons (close/minimise/
+   maximise) sit at x:16 y:18 inside the window.  They are 78 px wide total.
+   We shift the header inner content rightward on macOS so nothing overlaps.
+   The <body class="macos"> is applied by script.js when window.electronAPI
+   reports platform === "darwin".
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Make the header bar itself draggable so the user can move the window */
+.site-header {
+  -webkit-app-region: drag;
+}
+
+/* Every interactive element inside the header must opt OUT of dragging */
+.site-header .nav-btn,
+.site-header .header-status,
+.site-header .device-badge,
+.site-header a,
+.site-header button {
+  -webkit-app-region: no-drag;
+}
+
+/* On macOS shift the header content right to clear the 78px traffic lights */
+body.macos .header-inner {
+  padding-left: calc(78px + 0.5rem); /* 78px traffic lights + small gap */
+}
+
+/* Windowed (non-fullscreen) mode: traffic lights are present.
+   In fullscreen macOS hides them, so we reset the padding via a media query
+   that targets the fullscreen state exposed by Electron's CSS env variables. */
+@media (display-mode: fullscreen) {
+  body.macos .header-inner {
+    padding-left: 1.5rem;
+  }
+}
