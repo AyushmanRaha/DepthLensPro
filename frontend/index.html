@@ -17,47 +17,27 @@
   <body>
     <canvas id="bgCanvas" aria-hidden="true"></canvas>
 
-    <!-- ── Landing / Welcome Screen ─────────────────────────────────── -->
+    <!-- ══════════════════════════════════════════════════
+         WELCOME SCREEN v5.0 — Liquid Metal Logo Animation
+         ══════════════════════════════════════════════════ -->
     <section
       class="welcome-screen"
       id="welcomeScreen"
       aria-label="Welcome to DepthLensPro"
     >
+      <!-- Vector line background (visible both themes) -->
+      <canvas id="welcomeBgCanvas" aria-hidden="true"></canvas>
+
       <div class="welcome-content">
-        <!-- SVG text for tracing animation -->
-        <div class="welcome-brand-wrap" aria-label="DepthLensPro">
-          <svg class="brand-svg" viewBox="0 0 820 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <defs>
-              <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#dff0ff"/>
-                <stop offset="70%" stop-color="#dff0ff"/>
-                <stop offset="100%" stop-color="#00c8ff"/>
-              </linearGradient>
-              <filter id="brandGlow">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
-                <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0  0 0.78 0 0 1  0 0 0 0 1  0 0 0 18 -7" result="glow"/>
-                <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-            </defs>
-            <!-- "DepthLens" in white, "Pro" in cyan -->
-            <text
-              class="brand-text brand-text-main"
-              x="10" y="78"
-              font-family="Rajdhani, sans-serif"
-              font-weight="700"
-              font-size="82"
-              letter-spacing="2"
-              fill="url(#brandGrad)"
-              filter="url(#brandGlow)"
-            >DepthLens<tspan fill="#00c8ff" class="brand-pro">Pro</tspan></text>
-          </svg>
-          <!-- Fallback accessible text -->
-          <h1 class="welcome-brand-fallback sr-only">DepthLensPro</h1>
+        <!-- Canvas for liquid metal logo animation -->
+        <div class="welcome-logo-stage" aria-label="DepthLensPro">
+          <canvas id="logoCanvas" role="img" aria-label="DepthLensPro logo"></canvas>
         </div>
 
+        <!-- CTA — hidden until logo animation completes -->
         <div class="welcome-cta-wrap" id="welcomeCtaWrap">
           <button
-            class="btn btn-primary welcome-btn"
+            class="btn welcome-btn"
             id="getStartedBtn"
             type="button"
           >
@@ -680,5 +660,6 @@
     </div>
 
     <script src="script.js"></script>
+    <script src="welcome-anim.js"></script>
   </body>
 </html>

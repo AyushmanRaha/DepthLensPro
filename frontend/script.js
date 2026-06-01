@@ -1,8 +1,10 @@
 /**
- * DepthLens Pro — script.js v4.1
- * Adds: theme persistence, dark/light toggle, toggle migration animation,
- *       cinematic landing → workspace transition.
- * All original inference, gallery, compare, and lightbox logic preserved.
+ * DepthLens Pro — script.js v5.0
+ * Changes from v4.1:
+ *  - applyTheme() dispatches "depthlens-theme-changed" for welcome-anim.js
+ *  - enterWorkspace() updated: no more brand-svg reference, just fade+migrate
+ *  - migrateThemeToggle() updated: works with new .revealed class system
+ * All inference, gallery, compare, lightbox, metrics logic is IDENTICAL to v4.1.
  */
 "use strict";
 
@@ -22,6 +24,8 @@ function applyTheme(theme, animated = true) {
   if (!animated) html.style.transition = "none";
   html.setAttribute("data-theme", theme);
   if (!animated) requestAnimationFrame(() => { html.style.transition = ""; });
+  // Notify welcome animation (bg lines + logo recolor)
+  document.dispatchEvent(new CustomEvent("depthlens-theme-changed", { detail: theme }));
 }
 
 // Apply theme immediately before paint to avoid flash
@@ -170,27 +174,25 @@ function toggleTheme() {
   currentTheme = currentTheme === "dark" ? "light" : "dark";
   applyTheme(currentTheme, true);
   saveTheme(currentTheme);
-  // Redraw chart colors if charts exist
   updateChartTheme();
 }
 
 el.themeToggleBtn?.addEventListener("click", toggleTheme);
 
 // ══════════════════════════════════════════════════════════════
-// LANDING → WORKSPACE TRANSITION (with toggle migration)
+// LANDING → WORKSPACE TRANSITION
 // ══════════════════════════════════════════════════════════════
 function enterWorkspace() {
   if (!el.welcomeScreen || !el.appShell) return;
   el.getStartedBtn?.setAttribute("disabled", "true");
 
-  // Step 1: migrate theme toggle button from landing to header
+  // Migrate theme toggle from landing corner → header
   migrateThemeToggle(() => {
-    // Step 2: slide-out welcome screen
     el.welcomeScreen.classList.add("is-exiting");
     setTimeout(() => {
       el.welcomeScreen.hidden = true;
       el.appShell.classList.add("ready");
-    }, 620);
+    }, 650);
   });
 }
 
@@ -200,38 +202,32 @@ function migrateThemeToggle(onComplete) {
   const btn         = el.themeToggleBtn;
   if (!landingWrap || !headerWrap || !btn) { onComplete(); return; }
 
-  // Get source position (landing, bottom-right)
   const srcRect = btn.getBoundingClientRect();
 
-  // Move the button into the header slot (invisible at first)
+  // Move button into header slot
   headerWrap.appendChild(btn);
   const dstRect = btn.getBoundingClientRect();
 
-  // Calculate delta
   const dx = srcRect.left - dstRect.left;
   const dy = srcRect.top  - dstRect.top;
 
-  // Animate from old position to new
-  btn.style.transform = `translate(${dx}px, ${dy}px) scale(1.1)`;
+  btn.style.transform  = `translate(${dx}px, ${dy}px) scale(1.1)`;
   btn.style.transition = "none";
-  btn.style.opacity = "1";
+  btn.style.opacity    = "1";
 
-  // Hide landing placeholder
+  // Hide the landing placeholder visually
   landingWrap.classList.add("is-migrating");
 
-  // Trigger fly-in
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      btn.style.transition =
-        "transform 0.62s cubic-bezier(0.22,1,0.36,1), opacity 0.4s ease";
-      btn.style.transform = "translate(0,0) scale(1)";
+      btn.style.transition = "transform 0.62s cubic-bezier(0.22,1,0.36,1), opacity 0.4s ease";
+      btn.style.transform  = "translate(0,0) scale(1)";
       btn.classList.add("visible");
     });
   });
 
-  // After migration completes, kick off the main transition
   setTimeout(() => {
-    btn.style.transform = "";
+    btn.style.transform  = "";
     btn.style.transition = "";
     onComplete();
   }, 480);
@@ -271,7 +267,7 @@ document.addEventListener("change", (e) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// BACKGROUND CANVAS
+// BACKGROUND CANVAS (workspace)
 // ══════════════════════════════════════════════════════════════
 (function bgCanvas() {
   const cv = el.bgCanvas, ctx = cv.getContext("2d");
@@ -776,7 +772,6 @@ function setFileSt(id,cls,txt) {
 }
 
 el.fileInput.addEventListener("change",()=>{ addFiles(el.fileInput.files); el.fileInput.value=""; });
-
 el.dropZone.addEventListener("dragover",e=>{ e.preventDefault(); el.dropZone.classList.add("drag-over"); });
 el.dropZone.addEventListener("dragleave",e=>{ if (!el.dropZone.contains(e.relatedTarget)) el.dropZone.classList.remove("drag-over"); });
 el.dropZone.addEventListener("drop",e=>{ e.preventDefault(); el.dropZone.classList.remove("drag-over"); addFiles(e.dataTransfer.files); });
