@@ -9,8 +9,9 @@ DepthLensPro is an intelligent native cross-platform desktop application built w
 
 - AI-powered monocular depth estimation with multiple MiDaS models (`MiDaS_small`, `DPT_Hybrid`, `DPT_Large`)
 - Native cross-platform desktop application via **Electron v42** with automatic backend lifecycle management
-- Liquid-metal animated welcome screen with theme-aware canvas logo animation
-- Persistent dark/light **theme toggle** (migrates from landing screen to header on entry)
+- **Liquid-metal animated welcome screen** (v5.0): canvas blob animation — drops spawn from ring → fall toward centre → merge → morph into particle cloud → crystallise into final gradient text
+- **Vector background canvas** on the welcome screen — grid lines, diagonal accents, circuit connector segments, and intersection dots; theme-aware and re-drawn on resize
+- Persistent dark/light **theme toggle** — migrates from landing screen corner to header slot via spring-physics `getBoundingClientRect` delta animation on workspace entry
 - Batch processing support (up to **10 images** per request)
 - Broad image format compatibility (PNG, JPG/JPEG, WEBP, BMP)
 - Dual output rendering (colorized depth map + grayscale depth map)
@@ -21,9 +22,12 @@ DepthLensPro is an intelligent native cross-platform desktop application built w
 - Dedicated model comparison panel with side-by-side output cards and metric-driven charting
 - Session analytics dashboard (latency trends, throughput, cache hits, error counts, total inference time)
 - In-memory inference caching for repeated image + model + colormap + device combinations
+- **System telemetry** in `/health` — memory pressure and disk utilisation reported alongside engine status
+- **Structured JSON logging** — all backend log records emitted as JSON via `JsonLogFormatter` for production collector compatibility
+- **Structured runtime configuration** via `backend/config.py` — `pydantic-settings`-backed `Settings` class reads `HOST`, `PORT`, `LOG_LEVEL`, `DEBUG` from environment and `.env` file
 - API-first backend architecture for integration, automation, and deployment workflows
 - Per-request upload cancel support with ETA/progress visibility
-- Persistent user preferences (model, colormap, device) via localStorage
+- Persistent user preferences (model, colormap, device) via `localStorage`
 
 ---
 
@@ -35,8 +39,8 @@ DepthLensPro is an intelligent native cross-platform desktop application built w
 - A splash screen is displayed while the backend warms up. Main window appears only after the engine is ready (or a graceful timeout).
 - Distributed as a **DMG** for macOS. No internet connection required after first model weight download.
 - **Security:** `contextIsolation` enabled, `nodeIntegration` disabled, renderer sandboxed. Backend only accessible on `127.0.0.1`.
-- macOS traffic-light buttons use `titleBarStyle: "hidden"` with `trafficLightPosition` for correct header layout.
-- Python path resolution is multi-candidate, covering development venv, packaged `.app` Resources, and system fallbacks with clear error dialogs.
+- macOS traffic-light buttons use `titleBarStyle: "hidden"` with `trafficLightPosition` for correct header layout. The preload exposes `platform` and `arch` via `contextBridge` so the renderer can conditionally apply macOS padding without hard-coding in CSS.
+- Python path resolution is multi-candidate, covering development venv, packaged `.app` Resources, system Homebrew, and `/usr/bin` fallbacks with clear error dialogs.
 - Navigation policy enforced: renderer cannot navigate outside `127.0.0.1` / `localhost`.
 
 ---
@@ -46,13 +50,18 @@ DepthLensPro is an intelligent native cross-platform desktop application built w
 ### Backend (v4.0.0)
 
 - **Modular architecture** — code split into `backend/main.py` (app factory + lifespan), `backend/api/routes.py` (all route handlers), `backend/services/inference.py` (model loading + image pipeline), `backend/services/cache_service.py` (in-memory cache), and `backend/utils/hardware.py` (device detection).
+- **`backend/config.py`** — new `Settings` class backed by `pydantic-settings`. Reads `HOST`, `PORT`, `LOG_LEVEL`, `DEBUG` from environment variables and a `.env` file. Falls back to a lightweight shim when `pydantic-settings` is absent. Exported as a cached singleton `settings`.
+- **Structured JSON logging** — `JsonLogFormatter` in `backend/main.py` emits every log record as a JSON object with `timestamp`, `level`, `logger`, `message`, `module`, `function`, `line`, `process`, `thread`, and optional `exception` / `stack_info` fields. All uvicorn and FastAPI loggers are routed through this formatter.
+- **System telemetry in `/health`** — the health endpoint now includes a `telemetry` block with:
+  - `memory` — reads `/proc/meminfo` (Linux) or `os.sysconf` page-based totals; reports `pressure_percent`, `total_bytes`, `available_bytes`, `used_bytes`, and status (`ok` / `degraded` / `unknown`).
+  - `disk` — calls `shutil.disk_usage("/")` and reports `usage_percent`, `total_bytes`, `free_bytes`, `used_bytes`.
+  - Overall `status` field is `"degraded"` when either subsystem exceeds its configured threshold (90% memory pressure or 90% disk usage), otherwise `"ok"`.
 - **Device detection and prioritization refined:**
-  - Corrected compute-class semantics for Apple MPS and Intel XPU.
   - Default device priority: `CUDA > MPS > XPU > CPU`.
-  - MPS runtime checks enforce both build-time (`is_built()`) and runtime (`is_available()`) availability guards.
+  - MPS runtime checks enforce both `is_built()` and `is_available()` guards.
   - XPU detected via `torch.xpu` with `device_count()` enumeration.
 - **Startup lifecycle** — warm-up on best available accelerator; falls back to CPU if accelerator pre-load fails; both paths log clearly.
-- **`/health` endpoint** now returns `acceleration_checks` with per-backend `available` + `operational` probe results (actual tensor multiply executed on device).
+- **`/health` endpoint** now returns `acceleration_checks` with per-backend `available` + `operational` probe results (actual tensor multiply executed on device), plus the new `telemetry` block.
 - **`/devices` endpoint** exposes `compute_classes` per device (`["gpu"]`, `["cpu"]`, etc.) for frontend filter rendering.
 - Request safety enforced: per-file size cap (**20 MB**), image dimension cap (**2048 px** max side, auto-resized), batch upper limit (**10 images**), standardised JSON error responses.
 - `backend/app.py` is a backward-compatible ASGI shim — existing `uvicorn app:app` launch flows from packaged Electron still work.
@@ -64,10 +73,11 @@ DepthLensPro is an intelligent native cross-platform desktop application built w
 ### Frontend (v5.0 — script.js + style.css + welcome-anim.js)
 
 - **Welcome screen v5.0** — liquid-metal canvas logo animation: blobs spawn from ring → fall toward centre → merge → morph into particle cloud → crystallise into final gradient text. 60 fps, theme-aware, reduced-motion safe.
-- **Vector background canvas** on the welcome screen — grid lines, diagonal accents, circuit connector segments, and intersection dots; re-drawn on theme change and window resize.
-- **Theme system** — `dark` / `light` toggle persisted to `localStorage`; applied before first paint to eliminate flash. Theme toggle button animates with spring physics (`cubic-bezier(0.34,1.56,0.64,1)`). A spinning multi-colour conic-gradient ring appears on hover.
-- **Landing → workspace transition** — theme toggle button physically migrates from landing corner to header slot via `getBoundingClientRect` delta animation.
-- **Electron integration** — `window.electronAPI` detected at runtime; backend URL fetched via `ipcRenderer.invoke("get-backend-url")`; `macos` class applied to body for traffic-light padding; native file save/open dialogs available.
+- **Vector background canvas** on the welcome screen — grid lines (fine + bold), diagonal accents, circuit connector segments, and intersection dots; re-drawn on theme change (`depthlens-theme-changed` custom event) and window resize. Colors adapt clearly for both dark and light modes.
+- **Theme system** — `dark` / `light` toggle persisted to `localStorage`; applied before first paint to eliminate flash. `applyTheme()` dispatches `depthlens-theme-changed` for `welcome-anim.js` to update the background canvas and logo colors immediately. Toggle button animates with spring physics (`cubic-bezier(0.34,1.56,0.64,1)`). A spinning multi-colour conic-gradient ring appears on hover.
+- **Landing → workspace transition** — theme toggle button physically migrates from landing corner to header slot via `getBoundingClientRect` delta animation (`migrateThemeToggle()`). The button uses a `.visible` class for its final opacity/scale reveal, and the landing placeholder uses `.is-migrating` to disappear cleanly during flight.
+- **Get Started button (v5.0)** — premium glass/glow button always visible at rest; spinning conic-gradient ring border at 0.78 opacity even without hover; hover triggers spring bounce (`translateY(-5px) scale(1.065)`) and full ring opacity; correct light-mode colour variants included.
+- **Electron integration** — `window.electronAPI` detected at runtime; backend URL fetched via `ipcRenderer.invoke("get-backend-url")`; `macos` class applied to body for traffic-light padding; native file save/open dialogs available. `preload.js` exposes `platform` and `arch` alongside existing handles.
 - **Device selector** — dynamically rendered from `/health` + `/devices`; shows filter toggle (All / CPU / GPU / NPU) when multiple classes detected; `Auto` option label describes the actual preferred device.
 - **`/health` acceleration checks** surfaced in the status bar and as a warning toast if any accelerator backend is non-operational.
 - **Upload flow** — drag-and-drop with animated overlay, thumbnail preview, per-item status badges, cancel button, ETA countdown, and item/total counter.
@@ -79,7 +89,7 @@ DepthLensPro is an intelligent native cross-platform desktop application built w
 
 ### Electron Shell (v4.0.0)
 
-- `main.js` — multi-candidate Python path resolution (dev venv → packaged Resources → system fallbacks); graceful `SIGTERM` → `SIGKILL` shutdown with 3 s timeout; log-based + health-poll backend readiness detection; hard 20 s timeout fallback opens the window anyway with offline status.
+- `main.js` — multi-candidate Python path resolution (dev venv → packaged Resources → Homebrew → system fallbacks); graceful `SIGTERM` → `SIGKILL` shutdown with 3 s timeout; log-based + health-poll backend readiness detection; hard 20 s timeout fallback opens the window anyway with offline status.
 - `preload.js` — exposes `getBackendUrl`, `getAppVersion`, `getPlatform`, `showSaveDialog`, `showOpenDialog`, `platform`, `arch` via `contextBridge`.
 - `package.json` — `electron-builder` config bundles `backend/`, `venv/`, and `frontend/` into `extraResources`; excludes `__pycache__` and `.pyc` files; macOS target: `dmg` / `arm64`.
 
@@ -92,14 +102,15 @@ DepthLensPro/
 │
 ├── backend/                        # FastAPI + depth inference engine
 │   ├── app.py                      # Backward-compatible ASGI entrypoint (shim)
-│   ├── main.py                     # FastAPI app factory, CORS, lifespan hooks
+│   ├── main.py                     # FastAPI app factory, JSON logging, CORS, lifespan hooks
+│   ├── config.py                   # pydantic-settings Settings (HOST, PORT, LOG_LEVEL, DEBUG)
 │   ├── depth_models.py             # Legacy DepthEstimator wrapper
 │   ├── requirements.txt            # Python dependencies
 │   ├── __init__.py
 │   │
 │   ├── api/
 │   │   ├── __init__.py
-│   │   └── routes.py               # All API route handlers
+│   │   └── routes.py               # All API route handlers (incl. memory + disk telemetry)
 │   │
 │   ├── services/
 │   │   ├── __init__.py
@@ -117,13 +128,13 @@ DepthLensPro/
 │
 ├── frontend/                       # Web UI
 │   ├── index.html                  # Multi-panel UI (Welcome / Workspace / Compare / About)
-│   ├── style.css                   # Cyber-neon design system (dark + light mode)
-│   ├── script.js                   # Frontend logic v5.0 (state, API, charts, metrics)
+│   ├── style.css                   # Cyber-neon design system v5.0 (dark + light mode)
+│   ├── script.js                   # Frontend logic v5.0 (state, API, charts, metrics, theme migrate)
 │   └── welcome-anim.js             # Liquid-metal logo canvas animation v5.0
 │
 ├── electron-app/
 │   ├── main.js                     # Electron main process + backend lifecycle
-│   ├── preload.js                  # Secure contextBridge API surface
+│   ├── preload.js                  # Secure contextBridge API surface (platform + arch exposed)
 │   ├── package.json                # Electron + electron-builder config
 │   ├── package-lock.json
 │   ├── entitlements.mac.plist      # macOS sandbox entitlements
@@ -135,9 +146,12 @@ DepthLensPro/
 │   └── workflows/
 │       └── ci.yml                  # GitHub Actions: black, ruff, mypy, pytest
 │
+├── Dockerfile                      # Multi-stage Docker image (builder + runner)
+├── docker-compose.yml              # Single-service compose with healthcheck + resource limits
 ├── mypy.ini                        # Mypy strict config (tests excluded)
 ├── pyproject.toml                  # Black + Ruff shared config (line-length 100)
 ├── .gitignore
+├── .dockerignore
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 └── README.md
@@ -150,6 +164,8 @@ DepthLensPro/
 | Layer | Technology |
 |---|---|
 | **Backend** | Python 3.10+, FastAPI, Uvicorn |
+| **Configuration** | pydantic-settings (`backend/config.py`) |
+| **Logging** | Structured JSON via `JsonLogFormatter` |
 | **AI Models** | MiDaS (`MiDaS_small`, `DPT_Hybrid`, `DPT_Large`) via PyTorch Hub |
 | **Frontend** | HTML5, CSS3, Vanilla JavaScript (ES2022) |
 | **Charts** | Chart.js 4.4 |
@@ -157,6 +173,7 @@ DepthLensPro/
 | **Build Tool** | electron-builder v26 |
 | **Core Libraries** | PyTorch, OpenCV, NumPy |
 | **Transport / Data** | Multipart uploads + JSON API responses + base64 PNG payloads |
+| **Containerisation** | Docker (multi-stage), Docker Compose |
 | **CI** | GitHub Actions (black, ruff, mypy, pytest) |
 
 ---
@@ -232,6 +249,28 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 
 ---
 
+#### Environment Configuration
+
+The backend reads optional configuration from a `.env` file at the repo root or from process environment variables. All settings have safe defaults and are validated at startup via `backend/config.py`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `0.0.0.0` | Host interface for the ASGI server |
+| `PORT` | `8000` | ASGI server port (1–65535) |
+| `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) |
+| `DEBUG` | `false` | Enable FastAPI debug responses |
+
+Example `.env`:
+
+```
+HOST=127.0.0.1
+PORT=8000
+LOG_LEVEL=DEBUG
+DEBUG=false
+```
+
+---
+
 #### Running the Full Application (Manual)
 
 **1. Start the backend:**
@@ -290,6 +329,26 @@ npm run build:all
 
 ---
 
+### Variant C — Docker
+
+```bash
+# Build and run (requires .env file at repo root)
+docker compose up --build
+
+# Or build manually
+docker build -t depthlenspro-backend .
+docker run -p 8000:8000 --env-file .env depthlenspro-backend
+```
+
+The Docker image is a multi-stage build. The `builder` stage installs wheels; the `runner` stage is a minimal Python 3.10-slim image with `libgl1` and `libglib2.0-0` for OpenCV support. The container runs as a non-root `depthlens` user.
+
+The `docker-compose.yml` service includes:
+- Resource limits: `2.0` CPUs, `4 GB` memory
+- `init: true` for proper PID 1 signal handling
+- A healthcheck polling `/health` every 30 seconds with a 45-second start period
+
+---
+
 ## Validation & CI
 
 Run the same checks used by the GitHub Actions pipeline locally:
@@ -309,11 +368,11 @@ All four gates must pass before opening a pull request. See `CONTRIBUTING.md` fo
 
 ### Workspace Flow
 
-1. The animated welcome screen plays the liquid-metal logo formation. Click **Get Started** to enter the workspace (the theme toggle migrates to the header).
-2. The header status indicator shows engine connectivity and the active compute device.
+1. The animated welcome screen plays the liquid-metal logo formation (v5.0). Click **Get Started** to enter the workspace — the theme toggle migrates from the landing corner to the header via a spring-physics position animation.
+2. The header status indicator shows engine connectivity, active compute device, PyTorch version, and acceleration check results.
 3. Upload one or more 2D images via drag-and-drop or the file browser (PNG, JPG, WEBP, BMP; max 20 MB each).
 4. Select model architecture, colormap, and compute device. Use the device filter buttons to narrow by CPU / GPU / NPU.
-5. Click **Generate Depth Maps** to start the batch. A progress bar with ETA and per-item status updates is shown; cancel is available at any time.
+5. Click **Generate Depth Maps** to start the batch. A progress bar with adaptive ETA and per-item status updates is shown; cancel is available at any time.
 6. Review output cards in the results gallery. Click any card to open the **Lightbox** for the blend slider, full metric accordion, and download actions.
 7. Re-running identical image + model + colormap + device combinations serves results from the in-memory cache (shown as `cached` tag).
 8. The Session Dashboard tracks processed count, avg/min/max latency, cache hits, errors, throughput, total inference time, and a latency history chart.
@@ -335,7 +394,7 @@ Base URL: `http://127.0.0.1:8000`
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/` | API metadata and service version |
-| `GET` | `/health` | Engine status, device inventory, acceleration checks, cache size, torch version |
+| `GET` | `/health` | Engine status, device inventory, acceleration checks, telemetry, cache size, torch version |
 | `GET` | `/devices` | All discovered compute targets with type, compute classes, and hardware details |
 | `GET` | `/models` | Supported model registry with performance notes |
 | `GET` | `/colormaps` | Supported colormap keys |
@@ -343,7 +402,7 @@ Base URL: `http://127.0.0.1:8000`
 | `POST` | `/batch` | Multi-image depth estimation — max 10 files (same form fields) |
 | `DELETE` | `/cache` | Clear the in-memory inference cache |
 
-### `/health` Response Shape (abbreviated)
+### `/health` Response Shape
 
 ```json
 {
@@ -362,6 +421,25 @@ Base URL: `http://127.0.0.1:8000`
     "cuda": { "available": false, "operational": false },
     "mps":  { "available": true,  "operational": true  },
     "xpu":  { "available": false, "operational": false }
+  },
+  "telemetry": {
+    "memory": {
+      "status": "ok",
+      "pressure_percent": 42.1,
+      "limit_percent": 90.0,
+      "total_bytes": 17179869184,
+      "available_bytes": 9932800000,
+      "used_bytes": 7247069184
+    },
+    "disk": {
+      "status": "ok",
+      "path": "/",
+      "usage_percent": 61.3,
+      "limit_percent": 90.0,
+      "total_bytes": 499963174912,
+      "free_bytes": 193481154560,
+      "used_bytes": 306482020352
+    }
   },
   "system": {
     "os": "macOS-15.x-arm64",
@@ -442,6 +520,9 @@ Metrics are split into two categories:
 | Duplicate app icon in Applications | Delete old copy: `rm -rf "/Applications/DepthLens Pro.app"` and reinstall from DMG |
 | `acceleration_ok: false` in `/health` | One or more GPU backends are unavailable or failed the tensor probe — inference still works on CPU |
 | `mypy` errors in CI | Run `mypy backend/` locally; ensure new code has correct type annotations matching `strict = True` |
+| `status: "degraded"` in `/health` | Memory pressure or disk usage exceeded 90% threshold — check system resources; inference continues normally |
+| `.env` values not picked up | Ensure `.env` is at the repository root (same level as `pyproject.toml`); key names are case-insensitive |
+| Docker container exits immediately | Verify `.env` is present (required by `docker-compose.yml`); check `docker logs <container>` for JSON-formatted startup errors |
 
 ---
 
@@ -470,9 +551,8 @@ See `SECURITY.md`. To report a vulnerability, do not open a public GitHub issue 
 - Video depth estimation pipeline
 - True 3D reconstruction (point clouds / meshes)
 - Persistent cache layer (Redis / disk)
-- Dockerized deployment workflow
-- Mobile-responsive UX improvements
 - Ground-truth metric support (Abs Rel, δ thresholds, LPIPS) via optional depth reference upload
+- Mobile-responsive UX improvements
 
 ---
 
@@ -501,7 +581,9 @@ GitHub: [https://github.com/AyushmanRaha](https://github.com/AyushmanRaha)
 
 ## Notes
 
-- Inference cache is in-memory and resets when the backend restarts. Use `DELETE /cache` to clear it manually, or via the session dashboard if exposed in a future UI update.
+- Inference cache is in-memory and resets when the backend restarts. Use `DELETE /cache` to clear it manually.
 - Maximum supported image size is **20 MB** per file; maximum dimension is **2048 px** on the longest side (auto-resized above this threshold).
 - GPU acceleration depends on local PyTorch backend support (`CUDA`, `MPS`, or `XPU`) and installed drivers / runtime.
 - The `backend/app.py` shim exists for compatibility with existing packaged Electron flows that invoke `uvicorn app:app` from inside the `backend/` directory. New integrations should prefer `uvicorn backend.app:app` from the repository root.
+- All backend log output is JSON-formatted. Use `jq` or a log collector to parse it: `uvicorn backend.app:app ... 2>&1 | jq .`
+- The `telemetry.memory` block falls back to `status: "unknown"` on platforms where neither `/proc/meminfo` nor `os.sysconf` is available (e.g. macOS without the relevant sysconf keys). Inference is unaffected.
