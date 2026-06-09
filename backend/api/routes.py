@@ -7,13 +7,17 @@ import logging
 import os
 import platform
 import shutil
+import time
 from typing import Any
+
+from backend.utils.hardware import DeviceMap
 
 import torch
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from backend.config import settings
 from backend.services import cache_service
 from backend.services.benchmarks import run_benchmark
 from backend.services.inference import (
@@ -22,6 +26,8 @@ from backend.services.inference import (
     SUPPORTED_MODELS,
     _fhash,
     loaded_model_keys,
+    normalize_metrics_mode,
+    parse_outputs,
     process_image,
 )
 from backend.utils.hardware import (
@@ -37,18 +43,132 @@ router = APIRouter()
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
+SERVICE_VERSION = "3.1.0"
+_SERVICE_STARTED_AT = time.time()
+_PROBE_TTL_SECONDS = 10.0
+_DEVICE_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "devices": None,
+    "primary": "cpu",
+    "error": None,
+}
+_ACCEL_CACHE: dict[str, Any] = {"expires_at": 0.0, "checks": None, "error": None}
 _ROUTE_INFERENCE_SEMAPHORE = asyncio.Semaphore(
     max(1, int(os.getenv("INFERENCE_MAX_CONCURRENCY", "2")))
 )
 
 
 async def process_image_async(
-    raw: bytes, model: str, colormap: str, device: str, filename: str | None
+    raw: bytes,
+    model: str,
+    colormap: str,
+    device: str,
+    filename: str | None,
+    metrics: str | None = None,
+    outputs: str | None = None,
+    max_dim: int | None = None,
 ) -> dict[str, Any]:
     """Offload blocking image inference while preserving route-level monkeypatching."""
 
     async with _ROUTE_INFERENCE_SEMAPHORE:
-        return await run_in_threadpool(process_image, raw, model, colormap, device, filename)
+        return await run_in_threadpool(
+            process_image, raw, model, colormap, device, filename, metrics, outputs, max_dim
+        )
+
+
+def _elapsed_ms(start: float) -> float:
+    return round((time.perf_counter() - start) * 1000, 2)
+
+
+def _fallback_cpu(error: str | None = None) -> DeviceMap:
+    cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or "System CPU"
+    return {
+        "cpu": {
+            "name": f"CPU · {cpu_name}",
+            "hardware_name": cpu_name,
+            "type": "cpu",
+            "compute_classes": ["cpu"],
+            "available": True,
+            **({"discovery_error": error} if error else {}),
+        }
+    }
+
+
+def _cached_devices(force: bool = False) -> tuple[DeviceMap, str, dict[str, Any]]:
+    now = time.time()
+    if (
+        not force
+        and _DEVICE_CACHE.get("devices") is not None
+        and float(_DEVICE_CACHE.get("expires_at", 0.0)) > now
+    ):
+        return (
+            _DEVICE_CACHE["devices"],
+            str(_DEVICE_CACHE.get("primary") or "cpu"),
+            {
+                "cached": True,
+                "error": _DEVICE_CACHE.get("error"),
+            },
+        )
+
+    started = time.perf_counter()
+    error = None
+    try:
+        devs = _available_devices()
+        if "cpu" not in devs:
+            devs = {**_fallback_cpu("device discovery omitted CPU"), **devs}
+        primary = _default_device_key()
+        if primary not in devs:
+            primary = "cpu"
+    except Exception as exc:
+        error = str(exc)
+        log.warning("Device discovery degraded: %s", exc)
+        devs = _fallback_cpu(error)
+        primary = "cpu"
+
+    _DEVICE_CACHE.update(
+        {
+            "expires_at": now + _PROBE_TTL_SECONDS,
+            "devices": devs,
+            "primary": primary,
+            "error": error,
+        }
+    )
+    return devs, primary, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
+
+
+def _cached_acceleration_checks(
+    devs: DeviceMap, force: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    now = time.time()
+    if (
+        not force
+        and _ACCEL_CACHE.get("checks") is not None
+        and float(_ACCEL_CACHE.get("expires_at", 0.0)) > now
+    ):
+        return _ACCEL_CACHE["checks"], {"cached": True, "error": _ACCEL_CACHE.get("error")}
+
+    started = time.perf_counter()
+    error = None
+    try:
+        checks = _acceleration_checks(devs)
+    except Exception as exc:
+        error = str(exc)
+        log.warning("Acceleration probe degraded: %s", exc)
+        checks = {
+            "cuda": {
+                "available": any(k.startswith("cuda:") for k in devs),
+                "operational": False,
+                "error": error,
+            },
+            "mps": {"available": "mps" in devs, "operational": False, "error": error},
+            "xpu": {
+                "available": any(k.startswith("xpu:") for k in devs),
+                "operational": False,
+                "error": error,
+            },
+        }
+    _ACCEL_CACHE.update({"expires_at": now + _PROBE_TTL_SECONDS, "checks": checks, "error": error})
+    return checks, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
 
 
 def _percent(numerator: int, denominator: int) -> float:
@@ -137,34 +257,76 @@ def _telemetry_status(*checks: dict[str, Any]) -> str:
 
 @router.get("/")
 async def root() -> dict[str, str]:
-    return {"service": "DepthLens Pro API", "version": "3.1.0"}
+    return {"service": "DepthLens Pro API", "version": SERVICE_VERSION}
+
+
+@router.get("/live")
+async def live() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "DepthLens Pro API",
+        "version": SERVICE_VERSION,
+        "pid": os.getpid(),
+        "timestamp": time.time(),
+        "uptime_seconds": round(time.time() - _SERVICE_STARTED_AT, 3),
+    }
 
 
 @router.get("/health")
 async def health() -> dict[str, Any]:
-    devs = _available_devices()
-    best = _default_device_key()
+    started = time.perf_counter()
+    devs, best, device_meta = _cached_devices()
     accel = {k: v for k, v in devs.items() if k != "cpu"}
-    checks = _acceleration_checks(devs)
-    accel_ok = any(c.get("operational") for c in checks.values() if c.get("available"))
+    checks, accel_meta = _cached_acceleration_checks(devs)
+    accel_ok = (
+        True
+        if not accel
+        else any(c.get("operational") for c in checks.values() if c.get("available"))
+    )
 
     memory = _memory_telemetry()
     disk = _disk_telemetry()
+    cache_started = time.perf_counter()
+    try:
+        cache_metrics = cache_service.metrics()
+        cache_error = None
+    except Exception as exc:
+        log.warning("Cache metrics degraded: %s", exc)
+        cache_metrics = {"status": "degraded", "error": str(exc)}
+        cache_error = str(exc)
+    cache_ms = _elapsed_ms(cache_started)
+
+    status = _telemetry_status(memory, disk)
+    if device_meta.get("error") or accel_meta.get("error") or cache_error:
+        status = "degraded"
 
     return {
-        "status": _telemetry_status(memory, disk),
-        "version": "3.1.0",
+        "status": status,
+        "diagnostics_status": status,
+        "version": SERVICE_VERSION,
         "primary_device": best,
         "devices": devs,
         "loaded_models": loaded_model_keys(),
         "cache_entries": cache_service.size(),
-        "cache_metrics": cache_service.metrics(),
+        "cache_metrics": cache_metrics,
         "torch_version": torch.__version__,
         "cuda_available": any(k.startswith("cuda:") for k in devs),
         "mps_available": "mps" in devs,
         "xpu_available": any(k.startswith("xpu:") for k in devs),
-        "acceleration_ok": True if not accel else accel_ok,
+        "acceleration_ok": accel_ok,
         "acceleration_checks": checks,
+        "warmup": {
+            "enabled": settings.DEPTHLENS_PRELOAD_MODEL,
+            "model": settings.DEPTHLENS_WARMUP_MODEL,
+            "device": settings.DEPTHLENS_WARMUP_DEVICE,
+            "loaded_models": loaded_model_keys(),
+        },
+        "timings_ms": {
+            "device_discovery": device_meta.get("duration_ms", 0.0),
+            "accelerator_probe": accel_meta.get("duration_ms", 0.0),
+            "cache_metrics": cache_ms,
+            "health_generation": _elapsed_ms(started),
+        },
         "telemetry": {
             "memory": memory,
             "disk": disk,
@@ -172,15 +334,16 @@ async def health() -> dict[str, Any]:
         "system": {
             "os": platform.platform(),
             "machine": platform.machine(),
-            "cpu": devs["cpu"]["hardware_name"],
-            "accelerators": [d["name"] for d in accel.values()],
+            "cpu": devs.get("cpu", {}).get("hardware_name", "System CPU"),
+            "accelerators": [d["name"] for d in accel.values() if "name" in d],
         },
     }
 
 
 @router.get("/devices")
 async def list_devices() -> dict[str, Any]:
-    return {"devices": _available_devices()}
+    devs, primary, meta = _cached_devices()
+    return {"devices": devs, "primary_device": primary, "cached": meta.get("cached", False)}
 
 
 @router.get("/models")
@@ -214,13 +377,22 @@ async def estimate(
     model: str = Form("MiDaS_small"),
     colormap: str = Form("inferno"),
     device: str = Form("auto"),
+    metrics: str = Form(settings.DEPTHLENS_DEFAULT_METRICS),
+    outputs: str = Form(settings.DEPTHLENS_DEFAULT_OUTPUTS),
+    max_dim: int | None = Form(None),
 ) -> JSONResponse:
     if model not in SUPPORTED_MODELS:
         raise HTTPException(422, f"Unknown model '{model}'")
     if colormap not in COLORMAPS:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
+    try:
+        metrics = normalize_metrics_mode(metrics)
+        outputs = ",".join(parse_outputs(outputs))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
-    avail = list(_available_devices().keys()) + ["auto"]
+    devs, _, _ = _cached_devices()
+    avail = list(devs.keys()) + ["auto"]
     if device not in avail:
         raise HTTPException(422, f"Device '{device}' unavailable. Options: {avail}")
 
@@ -232,14 +404,16 @@ async def estimate(
         raise HTTPException(413, f"File exceeds {MAX_SIZE_MB} MB limit")
 
     resolved = str(_resolve(device))
-    ck = _fhash(raw, model, colormap, resolved)
+    ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
     cached = cache_service.get(ck)
     if cached is not None:
         log.info("Cache hit: %r", file.filename)
         return JSONResponse({**cached, "cached": True})
 
     try:
-        result = await process_image_async(raw, model, colormap, resolved, file.filename)
+        result = await process_image_async(
+            raw, model, colormap, resolved, file.filename, metrics, outputs, max_dim
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -263,9 +437,21 @@ async def batch(
     model: str = Form("MiDaS_small"),
     colormap: str = Form("inferno"),
     device: str = Form("auto"),
+    metrics: str = Form(settings.DEPTHLENS_DEFAULT_METRICS),
+    outputs: str = Form(settings.DEPTHLENS_DEFAULT_OUTPUTS),
+    max_dim: int | None = Form(None),
 ) -> JSONResponse:
     if len(files) > 10:
         raise HTTPException(422, "Batch limit: 10 images")
+    if model not in SUPPORTED_MODELS:
+        raise HTTPException(422, f"Unknown model '{model}'")
+    if colormap not in COLORMAPS:
+        raise HTTPException(422, f"Unknown colormap '{colormap}'")
+    try:
+        metrics = normalize_metrics_mode(metrics)
+        outputs = ",".join(parse_outputs(outputs))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     resolved = str(_resolve(device))
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str | None]] = []
@@ -274,13 +460,15 @@ async def batch(
             raw = await upload.read()
             if len(raw) / 1024**2 > MAX_SIZE_MB:
                 raise ValueError("File too large")
-            ck = _fhash(raw, model, colormap, resolved)
+            ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
             cached = cache_service.get(ck)
             if cached is not None:
                 results.append({**cached, "cached": True})
                 continue
 
-            res = await process_image_async(raw, model, colormap, resolved, upload.filename)
+            res = await process_image_async(
+                raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
+            )
             cache_service.set(ck, res)
             results.append(res)
         except Exception as exc:

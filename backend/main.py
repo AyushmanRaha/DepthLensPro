@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -18,8 +19,8 @@ from fastapi.responses import JSONResponse
 from backend.api.routes import router
 from backend.config import settings
 from backend.services import cache_service
-from backend.services.inference import _load_model, clear_models
-from backend.utils.hardware import _available_devices, _default_device_key
+from backend.services.inference import SUPPORTED_MODELS, _load_model, clear_models
+from backend.utils.hardware import _available_devices, _default_device_key, _resolve
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -69,24 +70,46 @@ configure_logging(settings.LOG_LEVEL)
 log = logging.getLogger("depthlens")
 
 
+async def _warm_default_model() -> None:
+    """Optionally warm one model after the ASGI app is already serving /live."""
+    model = settings.DEPTHLENS_WARMUP_MODEL
+    requested_device = settings.DEPTHLENS_WARMUP_DEVICE
+    if model not in SUPPORTED_MODELS:
+        log.warning("⚠️  Warmup skipped: unknown model %s", model)
+        return
+    try:
+        device = str(_resolve(requested_device))
+    except Exception as exc:
+        log.warning(
+            "⚠️  Warmup device %s unavailable; falling back to CPU: %s", requested_device, exc
+        )
+        device = "cpu"
+    try:
+        log.info("🔥 Background warmup starting: %s on %s", model, device)
+        await asyncio.to_thread(_load_model, model, device)
+        log.info("✅ Background warmup complete: %s on %s", model, device)
+    except Exception as exc:
+        log.warning("⚠️  Background warmup failed for %s on %s: %s", model, device, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Warm the default model on startup and clear runtime caches on shutdown."""
-    devs = _available_devices()
-    best = _default_device_key()
-    log.info("🚀 DepthLens Pro v3.1 — devices: %s  best: %s", list(devs), best)
+    """Start quickly; optional model warmup runs after liveness is available."""
     try:
-        _load_model("MiDaS_small", best)
-        log.info("✅ MiDaS_small pre-loaded on %s", best)
+        devs = _available_devices()
+        best = _default_device_key()
+        log.info("🚀 DepthLens Pro v3.1 — devices: %s  best: %s", list(devs), best)
     except Exception as exc:
-        log.warning("⚠️  Pre-load on %s skipped: %s", best, exc)
-        try:
-            _load_model("MiDaS_small", "cpu")
-            log.info("✅ MiDaS_small pre-loaded on CPU (fallback)")
-        except Exception as fallback_exc:
-            log.warning("⚠️  CPU pre-load also skipped: %s", fallback_exc)
+        log.warning("⚠️  Device discovery degraded during startup: %s", exc)
+    warmup_task: asyncio.Task[None] | None = None
+    if settings.DEPTHLENS_PRELOAD_MODEL:
+        warmup_task = asyncio.create_task(_warm_default_model())
+    else:
+        log.info("Model preload disabled; first inference will lazy-load the selected model")
     yield
     log.info("🛑 Shutting down")
+    if warmup_task and not warmup_task.done():
+        warmup_task.cancel()
     clear_models()
     cache_service.clear()
 

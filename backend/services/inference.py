@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from starlette.concurrency import run_in_threadpool
 
+from backend.config import settings
 from backend.depth_models import ONNXExecutionEngine, onnx_model_path
 
 log = logging.getLogger("depthlens")
@@ -50,10 +51,13 @@ COLORMAPS: dict[str, int] = {
     "turbo": cv2.COLORMAP_TURBO,
 }
 
-MAX_DIM = 2048
+MAX_DIM = int(settings.DEPTHLENS_MAX_DIM)
 MAX_SIZE_MB = 20
 MODELS: dict[str, tuple[torch.nn.Module, torch.device]] = {}
 ONNX_ENGINES: dict[str, ONNXExecutionEngine] = {}
+_DEPTH_CACHE: dict[str, tuple[float, np.ndarray, dict[str, int]]] = {}
+_DEPTH_CACHE_MAX_ENTRIES = 12
+_ONNX_MISSING_WARNED: set[str] = set()
 TRANSFORMS: dict[str, Callable[[np.ndarray], torch.Tensor]] = {}
 _MODEL_LOCK = threading.RLock()
 _MODEL_FORWARD_LOCKS: dict[str, threading.Lock] = {}
@@ -70,6 +74,8 @@ def clear_models() -> None:
         TRANSFORMS.clear()
         _MODEL_FORWARD_LOCKS.clear()
         _ONNX_FORWARD_LOCKS.clear()
+        _DEPTH_CACHE.clear()
+        _ONNX_MISSING_WARNED.clear()
 
 
 def loaded_model_keys() -> list[str]:
@@ -112,15 +118,16 @@ def _load_model(
         return (model, device), TRANSFORMS[model_name]
 
 
-def _decode(raw: bytes) -> np.ndarray:
+def _decode(raw: bytes, max_dim: int | None = None) -> np.ndarray:
     """Decode image bytes into a BGR OpenCV image, resizing oversized inputs."""
     arr = np.frombuffer(raw, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("Cannot decode image — corrupt or unsupported format")
     h, w = img.shape[:2]
-    if max(h, w) > MAX_DIM:
-        scale = MAX_DIM / max(h, w)
+    limit = max(256, int(max_dim or MAX_DIM))
+    if max(h, w) > limit:
+        scale = limit / max(h, w)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
     return img
 
@@ -180,7 +187,11 @@ def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
 
     if onnx_model_path(model_name).exists():
         return _infer_onnx(img_bgr, model_name, device_str)
-    log.warning("ONNX weights unavailable for %s; falling back to PyTorch execution", model_name)
+    if model_name not in _ONNX_MISSING_WARNED:
+        log.warning(
+            "ONNX weights unavailable for %s; falling back to PyTorch execution", model_name
+        )
+        _ONNX_MISSING_WARNED.add(model_name)
     return _infer_torch(img_bgr, model_name, device_str)
 
 
@@ -196,9 +207,58 @@ def _b64(img: np.ndarray) -> str:
     return base64.b64encode(buf.tobytes()).decode()
 
 
-def _fhash(raw: bytes, model: str, cmap: str, dev: str) -> str:
-    """Build a stable cache key for request image bytes and inference options."""
-    return hashlib.sha1(f"{model}:{cmap}:{dev}:{hashlib.md5(raw).hexdigest()}".encode()).hexdigest()
+def _raw_hash(raw: bytes) -> str:
+    """Return a stable content hash for raw image bytes."""
+    return hashlib.md5(raw).hexdigest()
+
+
+def _depth_cache_key(raw: bytes, model: str, dev: str, max_dim: int | None) -> str:
+    """Cache normalized depth independently from color/output/metric options."""
+    limit = max(256, int(max_dim or MAX_DIM))
+    return hashlib.sha1(f"depth:{model}:{dev}:{limit}:{_raw_hash(raw)}".encode()).hexdigest()
+
+
+def _fhash(
+    raw: bytes,
+    model: str,
+    cmap: str,
+    dev: str,
+    metrics: str = "full",
+    outputs: str = "color,gray",
+    max_dim: int | None = None,
+) -> str:
+    """Build a stable cache key for request image bytes and response options."""
+    limit = max(256, int(max_dim or MAX_DIM))
+    output_key = ",".join(parse_outputs(outputs))
+    metric_key = normalize_metrics_mode(metrics)
+    return hashlib.sha1(
+        f"{model}:{cmap}:{dev}:{metric_key}:{output_key}:{limit}:{_raw_hash(raw)}".encode()
+    ).hexdigest()
+
+
+def normalize_metrics_mode(mode: str | None) -> str:
+    value = (mode or settings.DEPTHLENS_DEFAULT_METRICS or "fast").strip().lower()
+    if value not in {"none", "fast", "full"}:
+        raise ValueError("metrics must be one of: none, fast, full")
+    return value
+
+
+def parse_outputs(outputs: str | None) -> tuple[str, ...]:
+    raw = outputs if outputs is not None else settings.DEPTHLENS_DEFAULT_OUTPUTS
+    requested = [part.strip().lower() for part in str(raw or "color").split(",") if part.strip()]
+    if not requested:
+        requested = ["color"]
+    normalized: list[str] = []
+    for item in requested:
+        if item in {"depth", "depth_map"}:
+            item = "color"
+        if item in {"grayscale", "grey"}:
+            item = "gray"
+        if item not in {"color", "gray"}:
+            raise ValueError("outputs must contain only color and/or gray")
+        if item not in normalized:
+            normalized.append(item)
+    return tuple(normalized)
 
 
 def _ssim(a: np.ndarray, b: np.ndarray) -> float:
@@ -214,6 +274,57 @@ def _ssim(a: np.ndarray, b: np.ndarray) -> float:
     num = (2 * mu_a * mu_b + c1) * (2 * sig_ab + c2)
     den = (mu_a**2 + mu_b**2 + c1) * (sig_a + sig_b + c2)
     return float(np.mean(num / (den + 1e-10)))
+
+
+def _compute_fast_metrics(depth: np.ndarray) -> dict[str, Any]:
+    """Compute lightweight metrics for interactive workspace inference."""
+    depth32 = depth.astype(np.float32, copy=False)
+    flat = depth32.ravel()
+    hist, edges = np.histogram(flat, bins=32, range=(0.0, 1.0))
+    hp = hist / max(float(hist.sum()), 1.0)
+    entropy = float(-np.sum(hp[hp > 0] * np.log2(hp[hp > 0])))
+    return {
+        "min": round(float(flat.min()), 4),
+        "max": round(float(flat.max()), 4),
+        "mean": round(float(flat.mean()), 4),
+        "std": round(float(flat.std()), 4),
+        "entropy": round(entropy, 3),
+        "histogram": {
+            "counts": hist.tolist(),
+            "bin_edges": [round(float(e), 3) for e in edges.tolist()],
+        },
+    }
+
+
+def _metrics_for_mode(depth: np.ndarray, img_bgr: np.ndarray, mode: str) -> dict[str, Any]:
+    if mode == "none":
+        return {}
+    if mode == "fast":
+        return _compute_fast_metrics(depth)
+    return _compute_metrics(depth, img_bgr)
+
+
+def _get_cached_depth(cache_key: str) -> tuple[np.ndarray, dict[str, int]] | None:
+    now = time.time()
+    item = _DEPTH_CACHE.get(cache_key)
+    if item is None:
+        return None
+    expires_at, depth, resolution = item
+    if expires_at <= now:
+        _DEPTH_CACHE.pop(cache_key, None)
+        return None
+    return depth.copy(), dict(resolution)
+
+
+def _set_cached_depth(cache_key: str, depth: np.ndarray, resolution: dict[str, int]) -> None:
+    if len(_DEPTH_CACHE) >= _DEPTH_CACHE_MAX_ENTRIES:
+        oldest = min(_DEPTH_CACHE.items(), key=lambda kv: kv[1][0])[0]
+        _DEPTH_CACHE.pop(oldest, None)
+    _DEPTH_CACHE[cache_key] = (
+        time.time() + int(settings.CACHE_TTL_SECONDS),
+        depth.copy(),
+        dict(resolution),
+    )
 
 
 def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict[str, Any]:
@@ -294,33 +405,67 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict[str, Any]:
 
 
 def process_image(
-    raw: bytes, model: str, colormap: str, device: str, filename: str | None
+    raw: bytes,
+    model: str,
+    colormap: str,
+    device: str,
+    filename: str | None,
+    metrics: str | None = None,
+    outputs: str | None = None,
+    max_dim: int | None = None,
 ) -> dict[str, Any]:
     """Decode, infer, colorize, and package one image response."""
-    img = _decode(raw)
-    t0 = time.perf_counter()
-    depth = _infer(img, model, device)
-    lat = round((time.perf_counter() - t0) * 1000, 1)
-    col = _colorize(depth, colormap)
-    gray = cv2.cvtColor((depth * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
-    return {
-        "depth_map": _b64(col),
-        "grayscale": _b64(gray),
-        "metrics": _compute_metrics(depth, img),
+    metrics_mode = normalize_metrics_mode(metrics)
+    output_set = parse_outputs(outputs)
+    depth_key = _depth_cache_key(raw, model, device, max_dim)
+    cached_depth = _get_cached_depth(depth_key)
+    img = _decode(raw, max_dim=max_dim)
+    if cached_depth is None:
+        t0 = time.perf_counter()
+        depth = _infer(img, model, device)
+        lat = round((time.perf_counter() - t0) * 1000, 1)
+        resolution = {"width": img.shape[1], "height": img.shape[0]}
+        _set_cached_depth(depth_key, depth, resolution)
+        depth_cached = False
+    else:
+        depth, resolution = cached_depth
+        lat = 0.0
+        depth_cached = True
+
+    payload: dict[str, Any] = {
+        "metrics": _metrics_for_mode(depth, img, metrics_mode),
         "latency_ms": lat,
         "model": model,
         "colormap": colormap,
         "device_used": device,
-        "resolution": {"width": img.shape[1], "height": img.shape[0]},
+        "resolution": resolution,
         "filename": filename,
         "cached": False,
+        "depth_cached": depth_cached,
+        "metrics_mode": metrics_mode,
+        "outputs": list(output_set),
     }
+    if "color" in output_set:
+        payload["depth_map"] = _b64(_colorize(depth, colormap))
+    if "gray" in output_set:
+        gray = cv2.cvtColor((depth * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        payload["grayscale"] = _b64(gray)
+    return payload
 
 
 async def process_image_async(
-    raw: bytes, model: str, colormap: str, device: str, filename: str | None
+    raw: bytes,
+    model: str,
+    colormap: str,
+    device: str,
+    filename: str | None,
+    metrics: str | None = None,
+    outputs: str | None = None,
+    max_dim: int | None = None,
 ) -> dict[str, Any]:
     """Run the blocking decode/inference/encode pipeline off the ASGI event loop."""
 
     async with _INFERENCE_SEMAPHORE:
-        return await run_in_threadpool(process_image, raw, model, colormap, device, filename)
+        return await run_in_threadpool(
+            process_image, raw, model, colormap, device, filename, metrics, outputs, max_dim
+        )

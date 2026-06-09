@@ -41,6 +41,12 @@ _ENV_KEYS = (
     "REDIS_SOCKET_TIMEOUT_SECONDS",
     "REDIS_MAX_CONNECTIONS",
     "CACHE_TTL_SECONDS",
+    "DEPTHLENS_PRELOAD_MODEL",
+    "DEPTHLENS_WARMUP_MODEL",
+    "DEPTHLENS_WARMUP_DEVICE",
+    "DEPTHLENS_MAX_DIM",
+    "DEPTHLENS_DEFAULT_METRICS",
+    "DEPTHLENS_DEFAULT_OUTPUTS",
 )
 
 
@@ -71,6 +77,28 @@ class Settings(BaseSettings):  # type: ignore[misc]
     )
     CACHE_TTL_SECONDS: int = Field(
         default=3600, ge=1, description="TTL applied to generated cache keys."
+    )
+    DEPTHLENS_PRELOAD_MODEL: bool = Field(
+        default=False,
+        description="Run optional model warmup in the background after FastAPI is live.",
+    )
+    DEPTHLENS_WARMUP_MODEL: str = Field(
+        default="MiDaS_small", description="Model to warm when DEPTHLENS_PRELOAD_MODEL is enabled."
+    )
+    DEPTHLENS_WARMUP_DEVICE: str = Field(
+        default="auto", description="Device to warm when DEPTHLENS_PRELOAD_MODEL is enabled."
+    )
+    DEPTHLENS_MAX_DIM: int = Field(
+        default=1536,
+        ge=256,
+        le=4096,
+        description="Maximum long image edge for interactive inference.",
+    )
+    DEPTHLENS_DEFAULT_METRICS: str = Field(
+        default="fast", description="Default estimate metrics mode: none, fast, or full."
+    )
+    DEPTHLENS_DEFAULT_OUTPUTS: str = Field(
+        default="color", description="Default estimate outputs: color, gray, or color,gray."
     )
 
     @field_validator("LOG_LEVEL", mode="before")
