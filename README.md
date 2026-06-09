@@ -180,7 +180,7 @@ DepthLensPro/
 
 ## Installation & Setup
 
-### Variant A — Desktop App (Recommended)
+### Desktop App (Recommended)
 
 Download the latest release from the GitHub Releases page.
 
@@ -196,22 +196,34 @@ xattr -cr "/Applications/DepthLens Pro.app"
 
 Then open normally. The inference engine starts automatically and a splash screen is shown until it is ready.
 
+> **Note:** First-time model loading downloads weights from `intel-isl/MiDaS` via `torch.hub`, so internet access is required during the initial model bootstrap.
+
 ---
 
-### Variant B — Manual Setup (Development)
+### Desktop Usage Guideline
+
+1. Launch **DepthLens Pro** from Applications or the installed desktop shortcut.
+2. Wait for the splash screen while the bundled FastAPI inference backend starts automatically.
+3. Click **Get Started** to enter the workspace.
+4. Upload one or more 2D images via drag-and-drop or the file browser (PNG, JPG, WEBP, BMP; max 20 MB each).
+5. Select the MiDaS model, colormap, and compute device.
+6. Click **Generate Depth Maps** to create colorized and grayscale depth outputs.
+7. Review the generated cards, open the **Lightbox** for detailed metrics, and download outputs as needed.
+8. Use the **COMPARE** panel to run all supported models against a single image and compare metrics side by side.
+9. Quit the desktop app normally; the inference backend is stopped automatically.
+
+---
+
+### Desktop Development Mode
 
 #### Prerequisites
 
 - Python 3.10+
 - pip
 - Git
-- Node.js (only if working on the Electron shell)
+- Node.js
 
-> **Note:** First-time model loading downloads weights from `intel-isl/MiDaS` via `torch.hub`, so internet access is required during the initial model bootstrap.
-
----
-
-#### Backend Setup
+#### Setup
 
 ##### macOS / Linux
 
@@ -224,11 +236,13 @@ cd DepthLensPro
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
+# Install backend dependencies used by the Electron shell
 pip install -r backend/requirements.txt
 
-# Run backend server
-uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+# Install Electron dependencies and launch the desktop app
+cd electron-app
+npm install
+npm start
 ```
 
 ##### Windows
@@ -242,67 +256,6 @@ venv\Scripts\activate
 
 pip install -r backend/requirements.txt
 
-uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
-```
-
-> The packaged Electron app launches uvicorn from inside the `backend/` directory using `uvicorn app:app`. Both invocation styles (`backend.app:app` and `app:app`) are supported via the `backend/app.py` shim.
-
----
-
-#### Environment Configuration
-
-The backend reads optional configuration from a `.env` file at the repo root or from process environment variables. All settings have safe defaults and are validated at startup via `backend/config.py`.
-
-| Variable | Default | Description |
-|---|---|---|
-| `HOST` | `0.0.0.0` | Host interface for the ASGI server |
-| `PORT` | `8000` | ASGI server port (1–65535) |
-| `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) |
-| `DEBUG` | `false` | Enable FastAPI debug responses |
-
-Example `.env`:
-
-```
-HOST=127.0.0.1
-PORT=8000
-LOG_LEVEL=DEBUG
-DEBUG=false
-```
-
----
-
-#### Running the Full Application (Manual)
-
-**1. Start the backend:**
-
-```bash
-uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
-```
-
-**2. Serve the frontend:**
-
-```bash
-cd frontend
-python -m http.server 5500
-```
-
-**3. Open in browser:**
-
-```
-http://localhost:5500
-```
-
-**4. Verify backend health (optional):**
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
----
-
-#### Electron Development Mode
-
-```bash
 cd electron-app
 npm install
 npm start
@@ -312,7 +265,7 @@ The Electron shell auto-detects `NODE_ENV=development` (or `app.isPackaged === f
 
 ---
 
-#### Build Desktop App
+### Build Desktop App
 
 ```bash
 cd electron-app
@@ -326,26 +279,6 @@ npm run build:win
 # Both
 npm run build:all
 ```
-
----
-
-### Variant C — Docker
-
-```bash
-# Build and run (requires .env file at repo root)
-docker compose up --build
-
-# Or build manually
-docker build -t depthlenspro-backend .
-docker run -p 8000:8000 --env-file .env depthlenspro-backend
-```
-
-The Docker image is a multi-stage build. The `builder` stage installs wheels; the `runner` stage is a minimal Python 3.10-slim image with `libgl1` and `libglib2.0-0` for OpenCV support. The container runs as a non-root `depthlens` user.
-
-The `docker-compose.yml` service includes:
-- Resource limits: `2.0` CPUs, `4 GB` memory
-- `init: true` for proper PID 1 signal handling
-- A healthcheck polling `/health` every 30 seconds with a 45-second start period
 
 ---
 
