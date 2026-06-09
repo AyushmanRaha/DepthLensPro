@@ -16,11 +16,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.api.live import router as live_router
 from backend.api.routes import router
 from backend.config import settings
-from backend.services import cache_service
-from backend.services.inference import SUPPORTED_MODELS, _load_model, clear_models
-from backend.utils.hardware import _available_devices, _default_device_key, _resolve
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -74,6 +72,9 @@ async def _warm_default_model() -> None:
     """Optionally warm one model after the ASGI app is already serving /live."""
     model = settings.DEPTHLENS_WARMUP_MODEL
     requested_device = settings.DEPTHLENS_WARMUP_DEVICE
+    from backend.services.inference import SUPPORTED_MODELS, _load_model
+    from backend.utils.hardware import _resolve
+
     if model not in SUPPORTED_MODELS:
         log.warning("⚠️  Warmup skipped: unknown model %s", model)
         return
@@ -95,23 +96,30 @@ async def _warm_default_model() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start quickly; optional model warmup runs after liveness is available."""
-    try:
-        devs = _available_devices()
-        best = _default_device_key()
-        log.info("🚀 DepthLens Pro v3.1 — devices: %s  best: %s", list(devs), best)
-    except Exception as exc:
-        log.warning("⚠️  Device discovery degraded during startup: %s", exc)
+    log.info("ASGI_STARTUP_BEGIN")
     warmup_task: asyncio.Task[None] | None = None
     if settings.DEPTHLENS_PRELOAD_MODEL:
         warmup_task = asyncio.create_task(_warm_default_model())
     else:
         log.info("Model preload disabled; first inference will lazy-load the selected model")
-    yield
-    log.info("🛑 Shutting down")
-    if warmup_task and not warmup_task.done():
-        warmup_task.cancel()
-    clear_models()
-    cache_service.clear()
+    log.info("ASGI_STARTUP_YIELDING")
+    log.info("ASGI_STARTUP_COMPLETE")
+    try:
+        yield
+    finally:
+        log.info("🛑 Shutting down")
+        if warmup_task and not warmup_task.done():
+            warmup_task.cancel()
+        try:
+            from backend.services.inference import clear_models
+            clear_models()
+        except Exception as exc:
+            log.warning("Model cleanup degraded: %s", exc)
+        try:
+            from backend.services import cache_service
+            cache_service.clear()
+        except Exception as exc:
+            log.warning("Cache cleanup degraded: %s", exc)
 
 
 app = FastAPI(title="DepthLens Pro API", version="3.1.0", debug=settings.DEBUG, lifespan=lifespan)
@@ -122,6 +130,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(live_router)
 app.include_router(router)
 
 

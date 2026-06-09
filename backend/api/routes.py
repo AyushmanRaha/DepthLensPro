@@ -10,32 +10,79 @@ import shutil
 import time
 from typing import Any
 
-from backend.utils.hardware import DeviceMap
-
-import torch
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from backend.config import settings
-from backend.services import cache_service
-from backend.services.benchmarks import run_benchmark
-from backend.services.inference import (
-    COLORMAPS,
-    MAX_SIZE_MB,
-    SUPPORTED_MODELS,
-    _fhash,
-    loaded_model_keys,
-    normalize_metrics_mode,
-    parse_outputs,
-    process_image,
-)
-from backend.utils.hardware import (
-    _acceleration_checks,
-    _available_devices,
-    _default_device_key,
-    _resolve,
-)
+from backend.api.live import SERVICE_VERSION
+
+
+def _available_devices():
+    from backend.utils.hardware import _available_devices as impl
+    return impl()
+
+
+def _default_device_key():
+    from backend.utils.hardware import _default_device_key as impl
+    return impl()
+
+
+def _acceleration_checks(devs):
+    from backend.utils.hardware import _acceleration_checks as impl
+    return impl(devs)
+
+
+def _resolve(device):
+    from backend.utils.hardware import _resolve as impl
+    return impl(device)
+
+
+def _inference():
+    from backend.services import inference
+    return inference
+
+
+def _cache_service():
+    from backend.services import cache_service
+    return cache_service
+
+
+def run_benchmark(model: str, device: str, iterations: int):
+    from backend.services.benchmarks import run_benchmark as impl
+    return impl(model=model, device=device, iterations=iterations)
+
+
+def process_image(*args, **kwargs):
+    return _inference().process_image(*args, **kwargs)
+
+
+def loaded_model_keys():
+    try:
+        return _inference().loaded_model_keys()
+    except Exception as exc:
+        log.warning("Loaded model inspection degraded: %s", exc)
+        return []
+
+
+def _torch_version() -> str | None:
+    try:
+        return __import__("torch").__version__
+    except Exception as exc:
+        log.warning("Torch version inspection degraded: %s", exc)
+        return None
+
+
+def _fhash(*args, **kwargs):
+    return _inference()._fhash(*args, **kwargs)
+
+
+def normalize_metrics_mode(*args, **kwargs):
+    return _inference().normalize_metrics_mode(*args, **kwargs)
+
+
+def parse_outputs(*args, **kwargs):
+    return _inference().parse_outputs(*args, **kwargs)
 
 log = logging.getLogger("depthlens")
 router = APIRouter()
@@ -43,8 +90,6 @@ router = APIRouter()
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
-SERVICE_VERSION = "3.1.0"
-_SERVICE_STARTED_AT = time.time()
 _PROBE_TTL_SECONDS = 10.0
 _DEVICE_CACHE: dict[str, Any] = {
     "expires_at": 0.0,
@@ -80,7 +125,7 @@ def _elapsed_ms(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 2)
 
 
-def _fallback_cpu(error: str | None = None) -> DeviceMap:
+def _fallback_cpu(error: str | None = None) -> dict[str, Any]:
     cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or "System CPU"
     return {
         "cpu": {
@@ -94,7 +139,7 @@ def _fallback_cpu(error: str | None = None) -> DeviceMap:
     }
 
 
-def _cached_devices(force: bool = False) -> tuple[DeviceMap, str, dict[str, Any]]:
+def _cached_devices(force: bool = False) -> tuple[dict[str, Any], str, dict[str, Any]]:
     now = time.time()
     if (
         not force
@@ -137,7 +182,7 @@ def _cached_devices(force: bool = False) -> tuple[DeviceMap, str, dict[str, Any]
 
 
 def _cached_acceleration_checks(
-    devs: DeviceMap, force: bool = False
+    devs: dict[str, Any], force: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     now = time.time()
     if (
@@ -255,23 +300,6 @@ def _telemetry_status(*checks: dict[str, Any]) -> str:
     return "degraded" if any(check.get("status") == "degraded" for check in checks) else "ok"
 
 
-@router.get("/")
-async def root() -> dict[str, str]:
-    return {"service": "DepthLens Pro API", "version": SERVICE_VERSION}
-
-
-@router.get("/live")
-async def live() -> dict[str, Any]:
-    return {
-        "status": "ok",
-        "service": "DepthLens Pro API",
-        "version": SERVICE_VERSION,
-        "pid": os.getpid(),
-        "timestamp": time.time(),
-        "uptime_seconds": round(time.time() - _SERVICE_STARTED_AT, 3),
-    }
-
-
 @router.get("/health")
 async def health() -> dict[str, Any]:
     started = time.perf_counter()
@@ -288,7 +316,7 @@ async def health() -> dict[str, Any]:
     disk = _disk_telemetry()
     cache_started = time.perf_counter()
     try:
-        cache_metrics = cache_service.metrics()
+        cache_metrics = _cache_service().metrics()
         cache_error = None
     except Exception as exc:
         log.warning("Cache metrics degraded: %s", exc)
@@ -307,9 +335,9 @@ async def health() -> dict[str, Any]:
         "primary_device": best,
         "devices": devs,
         "loaded_models": loaded_model_keys(),
-        "cache_entries": cache_service.size(),
+        "cache_entries": _cache_service().size(),
         "cache_metrics": cache_metrics,
-        "torch_version": torch.__version__,
+        "torch_version": _torch_version(),
         "cuda_available": any(k.startswith("cuda:") for k in devs),
         "mps_available": "mps" in devs,
         "xpu_available": any(k.startswith("xpu:") for k in devs),
@@ -348,12 +376,12 @@ async def list_devices() -> dict[str, Any]:
 
 @router.get("/models")
 async def list_models() -> dict[str, list[dict[str, str]]]:
-    return {"models": [{"id": k, **v} for k, v in SUPPORTED_MODELS.items()]}
+    return {"models": [{"id": k, **v} for k, v in _inference().SUPPORTED_MODELS.items()]}
 
 
 @router.get("/colormaps")
 async def list_colormaps() -> dict[str, list[str]]:
-    return {"colormaps": list(COLORMAPS.keys())}
+    return {"colormaps": list(_inference().COLORMAPS.keys())}
 
 
 @router.get("/api/benchmark")
@@ -381,9 +409,9 @@ async def estimate(
     outputs: str = Form(settings.DEPTHLENS_DEFAULT_OUTPUTS),
     max_dim: int | None = Form(None),
 ) -> JSONResponse:
-    if model not in SUPPORTED_MODELS:
+    if model not in _inference().SUPPORTED_MODELS:
         raise HTTPException(422, f"Unknown model '{model}'")
-    if colormap not in COLORMAPS:
+    if colormap not in _inference().COLORMAPS:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
         metrics = normalize_metrics_mode(metrics)
@@ -400,12 +428,12 @@ async def estimate(
         raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
-    if len(raw) / 1024**2 > MAX_SIZE_MB:
-        raise HTTPException(413, f"File exceeds {MAX_SIZE_MB} MB limit")
+    if len(raw) / 1024**2 > _inference().MAX_SIZE_MB:
+        raise HTTPException(413, f"File exceeds {_inference().MAX_SIZE_MB} MB limit")
 
     resolved = str(_resolve(device))
     ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
-    cached = cache_service.get(ck)
+    cached = _cache_service().get(ck)
     if cached is not None:
         log.info("Cache hit: %r", file.filename)
         return JSONResponse({**cached, "cached": True})
@@ -420,7 +448,7 @@ async def estimate(
         log.exception("Inference failed")
         raise HTTPException(500, f"Inference error: {exc}") from exc
 
-    cache_service.set(ck, result)
+    _cache_service().set(ck, result)
     log.info(
         "✅ %r | %s | %s | %s ms",
         file.filename,
@@ -443,9 +471,9 @@ async def batch(
 ) -> JSONResponse:
     if len(files) > 10:
         raise HTTPException(422, "Batch limit: 10 images")
-    if model not in SUPPORTED_MODELS:
+    if model not in _inference().SUPPORTED_MODELS:
         raise HTTPException(422, f"Unknown model '{model}'")
-    if colormap not in COLORMAPS:
+    if colormap not in _inference().COLORMAPS:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
         metrics = normalize_metrics_mode(metrics)
@@ -458,10 +486,10 @@ async def batch(
     for upload in files:
         try:
             raw = await upload.read()
-            if len(raw) / 1024**2 > MAX_SIZE_MB:
+            if len(raw) / 1024**2 > _inference().MAX_SIZE_MB:
                 raise ValueError("File too large")
             ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
-            cached = cache_service.get(ck)
+            cached = _cache_service().get(ck)
             if cached is not None:
                 results.append({**cached, "cached": True})
                 continue
@@ -469,7 +497,7 @@ async def batch(
             res = await process_image_async(
                 raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
             )
-            cache_service.set(ck, res)
+            _cache_service().set(ck, res)
             results.append(res)
         except Exception as exc:
             errors.append({"filename": upload.filename, "error": str(exc)})
@@ -488,9 +516,9 @@ async def batch(
 async def cache_metrics() -> dict[str, Any]:
     """Expose live Redis/fallback cache metrics for frontend dashboards."""
 
-    return cache_service.metrics()
+    return _cache_service().metrics()
 
 
 @router.delete("/cache")
 async def clear_cache() -> dict[str, int]:
-    return {"cleared": cache_service.clear()}
+    return {"cleared": _cache_service().clear()}
