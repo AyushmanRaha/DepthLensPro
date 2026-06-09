@@ -143,6 +143,7 @@ async def health() -> dict[str, Any]:
         "devices": devs,
         "loaded_models": loaded_model_keys(),
         "cache_entries": cache_service.size(),
+        "cache_metrics": cache_service.metrics(),
         "torch_version": torch.__version__,
         "cuda_available": any(k.startswith("cuda:") for k in devs),
         "mps_available": "mps" in devs,
@@ -263,6 +264,13 @@ async def batch(
             "failed": len(errors),
         }
     )
+
+
+@router.get("/cache/metrics")
+async def cache_metrics() -> dict[str, Any]:
+    """Expose live Redis/fallback cache metrics for frontend dashboards."""
+
+    return cache_service.metrics()
 
 
 @router.delete("/cache")

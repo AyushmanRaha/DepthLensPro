@@ -55,6 +55,7 @@ const state = {
     total: 0, cached: 0, errors: 0,
     latencies: [], totalInferenceMs: 0,
   },
+  cacheMetrics: null,
   lb: { current: null },
   abort: null,
   compareAbort: null,
@@ -546,12 +547,41 @@ function accelerationSummary(data = {}) {
   return [read("cuda","GPU"), read("npu","NPU")].join(" · ");
 }
 
+function normalizeCacheMetrics(raw = {}) {
+  return {
+    totalHits: Number(raw.total_hits ?? raw.hits ?? 0),
+    cacheMisses: Number(raw.cache_misses ?? raw.misses ?? 0),
+    keyspaceSize: Number(raw.keyspace_size ?? raw.cache_entries ?? 0),
+    backend: String(raw.backend || (raw.redis_available ? "redis" : "memory")),
+    redisAvailable: Boolean(raw.redis_available),
+    ttlSeconds: Number(raw.ttl_seconds ?? 3600),
+  };
+}
+
+function applyCacheMetrics(raw) {
+  if (!raw) return;
+  state.cacheMetrics = normalizeCacheMetrics(raw);
+  updateMetrics();
+}
+
+async function loadCacheMetrics() {
+  try {
+    const res = await fetch(`${API}/cache/metrics`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    applyCacheMetrics(await res.json());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function checkHealth() {
   setStatus("connecting","Connecting…","localhost:8000");
   try {
     const res = await fetch(`${API}/health`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    applyCacheMetrics(data.cache_metrics);
     const devs = data.devices || {};
     const primary = data.primary_device || "cpu";
     state.devices = devs; state.primaryDevice = primary;
@@ -859,6 +889,7 @@ async function runBatch() {
       if (result.cached) state.session.cached++;
       state.session.latencies.push(result.latency_ms);
       updateMetrics(); pushLatency(result.latency_ms);
+      loadCacheMetrics();
       state.results.push({...result,originalSrc:entry.thumb,filename:entry.file.name});
       appendGalleryItem(state.results.at(-1));
       el.resultsCard.hidden=false;
@@ -899,8 +930,15 @@ async function inferOne(file,model,colormap,device,signal) {
 // METRICS DASHBOARD
 // ══════════════════════════════════════════════════════════════
 function updateMetrics() {
-  const s=state.session, lats=s.latencies;
-  el.metricTotal.textContent=s.total; el.metricCached.textContent=s.cached;
+  const s=state.session, lats=s.latencies, cache=state.cacheMetrics;
+  el.metricTotal.textContent=s.total;
+  el.metricCached.textContent=cache ? cache.totalHits : s.cached;
+  if (cache) {
+    const cacheCell = el.metricCached.closest(".metric-cell");
+    if (cacheCell) {
+      cacheCell.title = `Cache hits: ${cache.totalHits} · Misses: ${cache.cacheMisses} · Keys: ${cache.keyspaceSize} · Backend: ${cache.backend} · TTL: ${cache.ttlSeconds}s`;
+    }
+  }
   el.metricErrors.textContent=s.errors;
   el.metricTotalTime.textContent=`${(s.totalInferenceMs/1000).toFixed(1)} s`;
   if (lats.length) {
@@ -1236,7 +1274,9 @@ async function init() {
   switchPanel("main");
   syncQueueControls();
   await checkHealth();
+  await loadCacheMetrics();
   setInterval(checkHealth, 30_000);
+  setInterval(loadCacheMetrics, 15_000);
 }
 
 init();

@@ -28,7 +28,20 @@ else:
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 _ENV_FILE = Path(".env")
-_ENV_KEYS = ("HOST", "PORT", "LOG_LEVEL", "DEBUG")
+_ENV_KEYS = (
+    "HOST",
+    "PORT",
+    "LOG_LEVEL",
+    "DEBUG",
+    "REDIS_URL",
+    "REDIS_HOST",
+    "REDIS_PORT",
+    "REDIS_DB",
+    "REDIS_PASSWORD",
+    "REDIS_SOCKET_TIMEOUT_SECONDS",
+    "REDIS_MAX_CONNECTIONS",
+    "CACHE_TTL_SECONDS",
+)
 
 
 class Settings(BaseSettings):  # type: ignore[misc]
@@ -45,6 +58,20 @@ class Settings(BaseSettings):  # type: ignore[misc]
     PORT: int = Field(default=8000, ge=1, le=65535, description="ASGI server port.")
     LOG_LEVEL: LogLevel = Field(default="INFO", description="Backend logging level.")
     DEBUG: bool = Field(default=False, description="Enable FastAPI debug responses.")
+    REDIS_URL: str | None = Field(default=None, description="Full Redis connection URL override.")
+    REDIS_HOST: str = Field(default="127.0.0.1", description="Redis cache host.")
+    REDIS_PORT: int = Field(default=6379, ge=1, le=65535, description="Redis cache port.")
+    REDIS_DB: int = Field(default=0, ge=0, description="Redis logical database index.")
+    REDIS_PASSWORD: str | None = Field(default=None, description="Optional Redis password.")
+    REDIS_SOCKET_TIMEOUT_SECONDS: float = Field(
+        default=1.5, gt=0, description="Redis socket connect/read timeout in seconds."
+    )
+    REDIS_MAX_CONNECTIONS: int = Field(
+        default=20, ge=1, description="Maximum Redis connections in the shared pool."
+    )
+    CACHE_TTL_SECONDS: int = Field(
+        default=3600, ge=1, description="TTL applied to generated cache keys."
+    )
 
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod
