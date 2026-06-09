@@ -119,3 +119,23 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     )
     assert second.status_code == 200
     assert second.json()["cached"] is True
+
+
+def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
+    def fake_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
+        return {
+            "model": model,
+            "device_requested": device,
+            "iterations": iterations,
+            "results": [],
+            "comparison": {},
+        }
+
+    monkeypatch.setattr("backend.api.routes.run_benchmark", fake_benchmark)
+
+    response = client.get("/api/benchmark?model=MiDaS_small&device=auto&iterations=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model"] == "MiDaS_small"
+    assert payload["iterations"] == 2
