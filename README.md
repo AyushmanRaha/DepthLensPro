@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows-lightgrey.svg)](#end-user-installation)
 
-Last Updated: 9th June 2026
+Last Updated: 10th July 2026
 
 DepthLensPro is a native cross-platform desktop application for hardware-accelerated monocular depth estimation from 2D images. It pairs an Electron desktop client with a FastAPI inference service that runs MiDaS-family models through PyTorch and ONNX Runtime, with Redis-backed caching for repeatable low-latency workflows.
 
@@ -152,31 +152,13 @@ DepthLensPro exposes operational signals suitable for local diagnostics, release
 
 ## Quick Start / Runbook
 
-### End-User Installation
-
-#### macOS
-
-1. Download the latest `DMG` release.
-2. Mount the image and drag **DepthLens Pro** into `/Applications`.
-3. Launch the application. The bundled backend starts automatically and the splash screen remains visible until the engine is ready.
-
-If macOS Gatekeeper blocks the app during local testing or unsigned distribution, clear quarantine metadata:
-
-```bash
-xattr -cr "/Applications/DepthLens Pro.app"
-```
-
-#### Windows
-
-1. Download the latest Windows installer (`.exe`).
-2. Run the installer and follow the prompts.
-3. Launch **DepthLens Pro** from the Start menu or desktop shortcut.
+DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. The Electron app starts that backend automatically in development and packaged desktop modes, then exposes the resolved URL to the renderer through the secure preload bridge.
 
 > **First run:** model weights may be downloaded through `torch.hub` the first time a model is loaded. Subsequent runs use the local model cache.
+>
+> **Cache note:** Redis is optional. If Redis is unavailable or not installed, the backend logs the condition and falls back to an in-memory cache automatically.
 
-### Developer Setup
-
-#### Prerequisites
+### Prerequisites
 
 - Python `3.10+`
 - `pip`
@@ -184,51 +166,121 @@ xattr -cr "/Applications/DepthLens Pro.app"
 - Git
 - Optional: Redis for distributed cache validation
 
-#### macOS / Linux
+### A. Native App Build / Install by Platform
+
+#### macOS Native App Build
+
+Builds an unsigned Apple Silicon DMG. For reproducible packaged builds, create the repo-root `venv/` before running electron-builder because `electron-app/package.json` includes `../venv` as an `extraResources` entry.
 
 ```bash
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
 
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
-
+python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 
-# Optional: export static ONNX weights for ONNX Runtime acceleration
-python backend/scripts/export_onnx.py --model MiDaS_small
+cd electron-app
+npm install
+npm run build:mac
+```
+
+Open the generated DMG from `electron-app/dist/`, drag **DepthLens Pro** to `/Applications`, and launch it. If macOS Gatekeeper blocks an unsigned local build, clear quarantine metadata:
+
+```bash
+xattr -cr "/Applications/DepthLens Pro.app"
+```
+
+#### Windows Native App Build
+
+Builds an NSIS installer. Run these commands from PowerShell so the Windows virtual environment layout is used (`venv\Scripts\python.exe`).
+
+```powershell
+cd DepthLensPro
+
+py -3 -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r backend\requirements.txt
+
+cd electron-app
+npm install
+npm run build:win
+```
+
+Run the generated installer from `electron-app\dist\`, then launch **DepthLens Pro** from the Start menu or desktop shortcut. Packaged builds expect the prepared `venv/`, `backend/`, and `frontend/` resources to be present in the installer resources.
+
+#### End-User Installation from Release Artifacts
+
+- **macOS:** Download the latest `DMG`, mount it, drag **DepthLens Pro** into `/Applications`, and launch the app.
+- **Windows:** Download the latest Windows installer (`.exe`), run it, and launch **DepthLens Pro** from the Start menu or desktop shortcut.
+
+### B. Terminal-Only Local Test / Development
+
+Use this path when you want to test the app locally without creating a native installer. `npm start` launches Electron, starts FastAPI on `127.0.0.1:8765`, and keeps the backend URL synchronized with the frontend.
+
+#### macOS / Linux Terminal-Only Development Test
+
+```bash
+cd DepthLensPro
+
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r backend/requirements.txt
 
 cd electron-app
 npm install
 npm start
+```
+
+#### Windows PowerShell Terminal-Only Development Test
+
+```powershell
+cd DepthLensPro
+
+py -3 -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r backend\requirements.txt
+
+cd electron-app
+npm install
+npm start
+```
+
+### Backend-Only Smoke Test
+
+Run the backend without Electron when validating API routes or working in a terminal-only environment.
+
+#### macOS / Linux
+
+```bash
+cd DepthLensPro
+source venv/bin/activate
+python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
 ```
 
 #### Windows PowerShell
 
 ```powershell
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
-
-python -m venv venv
 .\venv\Scripts\Activate.ps1
-
-pip install -r backend/requirements.txt
-
-# Optional: export static ONNX weights for ONNX Runtime acceleration
-python backend/scripts/export_onnx.py --model MiDaS_small
-
-cd electron-app
-npm install
-npm start
+python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
 ```
 
-### Backend-Only Development
+Health and route checks:
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r backend/requirements.txt
-uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+curl http://127.0.0.1:8765/
+curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:8765/devices
+```
+
+From `electron-app/`, you can also run the npm smoke helper while the backend is running:
+
+```bash
+npm run backend:smoke
 ```
 
 ### Docker Compose
@@ -237,26 +289,11 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 docker compose up --build
 ```
 
-### Build Desktop Installers
-
-```bash
-cd electron-app
-
-# macOS arm64 DMG
-npm run build:mac
-
-# Windows NSIS installer
-npm run build:win
-
-# macOS and Windows targets
-npm run build:all
-```
-
 ---
 
 ## API Surface
 
-Base URL: `http://127.0.0.1:8000`
+Base URL: `http://127.0.0.1:8765`
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -483,10 +520,10 @@ The GitHub Actions pipeline runs the same core checks for formatting, linting, t
 | Issue | Recommended Action |
 |---|---|
 | `ModuleNotFoundError` | Activate the virtual environment and rerun `pip install -r backend/requirements.txt`. |
-| Frontend reports that the engine is offline | Confirm the backend is listening on `127.0.0.1:8000`. |
+| Frontend reports that the engine is offline | Confirm the backend is listening on `127.0.0.1:8765` and check `curl http://127.0.0.1:8765/health`. |
 | Browser CORS or local file issue | Serve the frontend through a local HTTP server instead of opening files directly through `file://`. |
 | Slow inference | Use `MiDaS_small`, select an available accelerator, or export ONNX weights for the target model. |
-| Port already in use | Start Uvicorn with a different `--port` value or free port `8000`. |
+| Port already in use | Start Uvicorn with a different `--port` value or free port `8765`. |
 | First run is slow | Allow the initial model-weight download to complete; later runs use the local Torch cache. |
 | macOS blocks launch | Run `xattr -cr "/Applications/DepthLens Pro.app"` for unsigned local builds. |
 | Packaged backend does not start | Check the desktop logs at `~/Library/Logs/depthlens-pro/main.log`. |

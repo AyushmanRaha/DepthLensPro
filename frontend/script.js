@@ -34,19 +34,65 @@ applyTheme(getSavedTheme(), false);
 // ══════════════════════════════════════════════════════════════
 // CONFIG & STATE
 // ══════════════════════════════════════════════════════════════
-let API = "http://127.0.0.1:8000";
+const DEFAULT_API_BASE_URL = "http://127.0.0.1:8765";
+let API = null;
+let apiResolved = false;
+let backendOnline = false;
 
-async function initApp() {
-  if (window.electronAPI) {
-    API = await window.electronAPI.getBackendUrl();
-    console.log(`[DepthLens] Electron mode — backend at ${API}`);
-    const platform = window.electronAPI.platform;
-    if (platform === "darwin") {
-      document.body.classList.add("macos");
+function normalizeApiBaseUrl(url) {
+  return String(url || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
+}
+
+async function resolveApiBaseUrl() {
+  if (apiResolved && API) return API;
+
+  let resolved = null;
+  if (window.electronAPI?.getBackendUrl) {
+    resolved = await window.electronAPI.getBackendUrl();
+    const platform = await window.electronAPI.getPlatform?.() || window.electronAPI.platform;
+    if (platform === "darwin") document.body.classList.add("macos");
+  } else {
+    resolved = window.DEPTHLENS_API_URL;
+    try { resolved = resolved || localStorage.getItem("depthlens_api_url"); } catch {}
+  }
+
+  API = normalizeApiBaseUrl(resolved || DEFAULT_API_BASE_URL);
+  apiResolved = true;
+  console.log(`[DepthLens] Resolved backend URL: ${API}`);
+  return API;
+}
+
+function apiUrl(path) {
+  if (!apiResolved || !API) throw new Error("Backend URL has not been resolved yet");
+  const route = String(path || "");
+  return `${API}${route.startsWith("/") ? route : `/${route}`}`;
+}
+
+async function apiFetch(path, options = {}) {
+  const url = apiUrl(path);
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const err = await res.clone().json();
+        detail = err.detail || err.error || detail;
+      } catch {}
+      throw new Error(`${detail} (${url})`);
     }
+    return res;
+  } catch (err) {
+    const baseMsg = err.message || String(err);
+    const msg = err.name === "AbortError"
+      ? `Request cancelled or timed out (${url})`
+      : (baseMsg.includes(url) ? baseMsg : `${baseMsg} (${url})`);
+    console.error(`[DepthLens] API request failed: ${msg}`);
+    const wrapped = new Error(msg);
+    wrapped.name = err.name || "ApiError";
+    wrapped.cause = err;
+    throw wrapped;
   }
 }
-initApp();
 
 const state = {
   files: [],
@@ -65,6 +111,7 @@ const state = {
   deviceFilter: "all",
   timing: { workspace: {}, compare: {} },
   compareView: { metricKey: "latency_ms", open: true, results: [] },
+  initializingBackend: true,
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -557,7 +604,7 @@ function accelerationSummary(data = {}) {
     if (!c?.available) return `${label}: n/a`;
     return `${label}: ${c.operational ? "ok" : "fail"}`;
   };
-  return [read("cuda","GPU"), read("npu","NPU")].join(" · ");
+  return [read("cuda","CUDA"), read("mps","MPS"), read("xpu","XPU")].join(" · ");
 }
 
 function normalizeCacheMetrics(raw = {}) {
@@ -579,8 +626,7 @@ function applyCacheMetrics(raw) {
 
 async function loadCacheMetrics() {
   try {
-    const res = await fetch(`${API}/cache/metrics`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch("/cache/metrics", { signal: AbortSignal.timeout(3000) });
     applyCacheMetrics(await res.json());
     return true;
   } catch {
@@ -589,11 +635,11 @@ async function loadCacheMetrics() {
 }
 
 async function checkHealth() {
-  setStatus("connecting","Connecting…","localhost:8000");
+  setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
   try {
-    const res = await fetch(`${API}/health`, { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await apiFetch("/health", { signal: AbortSignal.timeout(4000) });
     const data = await res.json();
+    backendOnline = true;
     applyCacheMetrics(data.cache_metrics);
     const devs = data.devices || {};
     const primary = data.primary_device || "cpu";
@@ -601,7 +647,7 @@ async function checkHealth() {
     const info = devs[primary];
     let badge = "CPU";
     if (info?.type==="cuda")  badge = `GPU: ${info.name} (${info.memory_gb} GB)`;
-    else if (info?.type==="mps") badge = `Apple ${info.chip} · Neural Engine`;
+    else if (info?.type==="mps") badge = `Apple ${info.chip || "Silicon"} · Metal`;
     else if (info?.type==="xpu") badge = `NPU/GPU: ${info.name||primary}`;
     const accelText = accelerationSummary(data);
     setStatus("online","Depth Engine: Online",`PyTorch ${data.torch_version} · ${primary} · ${accelText}`,badge);
@@ -609,9 +655,12 @@ async function checkHealth() {
     updateDeviceInfoBanner(`${badge} · ${accelText}`);
     if (!data.acceleration_ok) toast("Acceleration check warning: one or more accelerator backends are unavailable.","warning");
     return true;
-  } catch {
-    setStatus("offline","Depth Engine: Offline","Run: uvicorn app:app --reload");
-    el.deviceInfoBanner.querySelector("span:last-child").textContent = "Start the FastAPI engine to detect available devices";
+  } catch (err) {
+    backendOnline = false;
+    setStatus("offline","Depth Engine: Offline",`No response from ${API || DEFAULT_API_BASE_URL}`);
+    el.deviceInfoBanner.querySelector("span:last-child").textContent = `Start the FastAPI engine at ${API || DEFAULT_API_BASE_URL} to detect available devices`;
+    toast(`Backend health check failed: ${err.message}`, "error", 6000);
+    syncQueueControls();
     return false;
   }
 }
@@ -628,9 +677,9 @@ function autoDeviceLabel(devs, primary) {
 async function loadDevices(devs, primaryFromHealth = null) {
   if (!devs || !Object.keys(devs).length) {
     try {
-      const r = await fetch(`${API}/devices`,{signal:AbortSignal.timeout(3000)});
+      const r = await apiFetch("/devices",{signal:AbortSignal.timeout(3000)});
       devs = (await r.json()).devices;
-    } catch { return; }
+    } catch (err) { console.error(`[DepthLens] Device load failed: ${err.message}`); return; }
   }
   const keys = Object.keys(devs);
   if (!keys.length) return;
@@ -808,7 +857,9 @@ function removeFile(id) {
 
 function syncQueueControls() {
   const has = state.files.length>0;
-  el.clearBtn.disabled = !has; el.runBtn.disabled = !has;
+  el.clearBtn.disabled = !has || Boolean(state.abort);
+  el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !backendOnline;
+  if (el.runBtn) el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : "");
 }
 
 function setFileSt(id,cls,txt) {
@@ -869,6 +920,10 @@ function cancelBatch() {
 }
 
 async function runBatch() {
+  if (!backendOnline) {
+    const ok = await checkHealth();
+    if (!ok) { toast(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`, "error", 6000); return; }
+  }
   const pending = state.files.filter(f=>f.status==="pending"||f.status==="error");
   if (!pending.length) return;
   state.abort = new AbortController();
@@ -879,6 +934,7 @@ async function runBatch() {
   const batchStart=Date.now();
   const model=selModel(), colormap=selCmap(), device=selDevice();
 
+  try {
   for (let i=0;i<pending.length;i++) {
     if (state.abort?.signal?.aborted) break;
     const entry=pending[i];
@@ -920,24 +976,30 @@ async function runBatch() {
   const elapsed=Date.now()-batchStart;
   const done=pending.filter(e=>e.status==="done").length;
   setProgress(100,`Done — ${done} image${done!==1?"s":""} in ${fmtDuration(elapsed)}`,"");
-  setTimeout(()=>{ el.progressBlock.hidden=true; },3000);
-  el.runBtn.disabled=false; el.clearBtn.disabled=false;
-  el.cancelBtn.hidden=true; state.abort=null;
   if (done>0) toast(`Batch complete — ${done} succeeded`,"success");
+  } catch (err) {
+    pending.filter(e=>e.status==="running").forEach(e=>{ e.status="error"; setFileSt(e.id,"error","Error"); });
+    state.session.errors += pending.filter(e=>e.status==="error").length;
+    updateMetrics();
+    setProgress(100,"Batch failed",err.message || "Inference failed");
+    toast(`Batch failed: ${err.message}`, "error", 6000);
+  } finally {
+    setTimeout(()=>{ el.progressBlock.hidden=true; },3000);
+    state.abort=null;
+    el.cancelBtn.hidden=true;
+    syncQueueControls();
+  }
 }
 
 async function inferOne(file,model,colormap,device,signal) {
   const fd=new FormData();
   fd.append("file",file); fd.append("model",model);
   fd.append("colormap",colormap); fd.append("device",device);
-  const res=await fetch(`${API}/estimate`,{
+  if (!backendOnline) throw new Error(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`);
+  const res=await apiFetch("/estimate",{
     method:"POST", body:fd,
     signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
   });
-  if (!res.ok) {
-    const err=await res.json().catch(()=>({detail:`HTTP ${res.status}`}));
-    throw new Error(err.detail||`HTTP ${res.status}`);
-  }
   return res.json();
 }
 
@@ -1198,7 +1260,16 @@ async function runComparison() {
   el.compareRunBtn.disabled=true; el.compareCancelBtn.hidden=false;
   el.compareProgressBlock.hidden=false; el.compareResults.innerHTML="";
   el.compareChartCard.hidden=true; el.compareMetricGrid.innerHTML="";
+  if (!backendOnline) {
+    const ok = await checkHealth();
+    if (!ok) {
+      toast(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`, "error", 6000);
+      el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
+      return;
+    }
+  }
   const results=[], t0=Date.now();
+  try {
   for (let i=0;i<models.length;i++) {
     if (state.compareAbort.signal.aborted) break;
     const model=models[i];
@@ -1227,13 +1298,19 @@ async function runComparison() {
   el.compareProgressFill.style.width="100%"; el.compareProgressPct.textContent="100%";
   el.compareProgressText.textContent=state.compareAbort.signal.aborted?"Cancelled":"Done!";
   el.compareProgressEta.textContent=`Total: ${fmtDuration(Date.now()-t0)}`;
-  setTimeout(()=>{ el.compareProgressBlock.hidden=true; },2500);
-  el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
   if (results.length) {
     state.compareView.results=results;
     renderCompareSummary(results);
     renderCompareChart(results,state.compareView.metricKey);
     toast("Comparison complete!","success");
+  }
+  } catch (err) {
+    el.compareProgressText.textContent="Comparison failed";
+    el.compareProgressEta.textContent=err.message || "Inference failed";
+    toast(`Comparison failed: ${err.message}`, "error", 6000);
+  } finally {
+    setTimeout(()=>{ el.compareProgressBlock.hidden=true; },2500);
+    el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
   }
 }
 
@@ -1319,10 +1396,13 @@ async function runBenchmark() {
   el.benchmarkRunBtn.textContent = "Running…";
   el.benchStatus.textContent = "Loading models and measuring latency…";
   try {
-    const res = await fetch(`${API}/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
+    if (!backendOnline) {
+      const ok = await checkHealth();
+      if (!ok) throw new Error(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`);
+    }
+    const res = await apiFetch(`/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
       signal: AbortSignal.timeout(240_000),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     renderBenchmark(await res.json());
     toast("Benchmark complete","success");
   } catch (err) {
@@ -1373,15 +1453,32 @@ function esc(s) {
 // ══════════════════════════════════════════════════════════════
 async function init() {
   if (el.appShell) el.appShell.classList.remove("ready");
+  state.initializingBackend = true;
   loadPrefs();
-  initLatencyChart();
-  initCompareControls();
-  switchPanel("main");
+  setStatus("connecting", "Starting engine…", DEFAULT_API_BASE_URL);
   syncQueueControls();
-  await checkHealth();
-  await loadCacheMetrics();
-  setInterval(checkHealth, 30_000);
-  setInterval(loadCacheMetrics, 15_000);
+  try {
+    await resolveApiBaseUrl();
+    initLatencyChart();
+    initCompareControls();
+    switchPanel("main");
+    await checkHealth();
+    await loadCacheMetrics();
+    setInterval(checkHealth, 30_000);
+    setInterval(loadCacheMetrics, 15_000);
+  } catch (err) {
+    backendOnline = false;
+    setStatus("offline", "Depth Engine: Offline", `Backend URL resolution failed: ${err.message}`);
+    toast(`Backend initialization failed: ${err.message}`, "error", 6000);
+  } finally {
+    state.initializingBackend = false;
+    syncQueueControls();
+  }
 }
 
-init();
+init().catch(err => {
+  console.error("[DepthLens] Fatal init error", err);
+  state.initializingBackend = false;
+  backendOnline = false;
+  syncQueueControls();
+});

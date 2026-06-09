@@ -55,7 +55,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
     """
 
     HOST: str = Field(default="0.0.0.0", description="Host interface for the ASGI server.")
-    PORT: int = Field(default=8000, ge=1, le=65535, description="ASGI server port.")
+    PORT: int = Field(default=8765, ge=1, le=65535, description="ASGI server port.")
     LOG_LEVEL: LogLevel = Field(default="INFO", description="Backend logging level.")
     DEBUG: bool = Field(default=False, description="Enable FastAPI debug responses.")
     REDIS_URL: str | None = Field(default=None, description="Full Redis connection URL override.")
