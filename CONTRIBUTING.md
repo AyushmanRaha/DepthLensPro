@@ -24,13 +24,13 @@ Thank you for improving DepthLens Pro. This project includes an Electron desktop
 From the repository root:
 
 ```bash
-uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+uvicorn backend.app:app --host 127.0.0.1 --port 8765 --reload
 ```
 
 Existing packaged Electron flows that run from the `backend/` directory can continue to use:
 
 ```bash
-uvicorn app:app --host 127.0.0.1 --port 8000
+uvicorn app:app --host 127.0.0.1 --port 8765
 ```
 
 ## Validation before opening a pull request

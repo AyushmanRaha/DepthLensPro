@@ -163,7 +163,7 @@ async def health() -> dict[str, Any]:
         "cuda_available": any(k.startswith("cuda:") for k in devs),
         "mps_available": "mps" in devs,
         "xpu_available": any(k.startswith("xpu:") for k in devs),
-        "acceleration_ok": bool(accel) and accel_ok,
+        "acceleration_ok": True if not accel else accel_ok,
         "acceleration_checks": checks,
         "telemetry": {
             "memory": memory,

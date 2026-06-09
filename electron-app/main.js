@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const http = require("http");
+const net = require("net");
 const fs = require("fs");
 const log = require("electron-log");
 
@@ -9,8 +10,9 @@ log.transports.file.level = "info";
 log.info("DepthLens Pro starting...");
 
 // ── Constants ──────────────────────────────────────────────
-const BACKEND_PORT = 8765;
-const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
+const BACKEND_HOST = "127.0.0.1";
+const BACKEND_PORT = Number.parseInt(process.env.DEPTHLENS_BACKEND_PORT || "8765", 10);
+let backendUrl = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
 // ── State ──────────────────────────────────────────────────
@@ -18,6 +20,7 @@ let mainWindow = null;
 let splashWindow = null;
 let backendProcess = null;
 let backendReady = false;
+let backendOwnedByElectron = false;
 
 // ── Resource paths ─────────────────────────────────────────
 function getResourcePath(...parts) {
@@ -27,199 +30,244 @@ function getResourcePath(...parts) {
   return path.join(process.resourcesPath, ...parts);
 }
 
+function getAppRoot() {
+  return isDev ? path.join(__dirname, "..") : process.resourcesPath;
+}
+
+function logPath() {
+  return log.transports.file.getFile().path;
+}
+
+// ── HTTP helpers ───────────────────────────────────────────
+function requestJson(url, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: timeoutMs }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        let json = null;
+        try { json = body ? JSON.parse(body) : null; } catch (_) {}
+        resolve({ statusCode: res.statusCode, json, body });
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy(new Error(`Timed out requesting ${url}`));
+    });
+  });
+}
+
+async function isHealthyDepthLensBackend(url) {
+  try {
+    const health = await requestJson(`${url}/health`, 2500);
+    if (health.statusCode !== 200 || !health.json || typeof health.json !== "object") return false;
+    if (health.json.version && (health.json.devices || health.json.primary_device)) return true;
+    const root = await requestJson(`${url}/`, 1500).catch(() => null);
+    return Boolean(root?.json?.service === "DepthLens Pro API");
+  } catch (_) {
+    return false;
+  }
+}
+
+function isPortAvailable(port, host = BACKEND_HOST) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", (err) => {
+      if (err.code === "EADDRINUSE" || err.code === "EACCES") resolve(false);
+      else reject(err);
+    });
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, host);
+  });
+}
+
 // ── Python executable detection ────────────────────────────
-// FIX (Issue 1 & 2): Robust Python path resolution that works both in
-// development AND inside a packaged .app on any machine.
-// The packaged .app has the venv at:
-//   DepthLens Pro.app/Contents/Resources/venv/bin/python3
-// In dev the venv is at the repo root: <repo>/venv/bin/python3
-// We try multiple candidate paths and pick the first one that exists.
-function getPythonPath() {
+function getPythonCandidates() {
+  const root = getAppRoot();
   const candidates = [];
 
-  if (isDev) {
-    // Development: venv is one level above electron-app/
-    candidates.push(path.join(__dirname, "..", "venv", "bin", "python3"));
-    candidates.push(path.join(__dirname, "..", "venv", "bin", "python"));
+  if (process.platform === "win32") {
+    candidates.push(path.join(root, "venv", "Scripts", "python.exe"));
+    candidates.push(path.join(root, "venv", "Scripts", "python3.exe"));
+    candidates.push(path.join(process.resourcesPath || root, "venv", "Scripts", "python.exe"));
+    candidates.push("py");
+    candidates.push("python");
   } else {
-    // Packaged .app: Resources/ is process.resourcesPath
-    candidates.push(path.join(process.resourcesPath, "venv", "bin", "python3"));
-    candidates.push(path.join(process.resourcesPath, "venv", "bin", "python"));
-    // Fallback: some builder configs embed it differently
-    candidates.push(path.join(process.resourcesPath, "..", "venv", "bin", "python3"));
-    candidates.push(path.join(app.getAppPath(), "..", "venv", "bin", "python3"));
+    candidates.push(path.join(root, "venv", "bin", "python3"));
+    candidates.push(path.join(root, "venv", "bin", "python"));
+    candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python3"));
+    candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python"));
+    candidates.push("python3");
+    candidates.push("python");
+    candidates.push("/usr/bin/python3");
+    candidates.push("/usr/local/bin/python3");
+    candidates.push("/opt/homebrew/bin/python3");
   }
 
-  // Also try system Python as a last resort so the app at least opens
-  // and shows a meaningful error rather than crashing with ENOENT.
-  candidates.push("/usr/bin/python3");
-  candidates.push("/usr/local/bin/python3");
-  candidates.push("/opt/homebrew/bin/python3"); // Apple Silicon Homebrew
+  return [...new Set(candidates)];
+}
 
+function getPythonPath() {
+  const candidates = getPythonCandidates();
   for (const candidate of candidates) {
     try {
-      if (fs.existsSync(candidate)) {
-        log.info(`Python found at: ${candidate}`);
+      if (path.isAbsolute(candidate)) {
+        if (fs.existsSync(candidate)) {
+          log.info(`Python found at: ${candidate}`);
+          return candidate;
+        }
+      } else {
+        log.info(`Using PATH Python candidate: ${candidate}`);
         return candidate;
       }
     } catch (_) {
-      // existsSync can throw on bad paths; just continue
+      // Ignore bad candidate paths and continue.
     }
   }
-
-  // Nothing found – return the most-expected path so the error message
-  // in the dialog is helpful rather than generic.
-  const fallback = isDev
-    ? path.join(__dirname, "..", "venv", "bin", "python3")
-    : path.join(process.resourcesPath, "venv", "bin", "python3");
-
+  const fallback = candidates[0];
   log.warn(`No Python found in candidate paths; will try: ${fallback}`);
   return fallback;
 }
 
-// ── Start FastAPI Backend ──────────────────────────────────
-function startBackend() {
+function createStartupError(message, details) {
+  return new Error(
+    `${message}\n\n` +
+    `Backend URL: ${details.backendUrl}\n` +
+    `Python path attempted: ${details.pythonPath}\n` +
+    `Backend directory attempted: ${details.backendDir}\n` +
+    `Working directory attempted: ${details.cwd}\n` +
+    `Command attempted: ${details.command}\n` +
+    `Electron logs: ${logPath()}`,
+  );
+}
+
+function waitForBackendReady(url, { timeoutMs = 45_000, intervalMs = 800 } = {}) {
+  const start = Date.now();
+  let settled = false;
+  let timer = null;
+
   return new Promise((resolve, reject) => {
-    const pythonPath = getPythonPath();
-    const backendDir = getResourcePath("backend");
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn(value);
+    };
 
-    log.info(`Starting backend: ${pythonPath}`);
-    log.info(`Backend dir: ${backendDir}`);
-
-    // Verify python exists before spawning so we can give a clear error
-    if (!fs.existsSync(pythonPath)) {
-      const msg =
-        `Python not found at: ${pythonPath}\n\n` +
-        `Please ensure the virtual environment is set up:\n` +
-        `  cd <project-root>\n` +
-        `  python3 -m venv venv\n` +
-        `  source venv/bin/activate\n` +
-        `  pip install -r backend/requirements.txt`;
-      log.error(msg);
-      return reject(new Error(msg));
-    }
-
-    if (!fs.existsSync(backendDir)) {
-      const msg = `Backend directory not found: ${backendDir}`;
-      log.error(msg);
-      return reject(new Error(msg));
-    }
-
-    backendProcess = spawn(
-      pythonPath,
-      [
-        "-m",
-        "uvicorn",
-        "app:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        String(BACKEND_PORT),
-        "--workers",
-        "1",
-      ],
-      {
-        cwd: backendDir,
-        stdio: ["ignore", "pipe", "pipe"],
-        // Inherit the shell environment so system libs and CUDA paths work
-        env: {
-          ...process.env,
-          PYTHONUNBUFFERED: "1",
-        },
-      },
-    );
-
-    backendProcess.stdout.on("data", (data) => {
-      const msg = data.toString();
-      log.info(`[Backend] ${msg.trim()}`);
-      if (
-        msg.includes("Application startup complete") ||
-        msg.includes("Uvicorn running on")
-      ) {
+    const poll = async () => {
+      if (settled) return;
+      if (await isHealthyDepthLensBackend(url)) {
         backendReady = true;
-        resolve(BACKEND_URL);
+        log.info(`Backend ready at ${url}`);
+        finish(resolve, url);
+        return;
       }
-    });
-
-    backendProcess.stderr.on("data", (data) => {
-      const msg = data.toString().trim();
-      log.info(`[Backend stderr] ${msg}`);
-      // Uvicorn writes its startup banner to stderr, not stdout
-      if (
-        msg.includes("Application startup complete") ||
-        msg.includes("Uvicorn running on")
-      ) {
-        if (!backendReady) {
-          backendReady = true;
-          resolve(BACKEND_URL);
-        }
+      if (Date.now() - start >= timeoutMs) {
+        finish(reject, new Error(`Backend did not become healthy within ${Math.round(timeoutMs / 1000)}s at ${url}`));
+        return;
       }
-    });
+      timer = setTimeout(poll, intervalMs);
+    };
 
-    backendProcess.on("error", (err) => {
-      log.error(`Backend spawn error: ${err.message}`);
-      reject(err);
-    });
-
-    backendProcess.on("close", (code) => {
-      log.info(`Backend exited with code ${code}`);
-      backendReady = false;
-    });
-
-    // Fallback: poll the health endpoint regardless of log output
-    // (handles cases where uvicorn logs to neither stdout nor stderr)
-    setTimeout(() => {
-      if (!backendReady) {
-        log.warn("Startup log not detected; polling /health endpoint...");
-        pollBackendHealth(30, 1000, resolve, reject);
-      }
-    }, 3000);
-
-    // Hard timeout – resolve anyway so the window opens and shows status
-    setTimeout(() => {
-      if (!backendReady) {
-        log.warn("Backend startup timeout – resolving to allow app to open.");
-        backendReady = true;
-        resolve(BACKEND_URL);
-      }
-    }, 20000);
+    poll();
   });
 }
 
-function pollBackendHealth(maxAttempts, intervalMs, resolve, reject) {
-  let attempts = 0;
+// ── Start FastAPI Backend ──────────────────────────────────
+async function startBackend() {
+  backendUrl = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+  const pythonPath = getPythonPath();
+  const backendDir = getResourcePath("backend");
+  const cwd = getAppRoot();
+  const args = [
+    "-m",
+    "uvicorn",
+    "backend.app:app",
+    "--host",
+    BACKEND_HOST,
+    "--port",
+    String(BACKEND_PORT),
+    "--workers",
+    "1",
+  ];
+  const command = `${pythonPath} ${args.join(" ")}`;
+  const details = { backendUrl, pythonPath, backendDir, cwd, command };
 
-  const check = () => {
-    attempts++;
-    const req = http.get(`${BACKEND_URL}/health`, { timeout: 2000 }, (res) => {
-      if (res.statusCode === 200) {
-        backendReady = true;
-        log.info(`Backend ready after ${attempts} health-poll attempts`);
-        resolve(BACKEND_URL);
-      } else {
-        retry();
-      }
-      res.resume();
-    });
+  log.info(`Backend URL: ${backendUrl}`);
+  log.info(`Backend dir: ${backendDir}`);
+  log.info(`Backend cwd: ${cwd}`);
+  log.info(`Starting backend command: ${command}`);
 
-    req.on("error", retry);
-    req.on("timeout", () => {
-      req.destroy();
-      retry();
-    });
-  };
-
-  function retry() {
-    if (attempts >= maxAttempts) {
-      // Don't reject – the window will show "offline" status instead
-      log.warn(`Backend did not respond after ${maxAttempts} polls`);
-      resolve(BACKEND_URL);
-      return;
-    }
-    setTimeout(check, intervalMs);
+  if (await isHealthyDepthLensBackend(backendUrl)) {
+    backendReady = true;
+    backendOwnedByElectron = false;
+    log.info(`Reusing existing healthy DepthLens backend at ${backendUrl}`);
+    return backendUrl;
   }
 
-  setTimeout(check, 800);
+  const portAvailable = await isPortAvailable(BACKEND_PORT).catch((err) => {
+    throw createStartupError(`Could not inspect backend port ${BACKEND_PORT}: ${err.message}`, details);
+  });
+  if (!portAvailable) {
+    throw createStartupError(
+      `Port ${BACKEND_PORT} is already in use, but it is not a healthy DepthLens backend. Free the port or set DEPTHLENS_BACKEND_PORT consistently before launching.`,
+      details,
+    );
+  }
+
+  if (path.isAbsolute(pythonPath) && !fs.existsSync(pythonPath)) {
+    throw createStartupError(
+      "Python was not found. Create the repo-root virtual environment and install backend requirements before launching.",
+      details,
+    );
+  }
+
+  if (!fs.existsSync(backendDir)) {
+    throw createStartupError("Backend directory was not found in app resources.", details);
+  }
+
+  backendProcess = spawn(pythonPath, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: "1",
+      PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+    },
+    shell: process.platform === "win32" && !path.isAbsolute(pythonPath),
+  });
+  backendOwnedByElectron = true;
+
+  backendProcess.stdout.on("data", (data) => {
+    const msg = data.toString().trim();
+    if (msg) log.info(`[Backend stdout] ${msg}`);
+  });
+
+  backendProcess.stderr.on("data", (data) => {
+    const msg = data.toString().trim();
+    if (msg) log.info(`[Backend stderr] ${msg}`);
+  });
+
+  backendProcess.on("error", (err) => {
+    log.error(`Backend spawn error: ${err.message}`);
+  });
+
+  backendProcess.on("close", (code) => {
+    log.info(`Backend exited with code ${code}`);
+    backendReady = false;
+    backendOwnedByElectron = false;
+    backendProcess = null;
+  });
+
+  try {
+    return await waitForBackendReady(backendUrl);
+  } catch (err) {
+    if (backendProcess && !backendProcess.killed) backendProcess.kill("SIGTERM");
+    throw createStartupError(err.message, details);
+  }
 }
 
 // ── Splash Window ──────────────────────────────────────────
@@ -246,15 +294,8 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 600,
     show: false,
-    // FIX (Issue 4): Use "hidden" instead of "hiddenInset" on macOS.
-    // "hiddenInset" keeps the traffic-light buttons but moves them INSIDE
-    // the window frame, where they overlap the header content.
-    // "hidden" removes the title bar entirely and we handle dragging via CSS.
     titleBarStyle: process.platform === "darwin" ? "hidden" : "default",
-    // On macOS, expose the traffic-light inset size so the renderer can pad
-    trafficLightPosition: process.platform === "darwin"
-      ? { x: 16, y: 18 }
-      : undefined,
+    trafficLightPosition: process.platform === "darwin" ? { x: 16, y: 18 } : undefined,
     vibrancy: "under-window",
     visualEffectState: "active",
     backgroundColor: "#070d17",
@@ -294,7 +335,7 @@ function createMainWindow() {
 }
 
 // ── IPC Handlers ──────────────────────────────────────────
-ipcMain.handle("get-backend-url", () => BACKEND_URL);
+ipcMain.handle("get-backend-url", () => backendUrl);
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("get-platform", () => process.platform);
 
@@ -318,13 +359,12 @@ app.whenReady().then(async () => {
 
   try {
     await startBackend();
-    log.info("Backend started (or timed out gracefully)");
+    log.info(`Backend ready for renderer at ${backendUrl}`);
     createMainWindow();
   } catch (err) {
     log.error(`Failed to start backend: ${err.message}`);
     const { dialog } = require("electron");
 
-    // Destroy splash before showing dialog
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.destroy();
     }
@@ -335,8 +375,7 @@ app.whenReady().then(async () => {
       message: "Could not start the inference engine.",
       detail:
         `${err.message}\n\n` +
-        `The app will still open but inference will be unavailable.\n` +
-        `See logs at: ${log.transports.file.getFile().path}`,
+        `The app will still open but inference will be unavailable.`,
       buttons: ["Open Anyway", "Quit"],
       defaultId: 0,
       cancelId: 1,
@@ -347,7 +386,6 @@ app.whenReady().then(async () => {
       return;
     }
 
-    // Open the window anyway so the user can see the offline status
     createMainWindow();
   }
 
@@ -363,7 +401,7 @@ app.on("window-all-closed", () => {
 let isQuitting = false;
 
 app.on("before-quit", (event) => {
-  if (backendProcess && !isQuitting) {
+  if (backendProcess && backendOwnedByElectron && !isQuitting) {
     event.preventDefault();
     log.info("App quitting — shutting down backend");
 

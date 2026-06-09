@@ -136,7 +136,7 @@
             <div class="status-info">
               <span class="status-label" id="statusLabel">Engine offline</span>
               <span class="status-sub" id="statusSub"
-                >Run uvicorn app:app --reload</span
+                >Starting FastAPI on 127.0.0.1:8765</span
               >
             </div>
             <div class="device-badge" id="deviceBadge" hidden></div>
@@ -642,11 +642,11 @@
               <h3>Running Locally</h3>
               <div class="code-block">
                 <span class="code-comment"># 1. Start the inference engine (FastAPI)</span>
-                cd backend pip install -r requirements.txt uvicorn app:app --reload --host 127.0.0.1 --port 8000
+                python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
 
                 <span class="code-comment"># 2. Serve the frontend</span>
                 cd frontend python3 -m http.server 3000
-                <span class="code-comment"># Open http://localhost:3000</span>
+                <span class="code-comment"># Electron uses http://127.0.0.1:8765 by default</span>
               </div>
 
               <h3>Model Reference</h3>

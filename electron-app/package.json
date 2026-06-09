@@ -5,15 +5,17 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder --mac --win"
+    "build:mac": "electron-builder --mac dmg --arm64",
+    "build:win": "electron-builder --win nsis --x64",
+    "build:all": "electron-builder --mac dmg --arm64 --win nsis --x64",
+    "start:dev": "electron .",
+    "backend:smoke": "node -e \"fetch('http://127.0.0.1:8765/health').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "build": {
     "forceCodeSigning": false,
     "appId": "com.ayushmanraha.depthlens-pro",
     "productName": "DepthLens Pro",
-    "copyright": "Copyright © 2025 Ayushman Raha",
+    "copyright": "Copyright \u00a9 2025 Ayushman Raha",
     "directories": {
       "output": "dist"
     },
@@ -42,21 +44,29 @@
       "assets/**/*"
     ],
     "extraResources": [
-    {
-      "from": "../backend",
-      "to": "backend",
-      "filter": ["**/*", "!__pycache__/**", "!*.pyc"]
-    },
-    {
-      "from": "../venv",
-      "to": "venv",
-      "filter": ["**/*", "!__pycache__/**", "!*.pyc"]
-    },
-    {
-      "from": "../frontend",
-      "to": "frontend"
-    }
-  ]
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!*.pyc"
+        ]
+      },
+      {
+        "from": "../venv",
+        "to": "venv",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!*.pyc"
+        ]
+      },
+      {
+        "from": "../frontend",
+        "to": "frontend"
+      }
+    ]
   },
   "dependencies": {
     "electron-log": "^5.4.4"

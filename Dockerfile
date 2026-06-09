@@ -32,7 +32,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
     HOST=0.0.0.0 \
-    PORT=8000 \
+    PORT=8765 \
     LOG_LEVEL=info \
     DEBUG=false \
     WEB_CONCURRENCY=1 \
@@ -55,6 +55,6 @@ COPY backend ./backend
 RUN chown -R depthlens:depthlens /app
 USER depthlens
 
-EXPOSE 8000
+EXPOSE 8765
 
 CMD ["sh", "-c", "exec uvicorn backend.app:app --host ${HOST} --port ${PORT} --workers ${WEB_CONCURRENCY:-1} --log-level $(printf '%s' "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')"]
