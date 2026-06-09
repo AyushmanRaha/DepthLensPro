@@ -52,3 +52,27 @@ def test_resolve_rejects_unavailable_device(monkeypatch: Any) -> None:
         assert "unavailable" in str(exc)
     else:
         raise AssertionError("expected ValueError for unavailable device")
+
+
+def test_onnx_provider_translation_maps_mps_to_coreml() -> None:
+    providers = hardware._onnx_providers_for_device(
+        "mps", ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+    )
+
+    assert providers == ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+
+
+def test_onnx_provider_translation_maps_cuda_index_to_cuda() -> None:
+    providers = hardware._onnx_providers_for_device(
+        "cuda:0", ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+
+    assert providers == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+
+def test_onnx_provider_translation_maps_xpu_to_openvino() -> None:
+    providers = hardware._onnx_providers_for_device(
+        "xpu:0", ["OpenVINOExecutionProvider", "CPUExecutionProvider"]
+    )
+
+    assert providers == ["OpenVINOExecutionProvider", "CPUExecutionProvider"]

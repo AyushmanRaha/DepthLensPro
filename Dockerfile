@@ -34,7 +34,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOST=0.0.0.0 \
     PORT=8000 \
     LOG_LEVEL=info \
-    DEBUG=false
+    DEBUG=false \
+    WEB_CONCURRENCY=1 \
+    INFERENCE_MAX_CONCURRENCY=2 \
+    ORT_INTRA_OP_NUM_THREADS=2 \
+    ORT_INTER_OP_NUM_THREADS=1
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
@@ -53,4 +57,4 @@ USER depthlens
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "exec uvicorn backend.app:app --host ${HOST} --port ${PORT} --log-level $(printf '%s' "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')"]
+CMD ["sh", "-c", "exec uvicorn backend.app:app --host ${HOST} --port ${PORT} --workers ${WEB_CONCURRENCY:-1} --log-level $(printf '%s' "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')"]

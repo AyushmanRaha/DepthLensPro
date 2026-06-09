@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
@@ -11,6 +12,7 @@ from typing import Any
 import torch
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from backend.services import cache_service
 from backend.services.benchmarks import run_benchmark
@@ -35,6 +37,18 @@ router = APIRouter()
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
+_ROUTE_INFERENCE_SEMAPHORE = asyncio.Semaphore(
+    max(1, int(os.getenv("INFERENCE_MAX_CONCURRENCY", "2")))
+)
+
+
+async def process_image_async(
+    raw: bytes, model: str, colormap: str, device: str, filename: str | None
+) -> dict[str, Any]:
+    """Offload blocking image inference while preserving route-level monkeypatching."""
+
+    async with _ROUTE_INFERENCE_SEMAPHORE:
+        return await run_in_threadpool(process_image, raw, model, colormap, device, filename)
 
 
 def _percent(numerator: int, denominator: int) -> float:
@@ -187,7 +201,9 @@ async def benchmark(
     """Return PyTorch and ONNX Runtime performance matrices for the UI."""
 
     try:
-        return run_benchmark(model=model, device=device, iterations=iterations)
+        return await run_in_threadpool(
+            run_benchmark, model=model, device=device, iterations=iterations
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -223,7 +239,7 @@ async def estimate(
         return JSONResponse({**cached, "cached": True})
 
     try:
-        result = process_image(raw, model, colormap, resolved, file.filename)
+        result = await process_image_async(raw, model, colormap, resolved, file.filename)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -264,7 +280,7 @@ async def batch(
                 results.append({**cached, "cached": True})
                 continue
 
-            res = process_image(raw, model, colormap, resolved, upload.filename)
+            res = await process_image_async(raw, model, colormap, resolved, upload.filename)
             cache_service.set(ck, res)
             results.append(res)
         except Exception as exc:
