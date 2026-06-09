@@ -58,13 +58,10 @@ function requestJson(url, timeoutMs = 2000) {
   });
 }
 
-async function isHealthyDepthLensBackend(url) {
+async function isLiveDepthLensBackend(url) {
   try {
-    const health = await requestJson(`${url}/health`, 2500);
-    if (health.statusCode !== 200 || !health.json || typeof health.json !== "object") return false;
-    if (health.json.version && (health.json.devices || health.json.primary_device)) return true;
-    const root = await requestJson(`${url}/`, 1500).catch(() => null);
-    return Boolean(root?.json?.service === "DepthLens Pro API");
+    const live = await requestJson(`${url}/live`, 1200);
+    return Boolean(live.statusCode === 200 && live.json?.service === "DepthLens Pro API" && live.json?.status === "ok");
   } catch (_) {
     return false;
   }
@@ -132,19 +129,50 @@ function getPythonPath() {
   return fallback;
 }
 
-function createStartupError(message, details) {
+function pathExists(targetPath) {
+  try { return fs.existsSync(targetPath); } catch (_) { return false; }
+}
+
+function createStartupDetails(pythonPath, backendDir, cwd, command) {
+  const frontendDir = path.join(cwd, "frontend");
+  const backendApp = path.join(backendDir, "app.py");
+  const frontendIndex = path.join(frontendDir, "index.html");
+  return {
+    backendUrl,
+    pythonPath,
+    backendDir,
+    backendApp,
+    frontendDir,
+    frontendIndex,
+    cwd,
+    command,
+    pythonExists: path.isAbsolute(pythonPath) ? pathExists(pythonPath) : "PATH lookup",
+    backendDirExists: pathExists(backendDir),
+    backendAppExists: pathExists(backendApp),
+    frontendDirExists: pathExists(frontendDir),
+    frontendIndexExists: pathExists(frontendIndex),
+    logPath: logPath(),
+  };
+}
+
+function createStartupError(message, details, exitInfo = {}) {
   return new Error(
     `${message}\n\n` +
     `Backend URL: ${details.backendUrl}\n` +
-    `Python path attempted: ${details.pythonPath}\n` +
-    `Backend directory attempted: ${details.backendDir}\n` +
+    `Python path attempted: ${details.pythonPath} (exists: ${details.pythonExists})\n` +
+    `Backend directory attempted: ${details.backendDir} (exists: ${details.backendDirExists})\n` +
+    `Backend app attempted: ${details.backendApp} (exists: ${details.backendAppExists})\n` +
+    `Frontend directory attempted: ${details.frontendDir} (exists: ${details.frontendDirExists})\n` +
+    `Frontend index attempted: ${details.frontendIndex} (exists: ${details.frontendIndexExists})\n` +
     `Working directory attempted: ${details.cwd}\n` +
     `Command attempted: ${details.command}\n` +
-    `Electron logs: ${logPath()}`,
+    `Backend exit code: ${exitInfo.code ?? "n/a"}\n` +
+    `Backend exit signal: ${exitInfo.signal ?? "n/a"}\n` +
+    `Electron logs: ${details.logPath}`,
   );
 }
 
-function waitForBackendReady(url, { timeoutMs = 45_000, intervalMs = 800 } = {}) {
+function waitForBackendReady(url, details, { timeoutMs = 45_000, intervalMs = 500 } = {}) {
   const start = Date.now();
   let settled = false;
   let timer = null;
@@ -159,14 +187,18 @@ function waitForBackendReady(url, { timeoutMs = 45_000, intervalMs = 800 } = {})
 
     const poll = async () => {
       if (settled) return;
-      if (await isHealthyDepthLensBackend(url)) {
+      if (await isLiveDepthLensBackend(url)) {
         backendReady = true;
-        log.info(`Backend ready at ${url}`);
+        log.info(`Backend live at ${url}`);
         finish(resolve, url);
         return;
       }
+      if (backendProcess?.exitCode !== null && backendProcess?.exitCode !== undefined) {
+        finish(reject, createStartupError(`Backend process exited before /live became available.`, details, { code: backendProcess.exitCode, signal: backendProcess.signalCode }));
+        return;
+      }
       if (Date.now() - start >= timeoutMs) {
-        finish(reject, new Error(`Backend did not become healthy within ${Math.round(timeoutMs / 1000)}s at ${url}`));
+        finish(reject, createStartupError(`Backend did not become live within ${Math.round(timeoutMs / 1000)}s at ${url}`, details, { code: backendProcess?.exitCode, signal: backendProcess?.signalCode }));
         return;
       }
       timer = setTimeout(poll, intervalMs);
@@ -194,17 +226,17 @@ async function startBackend() {
     "1",
   ];
   const command = `${pythonPath} ${args.join(" ")}`;
-  const details = { backendUrl, pythonPath, backendDir, cwd, command };
+  const details = createStartupDetails(pythonPath, backendDir, cwd, command);
 
   log.info(`Backend URL: ${backendUrl}`);
   log.info(`Backend dir: ${backendDir}`);
   log.info(`Backend cwd: ${cwd}`);
   log.info(`Starting backend command: ${command}`);
 
-  if (await isHealthyDepthLensBackend(backendUrl)) {
+  if (await isLiveDepthLensBackend(backendUrl)) {
     backendReady = true;
     backendOwnedByElectron = false;
-    log.info(`Reusing existing healthy DepthLens backend at ${backendUrl}`);
+    log.info(`Reusing existing live DepthLens backend at ${backendUrl}`);
     return backendUrl;
   }
 
@@ -213,7 +245,7 @@ async function startBackend() {
   });
   if (!portAvailable) {
     throw createStartupError(
-      `Port ${BACKEND_PORT} is already in use, but it is not a healthy DepthLens backend. Free the port or set DEPTHLENS_BACKEND_PORT consistently before launching.`,
+      `Port ${BACKEND_PORT} is already in use, but /live is not a DepthLens backend. Free the port or set DEPTHLENS_BACKEND_PORT consistently before launching.`,
       details,
     );
   }
@@ -225,8 +257,8 @@ async function startBackend() {
     );
   }
 
-  if (!fs.existsSync(backendDir)) {
-    throw createStartupError("Backend directory was not found in app resources.", details);
+  if (!details.backendDirExists || !details.backendAppExists || !details.frontendDirExists || !details.frontendIndexExists) {
+    throw createStartupError("Required app resources were not found. Run npm run verify:resources before packaging and ensure the repo-root venv exists.", details);
   }
 
   backendProcess = spawn(pythonPath, args, {
@@ -255,18 +287,19 @@ async function startBackend() {
     log.error(`Backend spawn error: ${err.message}`);
   });
 
-  backendProcess.on("close", (code) => {
-    log.info(`Backend exited with code ${code}`);
+  backendProcess.on("close", (code, signal) => {
+    log.info(`Backend exited with code ${code}, signal ${signal}`);
     backendReady = false;
     backendOwnedByElectron = false;
     backendProcess = null;
   });
 
   try {
-    return await waitForBackendReady(backendUrl);
+    return await waitForBackendReady(backendUrl, details);
   } catch (err) {
     if (backendProcess && !backendProcess.killed) backendProcess.kill("SIGTERM");
-    throw createStartupError(err.message, details);
+    if (err.message?.includes("Backend URL:")) throw err;
+    throw createStartupError(err.message, details, { code: backendProcess?.exitCode, signal: backendProcess?.signalCode });
   }
 }
 
@@ -338,6 +371,7 @@ function createMainWindow() {
 ipcMain.handle("get-backend-url", () => backendUrl);
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("get-platform", () => process.platform);
+ipcMain.handle("get-backend-live-path", () => "/live");
 
 ipcMain.handle("show-save-dialog", async (event, options) => {
   const { dialog } = require("electron");
@@ -382,6 +416,7 @@ app.whenReady().then(async () => {
     });
 
     if (choice === 1) {
+      backendOwnedByElectron = false;
       app.quit();
       return;
     }
@@ -406,7 +441,7 @@ app.on("before-quit", (event) => {
     log.info("App quitting — shutting down backend");
 
     isQuitting = true;
-    backendProcess.kill("SIGTERM");
+    try { backendProcess.kill("SIGTERM"); } catch (err) { log.warn(`Failed to terminate backend: ${err.message}`); }
 
     const killTimer = setTimeout(() => {
       log.warn("Backend did not exit gracefully, forcing SIGKILL");

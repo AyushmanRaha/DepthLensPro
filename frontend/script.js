@@ -105,6 +105,10 @@ const state = {
   lb: { current: null },
   abort: null,
   compareAbort: null,
+  healthAbort: null,
+  benchmarkAbort: null,
+  pollTimers: [],
+  lastToast: { message: "", at: 0 },
   compareFile: null,
   devices: {},
   primaryDevice: "cpu",
@@ -625,6 +629,7 @@ function applyCacheMetrics(raw) {
 }
 
 async function loadCacheMetrics() {
+  if (!backendOnline || document.hidden) return false;
   try {
     const res = await apiFetch("/cache/metrics", { signal: AbortSignal.timeout(3000) });
     applyCacheMetrics(await res.json());
@@ -634,35 +639,66 @@ async function loadCacheMetrics() {
   }
 }
 
-async function checkHealth() {
-  setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
+function deviceBadge(devs, primary) {
+  const info = devs?.[primary];
+  if (info?.type==="cuda") return `GPU: ${info.name} (${info.memory_gb} GB)`;
+  if (info?.type==="mps") return `Apple ${info.chip || "Silicon"} · Metal`;
+  if (info?.type==="xpu") return `NPU/GPU: ${info.name||primary}`;
+  return "CPU";
+}
+
+async function checkLive({ quiet = false } = {}) {
+  if (!quiet) setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
   try {
-    const res = await apiFetch("/health", { signal: AbortSignal.timeout(4000) });
+    const res = await apiFetch("/live", { signal: AbortSignal.timeout(2500) });
     const data = await res.json();
-    backendOnline = true;
-    applyCacheMetrics(data.cache_metrics);
-    const devs = data.devices || {};
-    const primary = data.primary_device || "cpu";
-    state.devices = devs; state.primaryDevice = primary;
-    const info = devs[primary];
-    let badge = "CPU";
-    if (info?.type==="cuda")  badge = `GPU: ${info.name} (${info.memory_gb} GB)`;
-    else if (info?.type==="mps") badge = `Apple ${info.chip || "Silicon"} · Metal`;
-    else if (info?.type==="xpu") badge = `NPU/GPU: ${info.name||primary}`;
-    const accelText = accelerationSummary(data);
-    setStatus("online","Depth Engine: Online",`PyTorch ${data.torch_version} · ${primary} · ${accelText}`,badge);
-    await loadDevices(devs, primary);
-    updateDeviceInfoBanner(`${badge} · ${accelText}`);
-    if (!data.acceleration_ok) toast("Acceleration check warning: one or more accelerator backends are unavailable.","warning");
+    backendOnline = data.status === "ok";
+    if (!backendOnline) throw new Error("Unexpected /live response");
+    setStatus("online","Depth Engine: Online",`Backend live · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
+    syncQueueControls();
+    await loadDevices(state.devices, state.primaryDevice);
     return true;
   } catch (err) {
     backendOnline = false;
-    setStatus("offline","Depth Engine: Offline",`No response from ${API || DEFAULT_API_BASE_URL}`);
-    el.deviceInfoBanner.querySelector("span:last-child").textContent = `Start the FastAPI engine at ${API || DEFAULT_API_BASE_URL} to detect available devices`;
-    toast(`Backend health check failed: ${err.message}`, "error", 6000);
+    setStatus("offline","Depth Engine: Offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
+    el.deviceInfoBanner.querySelector("span:last-child").textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
+    if (!quiet) toastOnce(`Backend liveness check failed: ${err.message}`, "error", 6000);
     syncQueueControls();
     return false;
   }
+}
+
+async function checkDiagnostics({ quiet = true } = {}) {
+  if (!backendOnline) return false;
+  state.healthAbort?.abort();
+  state.healthAbort = new AbortController();
+  try {
+    const res = await apiFetch("/health", { signal: AbortSignal.any([state.healthAbort.signal, AbortSignal.timeout(6000)]) });
+    const data = await res.json();
+    applyCacheMetrics(data.cache_metrics);
+    const devs = data.devices || state.devices || {};
+    const primary = data.primary_device || state.primaryDevice || "cpu";
+    state.devices = devs; state.primaryDevice = primary;
+    const badge = deviceBadge(devs, primary);
+    const accelText = accelerationSummary(data);
+    setStatus("online","Depth Engine: Online",`PyTorch ${data.torch_version} · ${primary} · diagnostics ${data.status || "ok"} · ${accelText}`,badge);
+    await loadDevices(devs, primary);
+    updateDeviceInfoBanner(`${badge} · ${accelText}`);
+    if (data.status === "degraded" && !quiet) toastOnce("Diagnostics degraded; inference remains available.","warning");
+    return true;
+  } catch (err) {
+    if (backendOnline) {
+      setStatus("online","Depth Engine: Online",`Diagnostics degraded · ${err.message}`, deviceBadge(state.devices, state.primaryDevice));
+      if (!quiet) toastOnce(`Diagnostics check failed: ${err.message}`, "warning", 5000);
+    }
+    return false;
+  }
+}
+
+async function checkHealth() {
+  const live = await checkLive();
+  if (live) await checkDiagnostics({ quiet: true });
+  return live;
 }
 
 function autoDeviceLabel(devs, primary) {
@@ -921,7 +957,7 @@ function cancelBatch() {
 
 async function runBatch() {
   if (!backendOnline) {
-    const ok = await checkHealth();
+    const ok = await checkLive();
     if (!ok) { toast(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`, "error", 6000); return; }
   }
   const pending = state.files.filter(f=>f.status==="pending"||f.status==="error");
@@ -991,10 +1027,12 @@ async function runBatch() {
   }
 }
 
-async function inferOne(file,model,colormap,device,signal) {
+async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs="color") {
   const fd=new FormData();
   fd.append("file",file); fd.append("model",model);
   fd.append("colormap",colormap); fd.append("device",device);
+  fd.append("metrics", metrics);
+  fd.append("outputs", outputs);
   if (!backendOnline) throw new Error(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`);
   const res=await apiFetch("/estimate",{
     method:"POST", body:fd,
@@ -1261,7 +1299,7 @@ async function runComparison() {
   el.compareProgressBlock.hidden=false; el.compareResults.innerHTML="";
   el.compareChartCard.hidden=true; el.compareMetricGrid.innerHTML="";
   if (!backendOnline) {
-    const ok = await checkHealth();
+    const ok = await checkLive();
     if (!ok) {
       toast(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`, "error", 6000);
       el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
@@ -1287,7 +1325,7 @@ async function runComparison() {
       el.compareProgressEta.textContent=`ETA: ${fmtDuration(rem)}`;
     },120);
     try {
-      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal);
+      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray");
       clearInterval(tick); updateEstimate("compare",model,device,r.latency_ms);
       results.push(r); renderCompareCard(r);
     } catch(err) {
@@ -1389,7 +1427,9 @@ function renderBenchmark(data) {
 }
 
 async function runBenchmark() {
-  if (!el.benchmarkRunBtn) return;
+  if (!el.benchmarkRunBtn || el.benchmarkRunBtn.disabled) return;
+  state.benchmarkAbort?.abort();
+  state.benchmarkAbort = new AbortController();
   const model = el.benchmarkModel?.value || "MiDaS_small";
   const device = el.benchmarkDevice?.value || "auto";
   el.benchmarkRunBtn.disabled = true;
@@ -1397,29 +1437,40 @@ async function runBenchmark() {
   el.benchStatus.textContent = "Loading models and measuring latency…";
   try {
     if (!backendOnline) {
-      const ok = await checkHealth();
+      const ok = await checkLive();
       if (!ok) throw new Error(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`);
     }
     const res = await apiFetch(`/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
-      signal: AbortSignal.timeout(240_000),
+      signal: AbortSignal.any([state.benchmarkAbort.signal, AbortSignal.timeout(240_000)]),
     });
     renderBenchmark(await res.json());
     toast("Benchmark complete","success");
   } catch (err) {
     el.benchProvider.textContent = "Failed";
     el.benchStatus.textContent = err.message;
-    toast(`Benchmark failed: ${err.message}`,"error");
+    if (err.name !== "AbortError") toastOnce(`Benchmark failed: ${err.message}`,"error");
   } finally {
     el.benchmarkRunBtn.disabled = false;
     el.benchmarkRunBtn.textContent = "Run Benchmark";
+    state.benchmarkAbort = null;
   }
 }
 
-el.benchmarkRunBtn?.addEventListener("click", runBenchmark);
+el.benchmarkRunBtn?.addEventListener("click", () => {
+  clearTimeout(window.__depthlensBenchmarkTimer);
+  window.__depthlensBenchmarkTimer = setTimeout(runBenchmark, 250);
+});
 
 // ══════════════════════════════════════════════════════════════
 // TOAST
 // ══════════════════════════════════════════════════════════════
+function toastOnce(msg, type="info", dur=3500) {
+  const now = Date.now();
+  if (state.lastToast.message === msg && now - state.lastToast.at < 15000) return;
+  state.lastToast = { message: msg, at: now };
+  toast(msg, type, dur);
+}
+
 function toast(msg, type="info", dur=3500) {
   const t=document.createElement("div");
   t.className=`toast ${type}`;
@@ -1448,6 +1499,23 @@ function esc(s) {
     .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
+
+function startPollingLoops() {
+  state.pollTimers.forEach(clearInterval);
+  state.pollTimers = [];
+  state.pollTimers.push(setInterval(() => {
+    checkLive({ quiet: true });
+  }, document.hidden ? 30_000 : 10_000));
+  state.pollTimers.push(setInterval(() => {
+    if (!document.hidden) checkDiagnostics({ quiet: true });
+  }, document.hidden ? 120_000 : 60_000));
+  state.pollTimers.push(setInterval(() => {
+    if (!document.hidden) loadCacheMetrics();
+  }, document.hidden ? 120_000 : 45_000));
+}
+
+document.addEventListener("visibilitychange", startPollingLoops);
+
 // ══════════════════════════════════════════════════════════════
 // INITIALIZATION
 // ══════════════════════════════════════════════════════════════
@@ -1462,10 +1530,10 @@ async function init() {
     initLatencyChart();
     initCompareControls();
     switchPanel("main");
-    await checkHealth();
+    await checkLive();
+    await checkDiagnostics({ quiet: true });
     await loadCacheMetrics();
-    setInterval(checkHealth, 30_000);
-    setInterval(loadCacheMetrics, 15_000);
+    startPollingLoops();
   } catch (err) {
     backendOnline = false;
     setStatus("offline", "Depth Engine: Offline", `Backend URL resolution failed: ${err.message}`);

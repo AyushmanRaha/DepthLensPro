@@ -82,13 +82,23 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     )
     monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
 
+    calls = {"count": 0}
+
     def fake_process(
-        raw: bytes, model: str, colormap: str, device: str, filename: str | None
+        raw: bytes,
+        model: str,
+        colormap: str,
+        device: str,
+        filename: str | None,
+        metrics: str | None = None,
+        outputs: str | None = None,
+        max_dim: int | None = None,
     ) -> dict[str, Any]:
+        calls["count"] += 1
         return {
             "depth_map": "depth-png",
             "grayscale": "gray-png",
-            "metrics": {"mean": 0.5},
+            "metrics": {} if metrics == "none" else {"mean": 0.5, "mode": metrics},
             "latency_ms": 1.2,
             "model": model,
             "colormap": colormap,
@@ -96,6 +106,9 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
             "resolution": {"width": 8, "height": 8},
             "filename": filename,
             "cached": False,
+            "outputs": (outputs or "color").split(","),
+            **({"depth_map": "depth-png"} if outputs in (None, "color", "color,gray") else {}),
+            **({"grayscale": "gray-png"} if outputs in ("gray", "color,gray") else {}),
         }
 
     monkeypatch.setattr("backend.api.routes.process_image", fake_process)
@@ -119,6 +132,7 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     )
     assert second.status_code == 200
     assert second.json()["cached"] is True
+    assert calls["count"] == 1
 
 
 def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
@@ -139,3 +153,144 @@ def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
     payload = response.json()
     assert payload["model"] == "MiDaS_small"
     assert payload["iterations"] == 2
+
+
+def test_live_is_lightweight(monkeypatch: Any) -> None:
+    def fail_devices() -> None:
+        raise AssertionError("/live must not discover devices")
+
+    monkeypatch.setattr("backend.api.routes._available_devices", fail_devices)
+    response = client.get("/live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["service"] == "DepthLens Pro API"
+    assert "pid" in payload
+
+
+def test_devices_always_include_cpu_on_discovery_failure(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "backend.api.routes._DEVICE_CACHE",
+        {"expires_at": 0.0, "devices": None, "primary": "cpu", "error": None},
+    )
+
+    def fail_devices() -> None:
+        raise RuntimeError("probe failed")
+
+    monkeypatch.setattr("backend.api.routes._available_devices", fail_devices)
+    response = client.get("/devices")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["devices"]["cpu"]["available"] is True
+    assert payload["primary_device"] == "cpu"
+
+
+def test_health_degrades_when_acceleration_probe_fails(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "backend.api.routes._DEVICE_CACHE",
+        {"expires_at": 0.0, "devices": None, "primary": "cpu", "error": None},
+    )
+    monkeypatch.setattr(
+        "backend.api.routes._ACCEL_CACHE", {"expires_at": 0.0, "checks": None, "error": None}
+    )
+    monkeypatch.setattr(
+        "backend.api.routes._available_devices",
+        lambda: {
+            "cpu": {
+                "name": "CPU · test",
+                "hardware_name": "test",
+                "type": "cpu",
+                "compute_classes": ["cpu"],
+                "available": True,
+            },
+            "mps": {
+                "name": "GPU · test",
+                "hardware_name": "test",
+                "type": "mps",
+                "available": True,
+            },
+        },
+    )
+    monkeypatch.setattr("backend.api.routes._default_device_key", lambda: "mps")
+
+    def fail_accel(devs: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("mps probe failed")
+
+    monkeypatch.setattr("backend.api.routes._acceleration_checks", fail_accel)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["acceleration_checks"]["mps"]["operational"] is False
+    assert "timings_ms" in payload
+
+
+def test_estimate_metrics_and_outputs_modes(monkeypatch: Any) -> None:
+    cache_service.clear()
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda: (
+            {
+                "cpu": {
+                    "name": "CPU · test",
+                    "hardware_name": "test",
+                    "type": "cpu",
+                    "compute_classes": ["cpu"],
+                    "available": True,
+                }
+            },
+            "cpu",
+            {"cached": False},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+
+    def fake_process(
+        raw: bytes,
+        model: str,
+        colormap: str,
+        device: str,
+        filename: str | None,
+        metrics: str | None = None,
+        outputs: str | None = None,
+        max_dim: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "metrics": {} if metrics == "none" else {"mode": metrics},
+            "latency_ms": 1.0,
+            "model": model,
+            "colormap": colormap,
+            "device_used": device,
+            "resolution": {"width": 4, "height": 4},
+            "filename": filename,
+            "cached": False,
+        }
+        if outputs in {"color", "color,gray"}:
+            payload["depth_map"] = "depth-png"
+        if outputs in {"gray", "color,gray"}:
+            payload["grayscale"] = "gray-png"
+        return payload
+
+    monkeypatch.setattr("backend.api.routes.process_image", fake_process)
+    cases = [
+        ({"metrics": "none", "outputs": "color"}, "depth_map", "grayscale", {}),
+        ({"metrics": "fast", "outputs": "gray"}, "grayscale", "depth_map", {"mode": "fast"}),
+        ({"metrics": "full", "outputs": "color,gray"}, "depth_map", None, {"mode": "full"}),
+    ]
+    for data, present, absent, expected_metrics in cases:
+        response = client.post(
+            "/estimate",
+            files={
+                "file": ("sample.png", io.BytesIO(_png_bytes() + present.encode()), "image/png")
+            },
+            data={"model": "MiDaS_small", "colormap": "inferno", "device": "auto", **data},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert present in payload
+        if absent:
+            assert absent not in payload
+        assert payload["metrics"] == expected_metrics

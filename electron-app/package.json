@@ -5,11 +5,16 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:mac": "electron-builder --mac dmg --arm64",
+    "build:mac": "electron-builder --mac dmg --arm64 --x64",
     "build:win": "electron-builder --win nsis --x64",
-    "build:all": "electron-builder --mac dmg --arm64 --win nsis --x64",
+    "build:all": "electron-builder --mac dmg --arm64 --x64 --win nsis --x64 --linux AppImage --x64",
     "start:dev": "electron .",
-    "backend:smoke": "node -e \"fetch('http://127.0.0.1:8765/health').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\""
+    "backend:smoke": "npm run backend:live && npm run backend:devices && npm run backend:health",
+    "verify:resources": "node scripts/verify-resources.js",
+    "backend:live": "node -e \"fetch('http://127.0.0.1:8765/live').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
+    "backend:health": "node -e \"fetch('http://127.0.0.1:8765/health').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
+    "backend:devices": "node -e \"fetch('http://127.0.0.1:8765/devices').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
+    "build:linux": "electron-builder --linux AppImage --x64"
   },
   "build": {
     "forceCodeSigning": false,
@@ -25,7 +30,8 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
@@ -66,7 +72,11 @@
         "from": "../frontend",
         "to": "frontend"
       }
-    ]
+    ],
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
   },
   "dependencies": {
     "electron-log": "^5.4.4"
