@@ -1,0 +1,19 @@
+# --- Node / Dependencies ---
+node_modules/
+
+# --- Build Outputs ---
+# Ignores compiled app binaries and packaging outputs
+dist/
+out/
+release/
+build/
+
+# --- NPM / Yarn Logs ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# --- Environment ---
+.env
+.env.*

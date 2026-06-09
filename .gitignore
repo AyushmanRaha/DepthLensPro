@@ -1,25 +1,44 @@
-# macOS
+# --- macOS / OS ---
 .DS_Store
 .AppleDouble
 .LSOverride
+._*
+.Trashes
+Thumbs.db
 
-# Python
+# --- Python & Backend ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
 
-# Virtual Environments
+# --- Virtual Environments & Secrets ---
 venv/
 env/
 ENV/
+.venv/
 .env
+.env.*
 
-# PyTorch Local Model Weights
+# --- PyTorch / ML Model Weights ---
+# Prevents uploading massive model files
 *.pt
 *.pth
+*.onnx
+*.safetensors
+*.h5
+*.ckpt
 
-# IDE / Editor
+# --- Logs ---
+*.log
+logs/
+
+# --- IDE / Editor ---
 .vscode/
 .idea/
+*.swp
