@@ -55,6 +55,17 @@ def test_static_metadata_routes() -> None:
     assert "inferno" in client.get("/colormaps").json()["colormaps"]
 
 
+def test_cache_metrics_route_reports_dashboard_fields() -> None:
+    cache_service.clear()
+
+    response = client.get("/cache/metrics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"total_hits", "cache_misses", "keyspace_size"}.issubset(payload)
+    assert payload["ttl_seconds"] == cache_service.CACHE_TTL_SECONDS
+
+
 def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     cache_service.clear()
     monkeypatch.setattr(
