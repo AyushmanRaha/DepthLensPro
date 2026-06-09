@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
 import math
+import os
+import threading
 import time
 from typing import Any, Callable, cast
 
 import cv2
 import numpy as np
 import torch
+from starlette.concurrency import run_in_threadpool
 
 from backend.depth_models import ONNXExecutionEngine, onnx_model_path
 
@@ -51,13 +55,21 @@ MAX_SIZE_MB = 20
 MODELS: dict[str, tuple[torch.nn.Module, torch.device]] = {}
 ONNX_ENGINES: dict[str, ONNXExecutionEngine] = {}
 TRANSFORMS: dict[str, Callable[[np.ndarray], torch.Tensor]] = {}
+_MODEL_LOCK = threading.RLock()
+_MODEL_FORWARD_LOCKS: dict[str, threading.Lock] = {}
+_ONNX_LOCK = threading.RLock()
+_ONNX_FORWARD_LOCKS: dict[str, threading.Lock] = {}
+_INFERENCE_SEMAPHORE = asyncio.Semaphore(max(1, int(os.getenv("INFERENCE_MAX_CONCURRENCY", "2"))))
 
 
 def clear_models() -> None:
     """Release all loaded model and transform references."""
-    MODELS.clear()
-    ONNX_ENGINES.clear()
-    TRANSFORMS.clear()
+    with _MODEL_LOCK, _ONNX_LOCK:
+        MODELS.clear()
+        ONNX_ENGINES.clear()
+        TRANSFORMS.clear()
+        _MODEL_FORWARD_LOCKS.clear()
+        _ONNX_FORWARD_LOCKS.clear()
 
 
 def loaded_model_keys() -> list[str]:
@@ -70,30 +82,34 @@ def _load_model(
 ) -> tuple[tuple[torch.nn.Module, torch.device], Callable[[np.ndarray], torch.Tensor]]:
     """Load or reuse a MiDaS model for a resolved device."""
     key = f"{model_name}:{device_str}"
-    if key in MODELS:
-        return MODELS[key], TRANSFORMS[model_name]
-    if model_name not in SUPPORTED_MODELS:
-        raise ValueError(f"Unknown model: {model_name!r}")
+    with _MODEL_LOCK:
+        if key in MODELS:
+            return MODELS[key], TRANSFORMS[model_name]
+        if model_name not in SUPPORTED_MODELS:
+            raise ValueError(f"Unknown model: {model_name!r}")
 
-    device = torch.device(device_str)
-    log.info("Loading '%s' → %s …", model_name, device)
-    model = torch.hub.load("intel-isl/MiDaS", model_name, trust_repo=True)  # type: ignore[no-untyped-call]
-    model.to(device).eval()
+        device = torch.device(device_str)
+        log.info("Loading '%s' → %s …", model_name, device)
+        model = torch.hub.load("intel-isl/MiDaS", model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+        model.to(device).eval()
 
-    if device.type == "mps":
-        model = model.float()
+        if device.type == "mps":
+            model = model.float()
 
-    if model_name not in TRANSFORMS:
-        transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-            "intel-isl/MiDaS", "transforms", trust_repo=True
-        )
-        TRANSFORMS[model_name] = (
-            transforms.small_transform if model_name == "MiDaS_small" else transforms.dpt_transform
-        )
+        if model_name not in TRANSFORMS:
+            transforms = torch.hub.load(  # type: ignore[no-untyped-call]
+                "intel-isl/MiDaS", "transforms", trust_repo=True
+            )
+            TRANSFORMS[model_name] = (
+                transforms.small_transform
+                if model_name == "MiDaS_small"
+                else transforms.dpt_transform
+            )
 
-    MODELS[key] = (model, device)
-    log.info("✅ '%s' ready on %s", model_name, device)
-    return (model, device), TRANSFORMS[model_name]
+        MODELS[key] = (model, device)
+        _MODEL_FORWARD_LOCKS.setdefault(key, threading.Lock())
+        log.info("✅ '%s' ready on %s", model_name, device)
+        return (model, device), TRANSFORMS[model_name]
 
 
 def _decode(raw: bytes) -> np.ndarray:
@@ -121,9 +137,10 @@ def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.nd
     """Run normalized PyTorch depth inference for benchmarking and fallback."""
 
     (model, device), transform = _load_model(model_name, device_str)
+    key = f"{model_name}:{device_str}"
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    batch = transform(rgb).to(device)
-    with torch.no_grad():
+    batch = transform(rgb).to(device, non_blocking=True)
+    with _MODEL_FORWARD_LOCKS[key], torch.inference_mode():
         pred = model(batch)
         pred = torch.nn.functional.interpolate(
             pred.unsqueeze(1),
@@ -131,24 +148,31 @@ def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.nd
             mode="bicubic",
             align_corners=False,
         ).squeeze()
-    return _normalize_depth(pred.cpu().numpy().astype(np.float32))
+        depth = pred.detach().cpu().numpy().astype(np.float32, copy=False)
+    del batch, pred
+    return _normalize_depth(depth)
 
 
 def _load_onnx_engine(model_name: str, device_str: str) -> ONNXExecutionEngine:
     """Load or reuse an ONNX Runtime execution engine for static MiDaS weights."""
 
     key = f"{model_name}:{device_str}"
-    if key not in ONNX_ENGINES:
-        ONNX_ENGINES[key] = ONNXExecutionEngine(model_name=model_name, device=device_str)
-    return ONNX_ENGINES[key]
+    with _ONNX_LOCK:
+        if key not in ONNX_ENGINES:
+            ONNX_ENGINES[key] = ONNXExecutionEngine(model_name=model_name, device=device_str)
+            _ONNX_FORWARD_LOCKS.setdefault(key, threading.Lock())
+        return ONNX_ENGINES[key]
 
 
 def _infer_onnx(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
     """Run normalized ONNX Runtime depth inference for a BGR image."""
 
+    key = f"{model_name}:{device_str}"
     engine = _load_onnx_engine(model_name, device_str)
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    return _normalize_depth(engine.forward(rgb))
+    with _ONNX_FORWARD_LOCKS[key]:
+        depth = engine.forward(rgb)
+    return _normalize_depth(depth)
 
 
 def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
@@ -291,3 +315,12 @@ def process_image(
         "filename": filename,
         "cached": False,
     }
+
+
+async def process_image_async(
+    raw: bytes, model: str, colormap: str, device: str, filename: str | None
+) -> dict[str, Any]:
+    """Run the blocking decode/inference/encode pipeline off the ASGI event loop."""
+
+    async with _INFERENCE_SEMAPHORE:
+        return await run_in_threadpool(process_image, raw, model, colormap, device, filename)

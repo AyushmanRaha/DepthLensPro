@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import importlib
 import importlib.util
 import logging
@@ -28,6 +27,7 @@ _REDIS_POOL: Any | None = None
 _REDIS_CLIENT: Any | None = None
 _REDIS_DISABLED_UNTIL = 0.0
 _REDIS_BACKOFF_SECONDS = 10.0
+_CACHE_BINARY_MAGIC = b"DLP1\0"
 
 _METRIC_LOCK = threading.Lock()
 _MEMORY_HITS = 0
@@ -117,13 +117,21 @@ def _key(cache_key: str) -> str:
 
 
 def _serialize(value: dict[str, Any]) -> bytes:
-    """Serialize cache payloads, including NumPy arrays, into Redis-safe bytes."""
+    """Serialize cache payloads as direct binary bytes without JSON/base64 expansion."""
 
-    pickled = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
-    return base64.b64encode(pickled)
+    return _CACHE_BINARY_MAGIC + pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def _deserialize(raw: bytes) -> dict[str, Any]:
+    """Deserialize current binary cache payloads with legacy base64 compatibility."""
+
+    if raw.startswith(_CACHE_BINARY_MAGIC):
+        return cast(dict[str, Any], pickle.loads(raw[len(_CACHE_BINARY_MAGIC) :]))
+
+    # Compatibility for entries written by older DepthLens builds that wrapped
+    # pickle bytes in base64, incurring unnecessary CPU and memory overhead.
+    import base64
+
     return cast(dict[str, Any], pickle.loads(base64.b64decode(raw)))
 
 

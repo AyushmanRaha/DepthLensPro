@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import importlib
 import os
-import platform
 from pathlib import Path
-from typing import Any, Sequence, cast
+from typing import Any, cast
 
 import cv2  # noqa: F401 - retained for compatibility with legacy imports.
 import numpy as np
 import torch
 
-from backend.utils.hardware import _default_device_key
+from backend.utils.hardware import _default_device_key, _onnx_providers_for_device
 
 MIDAS_REPO = "intel-isl/MiDaS"
 ONNX_INPUT_SIZE = (384, 384)
@@ -22,7 +21,8 @@ DEFAULT_ONNX_DIR = Path(__file__).resolve().parent / "onnx_weights"
 def onnx_model_path(model_name: str, output_dir: str | os.PathLike[str] | None = None) -> Path:
     """Return the expected static ONNX weight path for a MiDaS model."""
 
-    base_dir = Path(output_dir or os.getenv("DEPTHLENS_ONNX_DIR", DEFAULT_ONNX_DIR))
+    configured_dir = output_dir or os.getenv("DEPTHLENS_ONNX_DIR")
+    base_dir = Path(configured_dir) if configured_dir is not None else DEFAULT_ONNX_DIR
     return base_dir / f"{model_name}.onnx"
 
 
@@ -45,8 +45,11 @@ class ONNXExecutionEngine:
 
         ort = importlib.import_module("onnxruntime")
         self.available_providers = list(ort.get_available_providers())
-        self.providers = self._select_providers(device, self.available_providers)
-        self.session = ort.InferenceSession(str(self.model_path), providers=self.providers)
+        self.providers = _onnx_providers_for_device(device, self.available_providers)
+        self.session_options = self._session_options(ort)
+        self.session = ort.InferenceSession(
+            str(self.model_path), sess_options=self.session_options, providers=self.providers
+        )
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
         self.transform = self._load_transform(model_name)
@@ -61,24 +64,20 @@ class ONNXExecutionEngine:
         return transforms.dpt_transform
 
     @staticmethod
-    def _select_providers(device: str, available: Sequence[str]) -> list[str]:
-        """Order ONNX Runtime providers by requested and platform hardware."""
+    def _session_options(ort: Any) -> Any:
+        """Create optimized ONNX Runtime session options for CV inference."""
 
-        requested = device.lower()
-        providers: list[str] = []
-        if (
-            requested.startswith("cuda") or requested == "auto"
-        ) and "CUDAExecutionProvider" in available:
-            providers.append("CUDAExecutionProvider")
-        if (
-            (requested in {"mps", "coreml", "ane"} or requested == "auto")
-            and platform.system() == "Darwin"
-            and "CoreMLExecutionProvider" in available
-        ):
-            providers.append("CoreMLExecutionProvider")
-        if "CPUExecutionProvider" in available:
-            providers.append("CPUExecutionProvider")
-        return providers or list(available)
+        options = ort.SessionOptions()
+        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+        default_intra_threads = min(4, os.cpu_count() or 1)
+        intra_threads = int(os.getenv("ORT_INTRA_OP_NUM_THREADS", str(default_intra_threads)))
+        inter_threads = int(os.getenv("ORT_INTER_OP_NUM_THREADS", "1"))
+        options.intra_op_num_threads = max(1, intra_threads)
+        options.inter_op_num_threads = max(1, inter_threads)
+        options.enable_mem_pattern = True
+        options.enable_cpu_mem_arena = True
+        return options
 
     @property
     def provider(self) -> str:
@@ -94,10 +93,13 @@ class ONNXExecutionEngine:
         pred = np.asarray(outputs[0], dtype=np.float32)
         pred = np.squeeze(pred)
         if pred.shape != img_rgb.shape[:2]:
-            pred = cv2.resize(
-                pred, (img_rgb.shape[1], img_rgb.shape[0]), interpolation=cv2.INTER_CUBIC
+            pred = cast(
+                np.ndarray,
+                cv2.resize(
+                    pred, (img_rgb.shape[1], img_rgb.shape[0]), interpolation=cv2.INTER_CUBIC
+                ),
             )
-        return cast(np.ndarray, pred.astype(np.float32, copy=False))
+        return pred.astype(np.float32, copy=False)
 
     def predict(self, img_rgb: np.ndarray) -> np.ndarray:
         """Compatibility alias for callers expecting a model-like predict method."""
@@ -147,7 +149,7 @@ class DepthEstimator:
         model, transform = self.load_model(model_name)
         input_batch = transform(img_rgb).to(self.device)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             prediction = model(input_batch)
             prediction = torch.nn.functional.interpolate(
                 prediction.unsqueeze(1),
@@ -156,4 +158,4 @@ class DepthEstimator:
                 align_corners=False,
             ).squeeze()
 
-        return prediction.cpu().numpy()
+        return prediction.detach().cpu().numpy()

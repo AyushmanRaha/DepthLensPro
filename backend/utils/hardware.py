@@ -1,11 +1,11 @@
-"""Hardware detection and torch device selection helpers."""
+"""Hardware detection and torch/ONNX device selection helpers."""
 
 from __future__ import annotations
 
 import os
 import platform
 import subprocess
-from typing import Any
+from typing import Any, Sequence
 
 import torch
 
@@ -139,6 +139,47 @@ def _resolve(requested: str) -> torch.device:
     if requested not in avail:
         raise ValueError(f"Device '{requested}' unavailable. Options: {list(avail)}")
     return torch.device(requested)
+
+
+def _onnx_provider_candidates(device: str) -> list[str]:
+    """Map a PyTorch-style device string to ordered ONNX Runtime providers.
+
+    ONNX Runtime does not understand PyTorch device names like ``mps`` or
+    ``cuda:0``. This helper translates those names into execution-provider
+    names and always appends CPU as the safe final fallback.
+    """
+
+    requested = (device or "auto").lower()
+    if requested == "auto":
+        requested = _default_device_key()
+
+    providers: list[str]
+    if requested.startswith("cuda"):
+        providers = ["CUDAExecutionProvider", "TensorrtExecutionProvider"]
+    elif requested in {"mps", "metal", "coreml", "ane"}:
+        providers = ["CoreMLExecutionProvider"]
+    elif requested.startswith("xpu") or requested.startswith("intel"):
+        providers = ["OpenVINOExecutionProvider", "DnnlExecutionProvider"]
+    elif requested.startswith("rocm") or requested.startswith("hip"):
+        providers = ["ROCMExecutionProvider", "MIGraphXExecutionProvider"]
+    elif requested.startswith("dml") or requested.startswith("directml"):
+        providers = ["DmlExecutionProvider"]
+    else:
+        providers = []
+
+    providers.append("CPUExecutionProvider")
+    return list(dict.fromkeys(providers))
+
+
+def _onnx_providers_for_device(device: str, available: Sequence[str]) -> list[str]:
+    """Return ONNX Runtime providers supported by this runtime for a PyTorch device."""
+
+    available_set = set(available)
+    candidates = _onnx_provider_candidates(device)
+    selected = [provider for provider in candidates if provider in available_set]
+    if "CPUExecutionProvider" in available_set and "CPUExecutionProvider" not in selected:
+        selected.append("CPUExecutionProvider")
+    return selected or list(available)
 
 
 def _acceleration_checks(devs: DeviceMap) -> dict[str, dict[str, Any]]:

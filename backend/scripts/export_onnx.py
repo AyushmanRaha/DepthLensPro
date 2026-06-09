@@ -1,4 +1,4 @@
-"""Export MiDaS Torch Hub weights to static ONNX Runtime graph files.
+"""Export MiDaS Torch Hub weights to dynamic ONNX Runtime graph files.
 
 Usage:
     python backend/scripts/export_onnx.py --model MiDaS_small
@@ -22,7 +22,7 @@ from backend.services.inference import SUPPORTED_MODELS  # noqa: E402
 
 
 def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:
-    """Load MiDaS from Torch Hub and export a static [1, 3, 384, 384] ONNX graph."""
+    """Load MiDaS from Torch Hub and export a dynamic BCHW ONNX graph."""
 
     output_path = onnx_model_path(model_name, output_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,17 +31,20 @@ def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:
     model.eval().cpu()
 
     dummy = torch.zeros((1, 3, ONNX_INPUT_SIZE[0], ONNX_INPUT_SIZE[1]), dtype=torch.float32)
-    with torch.no_grad():
+    with torch.inference_mode():
         torch.onnx.export(
             model,
-            dummy,
+            (dummy,),
             str(output_path),
             export_params=True,
             opset_version=opset,
             do_constant_folding=True,
             input_names=["image"],
             output_names=["depth"],
-            dynamic_axes=None,
+            dynamic_axes={
+                "image": {0: "batch", 2: "height", 3: "width"},
+                "depth": {0: "batch", 1: "height", 2: "width"},
+            },
         )
 
     onnx = __import__("onnx")
