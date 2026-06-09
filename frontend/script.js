@@ -714,14 +714,16 @@ async function loadDevices(devs, primaryFromHealth = null) {
   if (!devs || !Object.keys(devs).length) {
     try {
       const r = await apiFetch("/devices",{signal:AbortSignal.timeout(3000)});
-      devs = (await r.json()).devices;
+      const payload = await r.json();
+      devs = payload.devices || {};
+      primaryFromHealth = payload.primary_device || primaryFromHealth;
     } catch (err) { console.error(`[DepthLens] Device load failed: ${err.message}`); return; }
   }
   const keys = Object.keys(devs);
   if (!keys.length) return;
   state.devices = devs;
   const primary = primaryFromHealth && devs[primaryFromHealth] ? primaryFromHealth
-    : devs.mps ? "mps" : keys.includes("cuda:0") ? "cuda:0" : keys[0];
+    : devs.mps ? "mps" : keys.includes("cuda:0") ? "cuda:0" : keys.includes("xpu:0") ? "xpu:0" : keys[0];
   state.primaryDevice = primary;
   const savedRaw = window._savedDevice || "auto";
   const saved = savedRaw === "auto" || devs[savedRaw] ? savedRaw : "auto";
@@ -916,7 +918,7 @@ el.clearBtn.addEventListener("click",()=>{ state.files=[]; el.fileQueue.innerHTM
 // ══════════════════════════════════════════════════════════════
 function selModel()  { return $('input[name="model"]:checked')?.value    || "MiDaS_small"; }
 function selCmap()   { return $('input[name="colormap"]:checked')?.value || "inferno"; }
-function selDevice() { return $('input[name="device"]:checked')?.value   || state.primaryDevice || "cpu"; }
+function selDevice() { return $('input[name="device"]:checked')?.value || "auto"; }
 
 function setProgress(pct,status,eta,currentFile,countStr) {
   el.progressFill.style.width = `${pct}%`;

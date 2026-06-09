@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const http = require("http");
 const net = require("net");
 const fs = require("fs");
@@ -8,6 +8,22 @@ const log = require("electron-log");
 
 log.transports.file.level = "info";
 log.info("DepthLens Pro starting...");
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  log.warn("SECOND_INSTANCE_DETECTED");
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    log.warn("SECOND_INSTANCE_DETECTED");
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      log.info("SECOND_INSTANCE_FOCUS_EXISTING_WINDOW");
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 // ── Constants ──────────────────────────────────────────────
 const BACKEND_HOST = "127.0.0.1";
@@ -21,6 +37,9 @@ let splashWindow = null;
 let backendProcess = null;
 let backendReady = false;
 let backendOwnedByElectron = false;
+let backendPid = null;
+let backendMetadata = null;
+let shutdownInProgress = false;
 
 // ── Resource paths ─────────────────────────────────────────
 function getResourcePath(...parts) {
@@ -41,30 +60,53 @@ function logPath() {
 // ── HTTP helpers ───────────────────────────────────────────
 function requestJson(url, timeoutMs = 2000) {
   return new Promise((resolve, reject) => {
+    let connected = false;
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
+      connected = true;
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => { body += chunk; });
       res.on("end", () => {
         let json = null;
         try { json = body ? JSON.parse(body) : null; } catch (_) {}
-        resolve({ statusCode: res.statusCode, json, body });
+        resolve({ statusCode: res.statusCode, json, body, connected, empty: body.length === 0 });
       });
     });
-    req.on("error", reject);
+    req.on("socket", (socket) => {
+      socket.on("connect", () => { connected = true; });
+    });
+    req.on("error", (err) => {
+      err.connected = connected;
+      if (err.code === "ECONNREFUSED") err.kind = "connection_refused";
+      else if (connected && /timed out|timeout/i.test(err.message)) err.kind = "tcp_connected_http_timeout";
+      reject(err);
+    });
     req.on("timeout", () => {
-      req.destroy(new Error(`Timed out requesting ${url}`));
+      const err = new Error(`Timed out requesting ${url}`);
+      err.connected = connected;
+      err.kind = connected ? "tcp_connected_http_timeout" : "timeout";
+      req.destroy(err);
     });
   });
 }
 
-async function isLiveDepthLensBackend(url) {
+async function probeLive(url, timeoutMs = 1200, attempt = 0) {
+  const liveUrl = `${url}/live`;
   try {
-    const live = await requestJson(`${url}/live`, 1200);
-    return Boolean(live.statusCode === 200 && live.json?.service === "DepthLens Pro API" && live.json?.status === "ok");
-  } catch (_) {
-    return false;
+    const live = await requestJson(liveUrl, timeoutMs);
+    const valid = Boolean(live.statusCode === 200 && live.json?.service === "DepthLens Pro API" && live.json?.status === "ok");
+    log.info("LIVE_POLL_ATTEMPT", { attempt, url: liveUrl, statusCode: live.statusCode, json: live.json, valid, empty: live.empty });
+    return { ok: valid, kind: valid ? "valid_depthlens_live" : "non_depthlens_response", ...live };
+  } catch (err) {
+    const kind = err.kind || (err.code === "ECONNREFUSED" ? "connection_refused" : "error");
+    if (kind === "tcp_connected_http_timeout") log.warn("LIVE_TCP_CONNECTED_HTTP_TIMEOUT", { attempt, url: liveUrl, error: err.message });
+    log.info("LIVE_POLL_ATTEMPT", { attempt, url: liveUrl, error: err.message, kind });
+    return { ok: false, kind, error: err };
   }
+}
+
+async function isLiveDepthLensBackend(url) {
+  return (await probeLive(url, 1200, 0)).ok;
 }
 
 function isPortAvailable(port, host = BACKEND_HOST) {
@@ -79,6 +121,183 @@ function isPortAvailable(port, host = BACKEND_HOST) {
     });
     server.listen(port, host);
   });
+}
+
+
+function getBackendPidPath() {
+  return path.join(app.getPath("userData"), "backend.pid");
+}
+
+function getBackendMetadataPath() {
+  return path.join(app.getPath("userData"), "backend.json");
+}
+
+function readStoredBackendPid() {
+  try {
+    const raw = fs.readFileSync(getBackendPidPath(), "utf8").trim();
+    const pid = Number.parseInt(raw, 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function readStoredBackendMetadata() {
+  try { return JSON.parse(fs.readFileSync(getBackendMetadataPath(), "utf8")); } catch (_) { return null; }
+}
+
+function removeBackendPidFiles() {
+  for (const filePath of [getBackendPidPath(), getBackendMetadataPath()]) {
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (err) { log.warn(`Failed to remove ${filePath}: ${err.message}`); }
+  }
+}
+
+function writeBackendPidFiles(metadata) {
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(getBackendPidPath(), `${metadata.pid}\n`);
+  fs.writeFileSync(getBackendMetadataPath(), `${JSON.stringify(metadata, null, 2)}\n`);
+  log.info("BACKEND_PID_WRITTEN", { pidFile: getBackendPidPath(), metadataFile: getBackendMetadataPath(), pid: metadata.pid });
+}
+
+function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function isSupportedArchitecture() {
+  return ["darwin:arm64", "win32:arm64", "linux:arm64"].includes(`${process.platform}:${process.arch}`);
+}
+
+function showUnsupportedArchitectureDialog() {
+  const { dialog } = require("electron");
+  const message = "DepthLens Pro currently supports Apple Silicon macOS, Windows ARM, and Linux ARM only.";
+  log.error("UNSUPPORTED_ARCH_BLOCKED", { platform: process.platform, arch: process.arch });
+  dialog.showMessageBoxSync({
+    type: "error",
+    title: "DepthLens Pro — Unsupported Architecture",
+    message,
+    detail: `${message}\n\nDetected platform: ${process.platform}\nDetected architecture: ${process.arch}`,
+    buttons: ["Quit"],
+  });
+}
+
+function execCapture(command, args, options = {}) {
+  try {
+    return execFileSync(command, args, { encoding: "utf8", timeout: options.timeout || 2500, windowsHide: true }).trim();
+  } catch (err) {
+    return (err.stdout || "").toString().trim();
+  }
+}
+
+function getProcessCommandLine(pid) {
+  if (!pid) return "";
+  if (process.platform === "win32") {
+    const escaped = String(pid).replace(/'/g, "''");
+    return execCapture("powershell.exe", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId=${escaped}\").CommandLine`]);
+  }
+  return execCapture("ps", ["-p", String(pid), "-o", "command="]);
+}
+
+function getListeningPid(port = BACKEND_PORT) {
+  if (process.platform === "win32") {
+    const out = execCapture("cmd.exe", ["/c", `netstat -ano -p tcp | findstr :${port}`]);
+    const line = out.split(/\r?\n/).find((row) => row.includes("LISTENING"));
+    const pid = line?.trim().split(/\s+/).pop();
+    return pid ? Number.parseInt(pid, 10) : null;
+  }
+  const out = execCapture("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
+  const line = out.split(/\r?\n/).find((row) => /\bLISTEN\b/.test(row) && !row.startsWith("COMMAND"));
+  if (!line) return null;
+  const pid = Number.parseInt(line.trim().split(/\s+/)[1], 10);
+  return Number.isFinite(pid) ? pid : null;
+}
+
+async function isPidAlive(pid) {
+  if (!pid) return false;
+  try {
+    if (process.platform === "win32") {
+      return execCapture("cmd.exe", ["/c", `tasklist /FI \"PID eq ${pid}\"`]).includes(String(pid));
+    }
+    process.kill(pid, 0);
+    return true;
+  } catch (_) { return false; }
+}
+
+function isDepthLensOwnedProcess({ pid, commandLine = "", storedPid = null, storedMetadata = null, cwd = getAppRoot(), backendDir = getResourcePath("backend"), pythonPath = "" }) {
+  const cmd = commandLine || "";
+  const normalized = cmd.toLowerCase();
+  const candidates = [
+    storedMetadata?.backendDir,
+    storedMetadata?.cwd,
+    storedMetadata?.pythonPath,
+    path.join(process.resourcesPath || "", "backend"),
+    path.join(process.resourcesPath || "", "venv"),
+    backendDir,
+    cwd,
+    pythonPath,
+  ].filter(Boolean).map((value) => String(value).toLowerCase());
+  if (pid && storedPid && Number(pid) === Number(storedPid)) return true;
+  if (normalized.includes("depthlens pro") || normalized.includes("depthlenspro")) return true;
+  if (normalized.includes("uvicorn") && normalized.includes("backend.app:app") && candidates.some((value) => normalized.includes(value))) return true;
+  if (candidates.some((value) => value && normalized.includes(value) && (normalized.includes("backend.app:app") || normalized.includes("uvicorn")))) return true;
+  return false;
+}
+
+async function terminatePid(pid, { force = false } = {}) {
+  if (!pid) return;
+  if (process.platform === "win32") {
+    const args = ["/PID", String(pid), "/T"];
+    if (force) args.push("/F");
+    execCapture("taskkill.exe", args, { timeout: 5000 });
+  } else {
+    try { process.kill(pid, force ? "SIGKILL" : "SIGTERM"); } catch (err) { log.warn(`Failed to send ${force ? "SIGKILL" : "SIGTERM"} to ${pid}: ${err.message}`); }
+  }
+}
+
+async function inspectBackendPort() {
+  const storedPid = readStoredBackendPid();
+  const storedMetadata = readStoredBackendMetadata();
+  const listeningPid = getListeningPid(BACKEND_PORT);
+  const pid = listeningPid || storedPid;
+  const commandLine = pid ? getProcessCommandLine(pid) : "";
+  const pidMatchesPidFile = Boolean(pid && storedPid && Number(pid) === Number(storedPid));
+  const depthLensOwned = isDepthLensOwnedProcess({ pid, commandLine, storedPid, storedMetadata });
+  if (pid) log.info("PORT_OCCUPIED_PID_DETECTED", { pid, commandLine, pidMatchesPidFile, depthLensOwned });
+  return { storedPid, storedMetadata, listeningPid, pid, commandLine, pidMatchesPidFile, depthLensOwned };
+}
+
+async function cleanupStaleBackendIfSafe(reason, details) {
+  log.warn("STALE_BACKEND_DETECTED", { reason });
+  const info = await inspectBackendPort();
+  if (!info.pid || !info.depthLensOwned) {
+    const pidText = info.pid ? String(info.pid) : "unknown";
+    const command = info.pid ? (process.platform === "win32" ? `taskkill /PID ${info.pid} /F` : `kill -9 ${info.pid}`) : "No safe kill command available because no PID was detected.";
+    const { dialog } = require("electron");
+    dialog.showMessageBoxSync({
+      type: "error",
+      title: "DepthLens Pro — Port 8765 Busy",
+      message: "Port 8765 is occupied by a process that does not respond like DepthLens.",
+      detail: `Detected PID: ${pidText}\nCommand line: ${info.commandLine || "unknown"}\nExact command to run if this is safe to terminate: ${command}`,
+      buttons: ["OK"],
+    });
+    throw createStartupError(`Port ${BACKEND_PORT} is occupied by a non-DepthLens or unidentified process. Detected PID: ${pidText}.`, details);
+  }
+
+  log.warn("STALE_BACKEND_SIGTERM_SENT", { pid: info.pid });
+  await terminatePid(info.pid, { force: false });
+  await delay(3000);
+
+  let remainingPid = getListeningPid(BACKEND_PORT);
+  if (remainingPid && remainingPid === info.pid && isDepthLensOwnedProcess({ pid: remainingPid, commandLine: getProcessCommandLine(remainingPid), storedPid: info.storedPid, storedMetadata: info.storedMetadata })) {
+    log.warn("STALE_BACKEND_SIGKILL_SENT", { pid: remainingPid });
+    await terminatePid(remainingPid, { force: true });
+    await delay(1000);
+  }
+
+  remainingPid = getListeningPid(BACKEND_PORT);
+  if (remainingPid) {
+    log.error("STALE_BACKEND_CLEANUP_FAILED", { pid: remainingPid, commandLine: getProcessCommandLine(remainingPid), port: BACKEND_PORT });
+    throw createStartupError(`Could not free stale DepthLens backend on port ${BACKEND_PORT}. Remaining PID: ${remainingPid}.`, details);
+  }
+  log.info("STALE_BACKEND_TERMINATED", { port: BACKEND_PORT, finalPortState: "free" });
+  removeBackendPidFiles();
 }
 
 // ── Python executable detection ────────────────────────────
@@ -187,7 +406,9 @@ function waitForBackendReady(url, details, { timeoutMs = 45_000, intervalMs = 50
 
     const poll = async () => {
       if (settled) return;
-      if (await isLiveDepthLensBackend(url)) {
+      const attempt = Math.floor((Date.now() - start) / intervalMs) + 1;
+      const liveProbe = await probeLive(url, 1200, attempt);
+      if (liveProbe.ok) {
         backendReady = true;
         log.info(`Backend live at ${url}`);
         finish(resolve, url);
@@ -233,10 +454,11 @@ async function startBackend() {
   log.info(`Backend cwd: ${cwd}`);
   log.info(`Starting backend command: ${command}`);
 
-  if (await isLiveDepthLensBackend(backendUrl)) {
+  const initialLiveProbe = await probeLive(backendUrl, 1200, 0);
+  if (initialLiveProbe.ok) {
     backendReady = true;
     backendOwnedByElectron = false;
-    log.info(`Reusing existing live DepthLens backend at ${backendUrl}`);
+    log.info("EXISTING_BACKEND_LIVE_REUSED", { backendUrl });
     return backendUrl;
   }
 
@@ -244,10 +466,8 @@ async function startBackend() {
     throw createStartupError(`Could not inspect backend port ${BACKEND_PORT}: ${err.message}`, details);
   });
   if (!portAvailable) {
-    throw createStartupError(
-      `Port ${BACKEND_PORT} is already in use, but /live is not a DepthLens backend. Free the port or set DEPTHLENS_BACKEND_PORT consistently before launching.`,
-      details,
-    );
+    log.warn("PORT_OCCUPIED", { port: BACKEND_PORT, liveKind: initialLiveProbe.kind });
+    await cleanupStaleBackendIfSafe(initialLiveProbe.kind || "live_probe_failed", details);
   }
 
   if (path.isAbsolute(pythonPath) && !fs.existsSync(pythonPath)) {
@@ -272,6 +492,23 @@ async function startBackend() {
     shell: process.platform === "win32" && !path.isAbsolute(pythonPath),
   });
   backendOwnedByElectron = true;
+  backendPid = backendProcess.pid;
+  backendMetadata = {
+    pid: backendPid,
+    backendUrl,
+    port: BACKEND_PORT,
+    host: BACKEND_HOST,
+    cwd,
+    backendDir,
+    pythonPath,
+    command,
+    startedAt: new Date().toISOString(),
+    appVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+  };
+  writeBackendPidFiles(backendMetadata);
 
   backendProcess.stdout.on("data", (data) => {
     const msg = data.toString().trim();
@@ -290,14 +527,16 @@ async function startBackend() {
   backendProcess.on("close", (code, signal) => {
     log.info(`Backend exited with code ${code}, signal ${signal}`);
     backendReady = false;
-    backendOwnedByElectron = false;
-    backendProcess = null;
+    if (!shutdownInProgress) {
+      backendOwnedByElectron = false;
+      backendProcess = null;
+    }
   });
 
   try {
     return await waitForBackendReady(backendUrl, details);
   } catch (err) {
-    if (backendProcess && !backendProcess.killed) backendProcess.kill("SIGTERM");
+    if (backendProcess && !backendProcess.killed) await terminatePid(backendProcess.pid, { force: false });
     if (err.message?.includes("Backend URL:")) throw err;
     throw createStartupError(err.message, details, { code: backendProcess?.exitCode, signal: backendProcess?.signalCode });
   }
@@ -384,10 +623,17 @@ ipcMain.handle("show-open-dialog", async (event, options) => {
 });
 
 // ── App Lifecycle ──────────────────────────────────────────
-app.whenReady().then(async () => {
+if (singleInstanceLock) app.whenReady().then(async () => {
   log.info(
     `App ready — isDev: ${isDev}, platform: ${process.platform}, arch: ${process.arch}`,
   );
+
+  if (!isSupportedArchitecture()) {
+    showUnsupportedArchitectureDialog();
+    app.quit();
+    return;
+  }
+  log.info("SUPPORTED_ARCH_CHECK_PASSED", { platform: process.platform, arch: process.arch });
 
   createSplashWindow();
 
@@ -435,26 +681,49 @@ app.on("window-all-closed", () => {
 
 let isQuitting = false;
 
+async function shutdownOwnedBackend() {
+  if (!backendOwnedByElectron || !backendPid) return true;
+  shutdownInProgress = true;
+  const pid = backendPid;
+  log.info("App quitting — shutting down backend", { pid, port: BACKEND_PORT });
+
+  await terminatePid(pid, { force: false });
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && await isPidAlive(pid)) {
+    await delay(150);
+  }
+
+  if (await isPidAlive(pid)) {
+    log.warn("Backend did not exit gracefully, forcing SIGKILL", { pid });
+    await terminatePid(pid, { force: true });
+    await delay(750);
+  }
+
+  const alive = await isPidAlive(pid);
+  const listeningPid = getListeningPid(BACKEND_PORT);
+  if (!alive && (!listeningPid || listeningPid !== pid)) {
+    removeBackendPidFiles();
+    backendProcess = null;
+    backendPid = null;
+    backendMetadata = null;
+    backendOwnedByElectron = false;
+    backendReady = false;
+    shutdownInProgress = false;
+    log.info("Backend shut down successfully", { pid, port: BACKEND_PORT, finalPortState: listeningPid ? `occupied by ${listeningPid}` : "free" });
+    return true;
+  }
+
+  const commandLine = getProcessCommandLine(pid || listeningPid);
+  log.error("BACKEND_SHUTDOWN_VERIFY_FAILED", { pid, alive, port: BACKEND_PORT, listeningPid, commandLine });
+  shutdownInProgress = false;
+  return false;
+}
+
 app.on("before-quit", (event) => {
   if (backendProcess && backendOwnedByElectron && !isQuitting) {
     event.preventDefault();
-    log.info("App quitting — shutting down backend");
-
     isQuitting = true;
-    try { backendProcess.kill("SIGTERM"); } catch (err) { log.warn(`Failed to terminate backend: ${err.message}`); }
-
-    const killTimer = setTimeout(() => {
-      log.warn("Backend did not exit gracefully, forcing SIGKILL");
-      if (backendProcess) {
-        backendProcess.kill("SIGKILL");
-      }
-      app.quit();
-    }, 3000);
-
-    backendProcess.on("exit", () => {
-      clearTimeout(killTimer);
-      backendProcess = null;
-      log.info("Backend shut down successfully");
+    shutdownOwnedBackend().finally(() => {
       app.quit();
     });
   }

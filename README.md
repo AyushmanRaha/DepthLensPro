@@ -4,9 +4,9 @@
 [![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](electron-app/package.json)
 [![API](https://img.shields.io/badge/API-3.1.0-6f42c1.svg)](backend/main.py)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
-[![Platform](https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows-lightgrey.svg)](#end-user-installation)
+[![Platform](https://img.shields.io/badge/platform-ARM%20desktop%20only-lightgrey.svg)](#supported-platforms)
 
-Last Updated: 10th July 2026
+Last Updated: 9th June 2026
 
 DepthLensPro is a native cross-platform desktop application for hardware-accelerated monocular depth estimation from 2D images. It pairs an Electron desktop client with a FastAPI inference service that runs MiDaS-family models through PyTorch and ONNX Runtime, with Redis-backed caching for repeatable low-latency workflows.
 
@@ -22,6 +22,7 @@ The application is optimized for local-first image processing, secure desktop pa
 - [Technology Stack](#technology-stack)
 - [Observability & Telemetry](#observability--telemetry)
 - [Quick Start / Runbook](#quick-start--runbook)
+- [Supported Platforms](#supported-platforms)
 - [API Surface](#api-surface)
 - [Metrics & Models](#metrics--models)
 - [Project Structure](#project-structure)
@@ -79,7 +80,7 @@ DepthLensPro treats accelerator selection as an explicit runtime concern. Users 
 | **CPU** | PyTorch CPU and ONNX Runtime CPU provider | Stable fallback path for all supported systems. |
 | **ONNX Runtime** | Static `.onnx` graphs with provider fallback | Use `backend/scripts/export_onnx.py` to export model weights for accelerated inference paths. |
 
-The macOS desktop build targets **macOS arm64** and **macOS Intel x64** where dependencies are available; Apple Silicon runs PyTorch MPS inference through Metal without Rosetta translation overhead. ONNX Runtime remains available as an alternative execution path when static model graphs and compatible providers are present.
+Desktop packaging targets ARM platforms only. Apple Silicon macOS runs PyTorch MPS inference through Metal without Rosetta translation overhead; Windows ARM and Linux ARM keep CPU plus any available CUDA/XPU runtime paths provided by the installed Python environment. ONNX Runtime remains available as an alternative execution path when static model graphs and compatible providers are present.
 
 ---
 
@@ -152,6 +153,24 @@ DepthLensPro exposes operational signals suitable for local diagnostics, release
 
 ---
 
+## Supported Platforms
+
+DepthLens Pro now supports **ARM desktop targets only**. Normal users should open the native app; they should not manually start FastAPI or Uvicorn. Electron owns backend startup, readiness checks through `/live`, and backend shutdown.
+
+| Status | Platform | Architecture | Notes |
+|---|---|---|---|
+| Supported | macOS Apple Silicon only | `darwin arm64` | Build/open `electron-app/dist/mac-arm64/DepthLens Pro.app` or install one `/Applications/DepthLens Pro.app` from the Apple Silicon DMG. |
+| Supported | Windows ARM only | `win32 arm64` | Build with `npm run build:win:arm64`; Windows x64 installers are intentionally not produced. |
+| Supported | Linux ARM only | `linux arm64` / `aarch64` | Build with `npm run build:linux:arm64`; Linux x64 artifacts are intentionally not produced. |
+| Unsupported | Intel Mac / macOS x64 | `darwin x64` | Blocked at Electron startup before backend launch. |
+| Unsupported | macOS universal builds | universal | Unsupported because they can create duplicate/stale bundles and Intel launch paths. |
+| Unsupported | Windows x64 | `win32 x64` | Unsupported build scripts fail with a clear architecture message. |
+| Unsupported | Linux x64 | `linux x64` | Unsupported build scripts fail with a clear architecture message. |
+
+The bundle identifier remains stable as `com.ayushmanraha.depthlens-pro`, and the product name remains exactly `DepthLens Pro` without architecture suffixes.
+
+The runtime guard shows: “DepthLens Pro currently supports Apple Silicon macOS, Windows ARM, and Linux ARM only.” It also includes the detected platform and architecture and exits before starting the backend.
+
 ## Quick Start / Runbook
 
 DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. The Electron app starts that backend automatically in development and packaged desktop modes, waits for `GET /live`, then exposes the resolved URL to the renderer through the secure preload bridge. `GET /health` is intentionally reserved for fuller diagnostics and may be degraded without making inference unavailable.
@@ -172,7 +191,13 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
 
 #### macOS Native App Build
 
-Builds unsigned macOS DMGs for Apple Silicon (`arm64`) and Intel (`x64`). For reproducible packaged builds, create the repo-root `venv/` before running electron-builder because `electron-app/package.json` includes `../venv` as an `extraResources` entry. The same repo-root `venv/` layout is used for macOS Intel and Linux development packaging where applicable.
+Builds unsigned macOS artifacts for **Apple Silicon (`arm64`) only**. `npm run build:mac` cleans old packaged outputs first, builds the Apple Silicon target, and scans for duplicate app bundles. For reproducible packaged builds, create the repo-root `venv/` before running electron-builder because `electron-app/package.json` includes `../venv` as an `extraResources` entry.
+
+Do **not** open both `dist/mac` and `dist/mac-arm64`. `electron-app/dist/mac/DepthLens Pro.app` is stale/unsupported if it exists from an older x64 or universal build. The intended local Apple Silicon build output is:
+
+```text
+electron-app/dist/mac-arm64/DepthLens Pro.app
+```
 
 ```bash
 cd DepthLensPro
@@ -188,7 +213,7 @@ npm run verify:resources
 npm run build:mac
 ```
 
-Open the generated DMG from `electron-app/dist/`, drag **DepthLens Pro** to `/Applications`, and launch it. If macOS Gatekeeper blocks an unsigned local build, clear quarantine metadata:
+Open either the local app bundle at `electron-app/dist/mac-arm64/DepthLens Pro.app` for testing or the generated Apple Silicon DMG from `electron-app/dist/`, drag **one** **DepthLens Pro** app to `/Applications`, and launch it. The `dist/` app is build output; `/Applications/DepthLens Pro.app` is the installed copy. Keeping both can make Spotlight show two icons until one is removed and indexing catches up. If macOS Gatekeeper blocks an unsigned local build, clear quarantine metadata:
 
 ```bash
 xattr -cr "/Applications/DepthLens Pro.app"
@@ -196,7 +221,7 @@ xattr -cr "/Applications/DepthLens Pro.app"
 
 #### Windows Native App Build
 
-Builds an NSIS installer. Run these commands from PowerShell so the Windows virtual environment layout is used (`venv\Scripts\python.exe`).
+Builds a **Windows ARM64 only** NSIS installer. Run these commands from PowerShell so the Windows virtual environment layout is used (`venv\Scripts\python.exe`). Windows x64 builds are unsupported and intentionally fail.
 
 ```powershell
 cd DepthLensPro
@@ -209,7 +234,7 @@ pip install -r backend\requirements.txt
 cd electron-app
 npm install
 npm run verify:resources
-npm run build:win
+npm run build:win:arm64
 ```
 
 Run the generated installer from `electron-app\dist\`, then launch **DepthLens Pro** from the Start menu or desktop shortcut. Packaged builds expect the prepared `venv/`, `backend/`, and `frontend/` resources to be present in the installer resources.
@@ -217,7 +242,48 @@ Run the generated installer from `electron-app\dist\`, then launch **DepthLens P
 #### End-User Installation from Release Artifacts
 
 - **macOS:** Download the latest `DMG`, mount it, drag **DepthLens Pro** into `/Applications`, and launch the app.
-- **Windows:** Download the latest Windows installer (`.exe`), run it, and launch **DepthLens Pro** from the Start menu or desktop shortcut.
+- **Windows ARM:** Download the latest Windows ARM installer (`.exe`), run it, and launch **DepthLens Pro** from the Start menu or desktop shortcut. Windows x64 is unsupported.
+- **Linux ARM:** Build or download the ARM64/aarch64 AppImage and run one copy of **DepthLens Pro**. Linux x64 is unsupported.
+
+#### Fresh macOS Reinstall / Remove Duplicate App Entries
+
+Use this when Spotlight shows more than one **DepthLens Pro** icon or when old `dist/mac` output exists. The commands remove only known app bundles and packaged build output; they do not delete source files, user data, unrelated apps, or Python environments.
+
+```bash
+cd /Users/user/Downloads/DepthLensPro/electron-app
+npm run kill:backend
+npm run clean:dist
+npm run clean:install
+npm run build:mac
+open "dist/mac-arm64/DepthLens Pro.app"
+```
+
+`npm run reinstall:mac` performs the same safe flow, builds only macOS arm64, and prints the exact app path to open: `electron-app/dist/mac-arm64/DepthLens Pro.app`.
+
+#### Duplicate Spotlight Icons
+
+Two Spotlight icons usually mean multiple app bundles with the same name exist, not that one bundle installed itself twice. Common duplicate locations are:
+
+- `/Applications/DepthLens Pro.app`
+- `~/Applications/DepthLens Pro.app`
+- `electron-app/dist/mac/DepthLens Pro.app` (stale/unsupported)
+- `electron-app/dist/mac-arm64/DepthLens Pro.app`
+
+Scan first:
+
+```bash
+npm run scan:apps
+```
+
+Then remove duplicates safely:
+
+```bash
+npm run clean:install
+npm run clean:dist
+npm run clean:spotlight
+```
+
+After deleting duplicate bundles, Spotlight can take time to update. Avoid aggressive system-wide reindexing by default; remove duplicate app bundles first and wait for indexing to settle.
 
 ### B. Terminal-Only Local Test / Development
 
@@ -544,12 +610,52 @@ The GitHub Actions pipeline runs the same core checks for formatting, linting, t
 | Packaged backend does not start | Check the desktop logs for backend URL, Python path, cwd, command, exit code/signal, and resource existence. Run `npm run verify:resources` from `electron-app/` before packaging or pass a packaged resources directory to `node scripts/verify-resources.js <resources-root>`. |
 | Python not found in packaged app | Verify the repo-root `venv/` folder exists before packaging and is included in electron-builder `extraResources`. |
 | Packaged resources missing | Run `npm run verify:resources`; it validates `backend/`, `backend/app.py`, `frontend/`, `frontend/index.html`, and platform Python paths (`venv/bin/python3`, `venv/bin/python`, or `venv/Scripts/python.exe`). |
-| Duplicate app icon on macOS | Remove the old application bundle and reinstall from the latest DMG. |
+| Duplicate app icon on macOS | Run `npm run scan:apps`. Remove duplicate bundles with `npm run clean:install` and `npm run clean:dist`, then open only `dist/mac-arm64/DepthLens Pro.app` or one installed `/Applications/DepthLens Pro.app`. Spotlight can take time to update. |
 | `acceleration_ok: false` | A GPU backend failed the runtime probe; CPU inference remains available. |
 | `/health` reports degraded status | Inspect memory pressure and disk usage telemetry for threshold violations. |
 | Redis cache unavailable | Verify Redis host, port, credentials, and container health; the backend uses in-memory fallback automatically. |
 | Missing ONNX weights | This is not fatal. Export the required graph or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files; otherwise the backend logs a one-time warning and uses PyTorch fallback. |
 | `/benchmark` reports ONNX unavailable | Export the required graph or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files; PyTorch benchmark/inference can still run. |
+
+### Backend Readiness and Stale Backend Recovery
+
+- `/live` is the lightweight startup endpoint. It must answer quickly once Uvicorn accepts requests and does not load models, probe hardware, query Redis, or collect disk/memory telemetry.
+- `/devices` returns device inventory plus `primary_device`; the frontend uses that primary device for Auto while preserving CPU and available accelerators such as MPS, CUDA, or XPU.
+- `/health` is diagnostics only. It can be degraded or slower without making generation unavailable. Generation depends on the backend being online and queued files, not `/health` success.
+- Opening the native app twice is safe: Electron uses a single-instance lock, focuses the first window, and the second instance does not start another backend.
+
+If a stale Python backend is stuck on port `8765`, `curl` may connect but receive 0 bytes until it times out. Diagnose and clean it with:
+
+```bash
+lsof -nP -iTCP:8765 -sTCP:LISTEN
+npm run kill:backend
+npm run smoke:backend
+```
+
+`npm run kill:backend` uses the pid file and/or port owner, prints the detected PID and command line, and kills only safe DepthLens backend matches. If manual termination is needed, use the actual PID number shown by diagnostics. For example, if the PID is `66208`, run:
+
+```bash
+kill -9 66208
+```
+
+Do not type placeholders such as `kill -9 <PID>` or `kill -9 THE_NUMBER_SHOWN`; replace them with the real number. If a non-DepthLens process owns port `8765`, the app does not kill it automatically and shows the detected PID plus an exact command using that PID.
+
+### Acceptance Checks
+
+While the app is open:
+
+```bash
+curl --max-time 3 -v http://127.0.0.1:8765/live
+curl --max-time 5 -v http://127.0.0.1:8765/devices
+```
+
+After quitting the app:
+
+```bash
+lsof -nP -iTCP:8765 -sTCP:LISTEN
+```
+
+The final `lsof` command should print nothing.
 
 ---
 
