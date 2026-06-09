@@ -122,6 +122,7 @@
           >
             <button class="nav-btn active" data-panel="main">WORKSPACE</button>
             <button class="nav-btn" data-panel="compare">COMPARE</button>
+            <button class="nav-btn" data-panel="performance">PERFORMANCE</button>
             <button class="nav-btn" data-panel="about">ABOUT</button>
           </nav>
 
@@ -533,6 +534,74 @@
             <div class="compare-metric-grid" id="compareMetricGrid" aria-live="polite"></div>
             <div class="compare-chart-wrap">
               <canvas id="compareChart" aria-label="Model comparison chart"></canvas>
+            </div>
+          </div>
+        </div>
+      </main>
+
+
+      <!-- ── Performance analysis panel ───────────────────────────────── -->
+      <main class="panel" id="panel-performance" hidden>
+        <div class="about-layout">
+          <div class="card about-card">
+            <h2 class="card-title">
+              <span class="card-icon">▣</span> Performance Analysis
+            </h2>
+            <p class="compare-desc">
+              Benchmark the legacy PyTorch execution path against exported ONNX Runtime
+              weights using a synthetic 384×384 frame. Results include latency, memory,
+              and raw frame throughput.
+            </p>
+            <div class="cmap-row">
+              <label for="benchmarkModel" class="cmap-label">Model</label>
+              <select id="benchmarkModel" class="select-input">
+                <option value="MiDaS_small">MiDaS Small</option>
+                <option value="DPT_Hybrid">DPT Hybrid</option>
+                <option value="DPT_Large">DPT Large</option>
+              </select>
+              <label for="benchmarkDevice" class="cmap-label">Device</label>
+              <select id="benchmarkDevice" class="select-input">
+                <option value="auto">Auto</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="benchmarkRunBtn" type="button">
+                Run Benchmark
+              </button>
+            </div>
+            <div class="metrics-grid benchmark-grid" id="benchmarkMetrics">
+              <div class="metric-cell">
+                <span class="metric-value" id="benchTorchLatency">—</span>
+                <span class="metric-label">PyTorch Avg Latency</span>
+                <span class="metric-desc">Torch Hub model forward-pass timing</span>
+              </div>
+              <div class="metric-cell">
+                <span class="metric-value" id="benchOnnxLatency">—</span>
+                <span class="metric-label">ONNX Avg Latency</span>
+                <span class="metric-desc">ONNX Runtime session .run() timing</span>
+              </div>
+              <div class="metric-cell">
+                <span class="metric-value" id="benchSpeedup">—</span>
+                <span class="metric-label">Speedup</span>
+                <span class="metric-desc">PyTorch latency divided by ONNX latency</span>
+              </div>
+              <div class="metric-cell">
+                <span class="metric-value" id="benchThroughput">—</span>
+                <span class="metric-label">ONNX Throughput</span>
+                <span class="metric-desc">Raw synthetic frames processed per second</span>
+              </div>
+              <div class="metric-cell">
+                <span class="metric-value" id="benchMemory">—</span>
+                <span class="metric-label">Process RSS</span>
+                <span class="metric-desc">Resident memory after benchmark</span>
+              </div>
+              <div class="metric-cell">
+                <span class="metric-value" id="benchProvider">—</span>
+                <span class="metric-label">Execution Status</span>
+                <span class="metric-desc" id="benchStatus">Awaiting benchmark run</span>
+              </div>
+            </div>
+            <p class="chart-label">PyTorch vs ONNX Runtime Latency</p>
+            <div class="chart-wrap">
+              <canvas id="benchmarkChart" aria-label="PyTorch and ONNX benchmark chart"></canvas>
             </div>
           </div>
         </div>

@@ -47,3 +47,6 @@ ruff
 black
 mypy
 pytest
+
+onnx
+onnxruntime

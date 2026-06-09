@@ -13,6 +13,8 @@ import cv2
 import numpy as np
 import torch
 
+from backend.depth_models import ONNXExecutionEngine, onnx_model_path
+
 log = logging.getLogger("depthlens")
 
 SUPPORTED_MODELS: dict[str, dict[str, str]] = {
@@ -47,18 +49,20 @@ COLORMAPS: dict[str, int] = {
 MAX_DIM = 2048
 MAX_SIZE_MB = 20
 MODELS: dict[str, tuple[torch.nn.Module, torch.device]] = {}
+ONNX_ENGINES: dict[str, ONNXExecutionEngine] = {}
 TRANSFORMS: dict[str, Callable[[np.ndarray], torch.Tensor]] = {}
 
 
 def clear_models() -> None:
     """Release all loaded model and transform references."""
     MODELS.clear()
+    ONNX_ENGINES.clear()
     TRANSFORMS.clear()
 
 
 def loaded_model_keys() -> list[str]:
     """Return cache keys for models currently loaded in memory."""
-    return list(MODELS.keys())
+    return list(MODELS.keys()) + [f"onnx:{key}" for key in ONNX_ENGINES]
 
 
 def _load_model(
@@ -105,8 +109,17 @@ def _decode(raw: bytes) -> np.ndarray:
     return img
 
 
-def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
-    """Run normalized depth inference for a BGR image."""
+def _normalize_depth(depth: np.ndarray) -> np.ndarray:
+    """Normalize a raw depth plane into the existing [0, 1] output range."""
+
+    depth = depth.astype(np.float32, copy=False)
+    lo, hi = depth.min(), depth.max()
+    return cast(np.ndarray, (depth - lo) / (hi - lo + 1e-8))
+
+
+def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
+    """Run normalized PyTorch depth inference for benchmarking and fallback."""
+
     (model, device), transform = _load_model(model_name, device_str)
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     batch = transform(rgb).to(device)
@@ -118,9 +131,33 @@ def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
             mode="bicubic",
             align_corners=False,
         ).squeeze()
-    depth = pred.cpu().numpy().astype(np.float32)
-    lo, hi = depth.min(), depth.max()
-    return cast(np.ndarray, (depth - lo) / (hi - lo + 1e-8))
+    return _normalize_depth(pred.cpu().numpy().astype(np.float32))
+
+
+def _load_onnx_engine(model_name: str, device_str: str) -> ONNXExecutionEngine:
+    """Load or reuse an ONNX Runtime execution engine for static MiDaS weights."""
+
+    key = f"{model_name}:{device_str}"
+    if key not in ONNX_ENGINES:
+        ONNX_ENGINES[key] = ONNXExecutionEngine(model_name=model_name, device=device_str)
+    return ONNX_ENGINES[key]
+
+
+def _infer_onnx(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
+    """Run normalized ONNX Runtime depth inference for a BGR image."""
+
+    engine = _load_onnx_engine(model_name, device_str)
+    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    return _normalize_depth(engine.forward(rgb))
+
+
+def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
+    """Run normalized depth inference, preferring ONNX Runtime static weights."""
+
+    if onnx_model_path(model_name).exists():
+        return _infer_onnx(img_bgr, model_name, device_str)
+    log.warning("ONNX weights unavailable for %s; falling back to PyTorch execution", model_name)
+    return _infer_torch(img_bgr, model_name, device_str)
 
 
 def _colorize(depth: np.ndarray, cmap: str) -> np.ndarray:

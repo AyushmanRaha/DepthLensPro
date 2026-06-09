@@ -150,6 +150,18 @@ const el = {
   compareMetricSelect:   $("#compareMetricSelect"),
   compareMetricGrid:     $("#compareMetricGrid"),
 
+  // Benchmark
+  benchmarkModel:      $("#benchmarkModel"),
+  benchmarkDevice:     $("#benchmarkDevice"),
+  benchmarkRunBtn:     $("#benchmarkRunBtn"),
+  benchTorchLatency:   $("#benchTorchLatency"),
+  benchOnnxLatency:    $("#benchOnnxLatency"),
+  benchSpeedup:        $("#benchSpeedup"),
+  benchThroughput:     $("#benchThroughput"),
+  benchMemory:         $("#benchMemory"),
+  benchProvider:       $("#benchProvider"),
+  benchStatus:         $("#benchStatus"),
+
   // Lightbox
   lightboxBackdrop: $("#lightboxBackdrop"),
   lightboxClose:    $("#lightboxClose"),
@@ -319,7 +331,7 @@ document.addEventListener("change", (e) => {
 // ══════════════════════════════════════════════════════════════
 // CHARTS
 // ══════════════════════════════════════════════════════════════
-let latencyChart, compareChart;
+let latencyChart, compareChart, benchmarkChart;
 
 const COMPARE_METRICS = [
   { key:"latency_ms",    label:"Latency (ms)",        source:"root",    better:"lower",  fmt:(v)=>`${Math.round(v)} ms` },
@@ -401,6 +413,7 @@ function updateChartTheme() {
   if (compareChart && state.compareView.results.length) {
     renderCompareChart(state.compareView.results, state.compareView.metricKey);
   }
+  if (benchmarkChart) benchmarkChart.update("none");
 }
 
 function pushLatency(ms) {
@@ -660,16 +673,18 @@ async function loadDevices(devs, primaryFromHealth = null) {
 
   renderDeviceSelector(withKinds, primary, saved, devs);
 
-  el.compareDevice.innerHTML = "";
-  const autoOpt = document.createElement("option");
-  autoOpt.value="auto"; autoOpt.textContent=`Auto (${autoDeviceLabel(devs,primary)})`;
-  autoOpt.selected = saved==="auto";
-  el.compareDevice.appendChild(autoOpt);
-  Object.entries(devs).forEach(([key,info]) => {
-    const opt = document.createElement("option");
-    opt.value=key; opt.textContent=info.name||key;
-    opt.selected = saved!=="auto" && key===saved;
-    el.compareDevice.appendChild(opt);
+  [el.compareDevice, el.benchmarkDevice].filter(Boolean).forEach(select => {
+    select.innerHTML = "";
+    const autoOpt = document.createElement("option");
+    autoOpt.value="auto"; autoOpt.textContent=`Auto (${autoDeviceLabel(devs,primary)})`;
+    autoOpt.selected = saved==="auto";
+    select.appendChild(autoOpt);
+    Object.entries(devs).forEach(([key,info]) => {
+      const opt = document.createElement("option");
+      opt.value=key; opt.textContent=info.name||key;
+      opt.selected = saved!=="auto" && key===saved;
+      select.appendChild(opt);
+    });
   });
 }
 
@@ -1231,6 +1246,96 @@ function renderCompareCard(r) {
     <img src="data:image/png;base64,${r.depth_map}" alt="Depth map — ${lbl}" loading="lazy"/>`;
   el.compareResults.appendChild(card);
 }
+
+
+// ══════════════════════════════════════════════════════════════
+// BENCHMARK PANEL
+// ══════════════════════════════════════════════════════════════
+function benchmarkResult(data, engine) {
+  return (data?.results || []).find(r => r.engine === engine) || {};
+}
+
+function fmtBenchLatency(result) {
+  const avg = result?.latency_ms?.avg;
+  return Number.isFinite(Number(avg)) ? `${Number(avg).toFixed(1)} ms` : "—";
+}
+
+function renderBenchmarkChart(data) {
+  const results = data?.results || [];
+  const values = results.map(r => Number(r?.latency_ms?.avg));
+  const c = chartColors();
+  const ctx = $("#benchmarkChart")?.getContext("2d");
+  if (!ctx) return;
+  if (benchmarkChart) benchmarkChart.destroy();
+  benchmarkChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: results.map(r => r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch"),
+      datasets: [{
+        label: "Average latency (ms)",
+        data: values.map(v => Number.isFinite(v) ? v : null),
+        backgroundColor: values.map(v => Number.isFinite(v) ? c.bar : "rgba(127,140,153,.45)"),
+        borderColor: values.map(v => Number.isFinite(v) ? c.barBrd : "#5e6f81"),
+        borderWidth: 1.5,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: c.ttTitle, font: { family:"JetBrains Mono", size:10 } } },
+        tooltip: {
+          backgroundColor: c.tooltip, borderColor: c.ttBrd, borderWidth: 1,
+          titleColor: c.ttTitle, bodyColor: c.ttBody,
+          callbacks: { label: ctx => ctx.raw === null ? "Unavailable" : `${Number(ctx.raw).toFixed(1)} ms` },
+        },
+      },
+      scales: {
+        x: { ticks: { color: c.ttTitle, font: { family:"Rajdhani", size:12, weight:"600" } }, grid: { color: c.grid } },
+        y: { ticks: { color: c.tick, font: { family:"JetBrains Mono", size:9 } }, grid: { color: c.grid } },
+      },
+    },
+  });
+}
+
+function renderBenchmark(data) {
+  const torch = benchmarkResult(data, "pytorch");
+  const onnx = benchmarkResult(data, "onnxruntime");
+  el.benchTorchLatency.textContent = fmtBenchLatency(torch);
+  el.benchOnnxLatency.textContent = fmtBenchLatency(onnx);
+  el.benchSpeedup.textContent = data?.comparison?.speedup ? `${data.comparison.speedup}×` : "—";
+  el.benchThroughput.textContent = Number.isFinite(Number(onnx?.throughput_fps)) ? `${Number(onnx.throughput_fps).toFixed(2)} fps` : "—";
+  el.benchMemory.textContent = data?.memory_snapshot?.process_rss_mb ? `${data.memory_snapshot.process_rss_mb} MB` : "—";
+  el.benchProvider.textContent = onnx?.status === "ok" ? "ONNX Ready" : "ONNX Unavailable";
+  el.benchStatus.textContent = onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path}` : (onnx?.reason || "Benchmark completed with warnings");
+  renderBenchmarkChart(data);
+}
+
+async function runBenchmark() {
+  if (!el.benchmarkRunBtn) return;
+  const model = el.benchmarkModel?.value || "MiDaS_small";
+  const device = el.benchmarkDevice?.value || "auto";
+  el.benchmarkRunBtn.disabled = true;
+  el.benchmarkRunBtn.textContent = "Running…";
+  el.benchStatus.textContent = "Loading models and measuring latency…";
+  try {
+    const res = await fetch(`${API}/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
+      signal: AbortSignal.timeout(240_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderBenchmark(await res.json());
+    toast("Benchmark complete","success");
+  } catch (err) {
+    el.benchProvider.textContent = "Failed";
+    el.benchStatus.textContent = err.message;
+    toast(`Benchmark failed: ${err.message}`,"error");
+  } finally {
+    el.benchmarkRunBtn.disabled = false;
+    el.benchmarkRunBtn.textContent = "Run Benchmark";
+  }
+}
+
+el.benchmarkRunBtn?.addEventListener("click", runBenchmark);
 
 // ══════════════════════════════════════════════════════════════
 // TOAST

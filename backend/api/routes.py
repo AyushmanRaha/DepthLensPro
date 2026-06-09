@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from backend.services import cache_service
+from backend.services.benchmarks import run_benchmark
 from backend.services.inference import (
     COLORMAPS,
     MAX_SIZE_MB,
@@ -176,6 +177,19 @@ async def list_models() -> dict[str, list[dict[str, str]]]:
 @router.get("/colormaps")
 async def list_colormaps() -> dict[str, list[str]]:
     return {"colormaps": list(COLORMAPS.keys())}
+
+
+@router.get("/api/benchmark")
+@router.get("/benchmark")
+async def benchmark(
+    model: str = "MiDaS_small", device: str = "auto", iterations: int = 3
+) -> dict[str, Any]:
+    """Return PyTorch and ONNX Runtime performance matrices for the UI."""
+
+    try:
+        return run_benchmark(model=model, device=device, iterations=iterations)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/estimate")
