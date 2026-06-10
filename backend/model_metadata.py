@@ -1,19 +1,14 @@
-"""Static model and colormap metadata that is safe to import without ML runtimes."""
+"""Backward-compatible lightweight metadata aliases.
+
+The canonical model data lives in :mod:`backend.model_registry`.  This module is
+kept only for older imports and intentionally imports no ML runtime packages.
+"""
 
 from __future__ import annotations
 
-from backend.model_registry import MODEL_REGISTRY
+from backend.model_registry import supported_models_legacy_payload
 
-SUPPORTED_MODELS: dict[str, dict[str, str]] = {
-    model_id: {
-        "label": spec.display_name,
-        "display_name": spec.display_name,
-        "description": spec.notes or spec.architecture,
-        "compute": spec.recommended_device,
-        "pytorch_model_name": spec.pytorch_model_name,
-    }
-    for model_id, spec in MODEL_REGISTRY.items()
-}
+SUPPORTED_MODELS: dict[str, dict[str, str]] = supported_models_legacy_payload()
 
 COLORMAP_NAMES: tuple[str, ...] = (
     "inferno",

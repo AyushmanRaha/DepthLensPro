@@ -67,6 +67,12 @@ def onnx_status_payload(device: str = "auto") -> dict[str, Any]:
     return impl(device=device)
 
 
+def readiness_payload(device: str = "auto") -> dict[str, Any]:
+    from backend.services.onnx_diagnostics import readiness_payload as impl
+
+    return impl(device)
+
+
 def process_image(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return cast(dict[str, Any], _inference().process_image(*args, **kwargs))
 
@@ -122,7 +128,18 @@ _DEVICE_CACHE: dict[str, Any] = {
     "primary": "cpu",
     "error": None,
 }
-_ACCEL_CACHE: dict[str, Any] = {"expires_at": 0.0, "checks": None, "error": None}
+_ACCEL_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "checks": None,
+    "error": None,
+    "device_keys": (),
+}
+_READINESS_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "device": None,
+    "payload": None,
+    "error": None,
+}
 
 
 async def process_image_async(
@@ -227,9 +244,11 @@ def _cached_acceleration_checks(
     devs: dict[str, Any], force: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     now = time.time()
+    device_keys = tuple(sorted(devs))
     if (
         not force
         and _ACCEL_CACHE.get("checks") is not None
+        and _ACCEL_CACHE.get("device_keys") == device_keys
         and float(_ACCEL_CACHE.get("expires_at", 0.0)) > now
     ):
         return _ACCEL_CACHE["checks"], {"cached": True, "error": _ACCEL_CACHE.get("error")}
@@ -254,8 +273,49 @@ def _cached_acceleration_checks(
                 "error": error,
             },
         }
-    _ACCEL_CACHE.update({"expires_at": now + _PROBE_TTL_SECONDS, "checks": checks, "error": error})
+    _ACCEL_CACHE.update(
+        {
+            "expires_at": now + _PROBE_TTL_SECONDS,
+            "checks": checks,
+            "error": error,
+            "device_keys": device_keys,
+        }
+    )
     return checks, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
+
+
+def _cached_readiness_payload(device: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Cache heavier ONNX/model readiness diagnostics for health polling."""
+
+    now = time.time()
+    if (
+        _READINESS_CACHE.get("payload") is not None
+        and _READINESS_CACHE.get("device") == device
+        and float(_READINESS_CACHE.get("expires_at", 0.0)) > now
+    ):
+        return _READINESS_CACHE["payload"], {"cached": True, "error": _READINESS_CACHE.get("error")}
+
+    started = time.perf_counter()
+    error = None
+    try:
+        payload = readiness_payload(device)
+    except Exception as exc:
+        error = str(exc)
+        log.warning("Readiness diagnostics degraded: %s", exc)
+        payload = {
+            "status": "degraded",
+            "overall_status": "diagnostics_unavailable",
+            "error": error,
+        }
+    _READINESS_CACHE.update(
+        {
+            "expires_at": now + _PROBE_TTL_SECONDS,
+            "device": device,
+            "payload": payload,
+            "error": error,
+        }
+    )
+    return payload, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
 
 
 def _validated_device_or_422(device: str) -> str:
@@ -395,14 +455,17 @@ async def health() -> dict[str, Any]:
         log.warning("ONNX diagnostics degraded: %s", exc)
         onnx = {"status": "degraded", "error": str(exc)}
         onnx_error = str(exc)
+    readiness, readiness_meta = _cached_readiness_payload(best)
 
     status = _telemetry_status(memory, disk)
-    if device_meta.get("error") or accel_meta.get("error") or cache_error or onnx_error:
+    if (
+        device_meta.get("error")
+        or accel_meta.get("error")
+        or cache_error
+        or onnx_error
+        or readiness_meta.get("error")
+    ):
         status = "degraded"
-
-    from backend.services.onnx_diagnostics import readiness_payload as detailed_readiness_payload
-
-    readiness = detailed_readiness_payload(best)
     return {
         "status": status,
         "diagnostics_status": status,
@@ -433,6 +496,7 @@ async def health() -> dict[str, Any]:
             "device_discovery": device_meta.get("duration_ms", 0.0),
             "accelerator_probe": accel_meta.get("duration_ms", 0.0),
             "cache_metrics": cache_ms,
+            "readiness": readiness_meta.get("duration_ms", 0.0),
             "health_generation": _elapsed_ms(started),
         },
         "telemetry": {

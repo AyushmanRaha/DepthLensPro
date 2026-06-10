@@ -161,7 +161,14 @@ class ONNXExecutionEngine:
 
 
 class DepthEstimator:
-    """Small legacy helper for callers that use depth_models.py directly."""
+    """Legacy direct-use helper retained for external compatibility.
+
+    The FastAPI/service inference path uses module-level loaders in
+    :mod:`backend.services.inference` instead.  Keep new backend work out of this
+    class so model loading and cache behavior do not diverge again.
+    """
+
+    __legacy__ = True
 
     def __init__(self, prefer_onnx: bool = True) -> None:
         self.device = torch.device(_default_device_key())
