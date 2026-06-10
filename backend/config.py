@@ -41,6 +41,7 @@ _ENV_KEYS = (
     "REDIS_SOCKET_TIMEOUT_SECONDS",
     "REDIS_MAX_CONNECTIONS",
     "CACHE_TTL_SECONDS",
+    "CACHE_MAX_ENTRIES",
     "DEPTHLENS_PRELOAD_MODEL",
     "DEPTHLENS_WARMUP_MODEL",
     "DEPTHLENS_WARMUP_DEVICE",
@@ -77,6 +78,9 @@ class Settings(BaseSettings):
     )
     CACHE_TTL_SECONDS: int = Field(
         default=3600, ge=1, description="TTL applied to generated cache keys."
+    )
+    CACHE_MAX_ENTRIES: int = Field(
+        default=256, ge=1, description="Maximum entries retained by the in-memory cache."
     )
     DEPTHLENS_PRELOAD_MODEL: bool = Field(
         default=False,
