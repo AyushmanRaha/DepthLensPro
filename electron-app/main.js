@@ -5,6 +5,10 @@ const http = require("http");
 const net = require("net");
 const fs = require("fs");
 const log = require("electron-log");
+const { isAllowedAppUrl, isExternalUrl } = require("./src/security-policy");
+const {
+  isDepthLensOwnedProcess: isDepthLensOwnedProcessPolicy,
+} = require("./src/backend-process-policy");
 
 log.transports.file.level = "info";
 log.info("DepthLens Pro starting...");
@@ -173,10 +177,32 @@ function removeBackendPidFiles() {
   }
 }
 
+function writePrivateFile(filePath, contents) {
+  const handle = fs.openSync(filePath, "w", 0o600);
+  try {
+    fs.writeFileSync(handle, contents, "utf8");
+  } finally {
+    fs.closeSync(handle);
+  }
+  try { fs.chmodSync(filePath, 0o600); } catch (_) {}
+}
+
 function writeBackendPidFiles(metadata) {
-  fs.mkdirSync(app.getPath("userData"), { recursive: true });
-  fs.writeFileSync(getBackendPidPath(), `${metadata.pid}\n`);
-  fs.writeFileSync(getBackendMetadataPath(), `${JSON.stringify(metadata, null, 2)}\n`);
+  fs.mkdirSync(app.getPath("userData"), { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(app.getPath("userData"), 0o700); } catch (_) {}
+  const lifecycleMetadata = {
+    pid: metadata.pid,
+    backendUrl: metadata.backendUrl,
+    port: metadata.port,
+    host: metadata.host,
+    startedAt: metadata.startedAt,
+    appVersion: metadata.appVersion,
+    isPackaged: metadata.isPackaged,
+    platform: metadata.platform,
+    arch: metadata.arch,
+  };
+  writePrivateFile(getBackendPidPath(), `${metadata.pid}\n`);
+  writePrivateFile(getBackendMetadataPath(), `${JSON.stringify(lifecycleMetadata, null, 2)}\n`);
   log.info("BACKEND_PID_WRITTEN", { pidFile: getBackendPidPath(), metadataFile: getBackendMetadataPath(), pid: metadata.pid });
 }
 
@@ -241,24 +267,27 @@ async function isPidAlive(pid) {
   } catch (_) { return false; }
 }
 
-function isDepthLensOwnedProcess({ pid, commandLine = "", storedPid = null, storedMetadata = null, cwd = getAppRoot(), backendDir = getResourcePath("backend"), pythonPath = "" }) {
-  const cmd = commandLine || "";
-  const normalized = cmd.toLowerCase();
-  const candidates = [
-    storedMetadata?.backendDir,
-    storedMetadata?.cwd,
-    storedMetadata?.pythonPath,
-    path.join(process.resourcesPath || "", "backend"),
-    path.join(process.resourcesPath || "", "venv"),
-    backendDir,
+function isDepthLensOwnedProcess({
+  pid,
+  commandLine = "",
+  storedMetadata = null,
+  cwd = getAppRoot(),
+  backendDir = getResourcePath("backend"),
+}) {
+  const storedPidMatchesMetadata = Boolean(
+    pid
+    && storedMetadata?.pid
+    && Number(pid) === Number(storedMetadata.pid)
+    && storedMetadata?.host === BACKEND_HOST
+    && Number(storedMetadata?.port) === Number(BACKEND_PORT)
+  );
+
+  return storedPidMatchesMetadata && isDepthLensOwnedProcessPolicy({
+    commandLine,
+    storedMetadata,
     cwd,
-    pythonPath,
-  ].filter(Boolean).map((value) => String(value).toLowerCase());
-  if (pid && storedPid && Number(pid) === Number(storedPid)) return true;
-  if (normalized.includes("depthlens pro") || normalized.includes("depthlenspro")) return true;
-  if (normalized.includes("uvicorn") && normalized.includes("backend.app:app") && candidates.some((value) => normalized.includes(value))) return true;
-  if (candidates.some((value) => value && normalized.includes(value) && (normalized.includes("backend.app:app") || normalized.includes("uvicorn")))) return true;
-  return false;
+    backendDir,
+  });
 }
 
 async function terminatePid(pid, { force = false } = {}) {
@@ -514,6 +543,9 @@ async function startBackend() {
 
   args[args.indexOf("--port") + 1] = String(BACKEND_PORT);
 
+  // Keep shell disabled so PATH-based Python commands on Windows are resolved by
+  // CreateProcess/SearchPath instead of cmd.exe; uvicorn options remain a true
+  // argument array and cannot be interpreted as shell metacharacters.
   backendProcess = spawn(pythonPath, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -522,7 +554,8 @@ async function startBackend() {
       PYTHONUNBUFFERED: "1",
       PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
     },
-    shell: process.platform === "win32" && !path.isAbsolute(pythonPath),
+    shell: false,
+    windowsHide: true,
   });
   backendOwnedByElectron = true;
   backendPid = backendProcess.pid;
@@ -636,7 +669,11 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isExternalUrl(url)) {
+      shell.openExternal(url);
+    } else {
+      log.warn(`Blocked new-window request to: ${url}`);
+    }
     return { action: "deny" };
   });
 
@@ -771,9 +808,8 @@ app.on("before-quit", (event) => {
 // ── Navigation policy ─────────────────────────────────────
 app.on("web-contents-created", (event, contents) => {
   contents.on("will-navigate", (event, url) => {
-    const parsedUrl = new URL(url);
-    const allowedHosts = ["127.0.0.1", "localhost"];
-    if (!allowedHosts.includes(parsedUrl.hostname)) {
+    const frontendPath = getResourcePath("frontend", "index.html");
+    if (!isAllowedAppUrl(url, { backendHost: BACKEND_HOST, backendPort: BACKEND_PORT, frontendPath })) {
       log.warn(`Blocked navigation to: ${url}`);
       event.preventDefault();
     }
