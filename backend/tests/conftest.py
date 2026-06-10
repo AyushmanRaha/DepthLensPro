@@ -22,6 +22,7 @@ cv2_stub.COLORMAP_BONE = 6
 cv2_stub.COLORMAP_TURBO = 7
 cv2_stub.IMREAD_COLOR = 1
 cv2_stub.INTER_AREA = 3
+cv2_stub.INTER_NEAREST = 0
 cv2_stub.COLOR_BGR2RGB = 4
 cv2_stub.COLOR_GRAY2BGR = 8
 cv2_stub.COLOR_BGR2GRAY = 6

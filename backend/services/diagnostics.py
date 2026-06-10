@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import os
 import platform
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
+from backend.services.onnx_diagnostics import onnx_status_payload
 
 REQUIRED_RUNTIME_MODULES = ("fastapi", "uvicorn", "numpy", "torch", "cv2", "PIL")
 OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
@@ -74,33 +73,6 @@ def _torch_runtime_details(torch_check: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def _onnx_model_path(model_name: str) -> Path:
-    configured_dir = os.getenv("DEPTHLENS_ONNX_DIR")
-    base_dir = (
-        Path(configured_dir)
-        if configured_dir
-        else Path(__file__).resolve().parents[1] / "onnx_weights"
-    )
-    return base_dir / f"{model_name}.onnx"
-
-
-def _onnx_weights() -> dict[str, Any]:
-    weights: dict[str, Any] = {}
-    for model_name in SUPPORTED_MODELS:
-        path = _onnx_model_path(model_name)
-        weights[model_name] = {
-            "path": os.fspath(path),
-            "exists": path.exists(),
-            "size_bytes": path.stat().st_size if path.exists() else 0,
-        }
-    configured_dir = os.getenv("DEPTHLENS_ONNX_DIR")
-    return {
-        "configured_dir": configured_dir,
-        "default_dir": os.fspath(Path(__file__).resolve().parents[1] / "onnx_weights"),
-        "models": weights,
-    }
-
-
 def readiness_payload() -> dict[str, Any]:
     """Return a fast, non-mutating readiness payload without loading MiDaS weights."""
     started = time.perf_counter()
@@ -108,7 +80,7 @@ def readiness_payload() -> dict[str, Any]:
     optional = {name: _module_check(name, required=False) for name in OPTIONAL_RUNTIME_MODULES}
     required_ok = all(item.get("available") for item in required.values())
     torch_details = _torch_runtime_details(required.get("torch", {}))
-    onnx_weights = _onnx_weights()
+    onnx_status = onnx_status_payload(settings.DEPTHLENS_WARMUP_DEVICE)
 
     return {
         "status": "ready" if required_ok else "degraded",
@@ -116,7 +88,15 @@ def readiness_payload() -> dict[str, Any]:
         "required": required,
         "optional": optional,
         "torch_runtime": torch_details,
-        "onnx_weights": onnx_weights,
+        "onnx_weights": {
+            model: {
+                "path": item["expected_path"],
+                "exists": item["exists"],
+                "size_bytes": item["size_bytes"],
+            }
+            for model, item in onnx_status["models"].items()
+        },
+        "onnx": onnx_status,
         "models": [{"id": model_id, **meta} for model_id, meta in SUPPORTED_MODELS.items()],
         "colormaps": list(COLORMAP_NAMES),
         "settings": {

@@ -13,6 +13,7 @@ import numpy as np
 
 from backend.depth_models import onnx_model_path
 from backend.services.inference import SUPPORTED_MODELS, _infer_onnx, _infer_torch
+from backend.services.onnx_diagnostics import onnx_model_status
 from backend.utils.hardware import _resolve
 
 DEFAULT_BENCHMARK_ITERATIONS = 3
@@ -65,6 +66,7 @@ def _measure(label: str, runner: Callable[[], np.ndarray], iterations: int) -> d
     return {
         "engine": label,
         "status": "ok",
+        "state": "available",
         "iterations": iterations,
         "latency_ms": {
             "avg": round(avg, 2),
@@ -84,16 +86,22 @@ def _measure(label: str, runner: Callable[[], np.ndarray], iterations: int) -> d
     }
 
 
-def _unavailable(label: str, reason: str) -> dict[str, Any]:
-    return {
+def _unavailable(
+    label: str, reason: str, state: str = "unavailable", extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    payload = {
         "engine": label,
         "status": "unavailable",
+        "state": state,
         "reason": reason,
         "latency_ms": None,
         "throughput_fps": None,
         "throughput_frames_per_min": None,
         "memory": None,
     }
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 def run_benchmark(
@@ -118,16 +126,44 @@ def run_benchmark(
         pytorch_result = _unavailable("pytorch", str(exc))
 
     weights_path = onnx_model_path(model)
-    if weights_path.exists():
+    onnx_diag = onnx_model_status(model, resolved)
+    if onnx_diag["state"] == "available":
         try:
             onnx_result = _measure(
                 "onnxruntime", lambda: _infer_onnx(frame, model, resolved), iterations
             )
+            onnx_result["provider"] = onnx_diag["runtime"].get("selected_provider")
+            onnx_result["providers"] = onnx_diag["runtime"].get("selected_providers", [])
+            onnx_result["uses_cpu_fallback"] = onnx_diag["runtime"].get("uses_cpu_fallback", False)
         except Exception as exc:
-            onnx_result = _unavailable("onnxruntime", str(exc))
+            onnx_result = _unavailable(
+                "onnxruntime", str(exc), "runtime_error", {"diagnostics": onnx_diag}
+            )
+    elif onnx_diag["state"] == "missing_weights":
+        command = onnx_diag["recommended_export_command"]
+        onnx_result = _unavailable(
+            "onnxruntime",
+            f"ONNX weights missing. Expected {weights_path}. Run {command}.",
+            "missing_weights",
+            {"diagnostics": onnx_diag},
+        )
+    elif onnx_diag["state"] == "onnxruntime_missing":
+        onnx_result = _unavailable(
+            "onnxruntime",
+            "onnxruntime is not installed or cannot be imported",
+            "onnxruntime_missing",
+            {"diagnostics": onnx_diag},
+        )
+    elif onnx_diag["state"] == "provider_unavailable":
+        onnx_result = _unavailable(
+            "onnxruntime",
+            "No compatible ONNX Runtime execution provider is available",
+            "provider_unavailable",
+            {"diagnostics": onnx_diag},
+        )
     else:
         onnx_result = _unavailable(
-            "onnxruntime", f"Static weights missing at {weights_path}; run export_onnx.py"
+            "onnxruntime", "ONNX Runtime is unavailable", "unavailable", {"diagnostics": onnx_diag}
         )
 
     comparison: dict[str, Any] = {}
@@ -147,6 +183,7 @@ def run_benchmark(
         "iterations": iterations,
         "frame_shape": list(frame.shape),
         "weights": {"onnx_path": os.fspath(weights_path), "onnx_available": weights_path.exists()},
+        "onnx_diagnostics": onnx_diag,
         "results": [pytorch_result, onnx_result],
         "comparison": comparison,
         "memory_snapshot": _memory_snapshot(),

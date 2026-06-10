@@ -121,6 +121,9 @@ const state = {
   timing: { workspace: {}, compare: {} },
   compareView: { metricKey: "latency_ms", open: true, results: [] },
   initializingBackend: true,
+  gtMode: false,
+  gtFile: null,
+  experiment: { name: "DepthLens validation run", results: [], startedAt: null },
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -159,6 +162,11 @@ const el = {
   clearBtn:  $("#clearBtn"),
   cancelBtn: $("#cancelBtn"),
   runBtn:    $("#runBtn"),
+  gtToggle: $("#gtToggle"),
+  gtUpload: $("#gtUpload"),
+  gtFileInput: $("#gtFileInput"),
+  gtFileName: $("#gtFileName"),
+  clearGtBtn: $("#clearGtBtn"),
 
   // Progress
   progressBlock:      $("#progressBlock"),
@@ -217,6 +225,19 @@ const el = {
   benchMemory:         $("#benchMemory"),
   benchProvider:       $("#benchProvider"),
   benchStatus:         $("#benchStatus"),
+
+  // Experiments
+  experimentName:         $("#experimentName"),
+  experimentRunBtn:       $("#experimentRunBtn"),
+  experimentExportJsonBtn:$("#experimentExportJsonBtn"),
+  experimentExportCsvBtn: $("#experimentExportCsvBtn"),
+  experimentStatus:       $("#experimentStatus"),
+  experimentCount:        $("#experimentCount"),
+  experimentAvgLatency:   $("#experimentAvgLatency"),
+  experimentBestAbsRel:   $("#experimentBestAbsRel"),
+  experimentStatusMetric: $("#experimentStatusMetric"),
+  experimentTableBody:    $("#experimentTableBody"),
+  experimentPreviews:     $("#experimentPreviews"),
 
   // Lightbox
   lightboxBackdrop: $("#lightboxBackdrop"),
@@ -578,6 +599,11 @@ function initCompareControls() {
   });
 }
 
+function logEndpointTiming(label, started, ok, extra = "") {
+  const ms = Math.round(performance.now() - started);
+  console.debug(`[DepthLens] ${label} ${ok ? "ok" : "failed"} in ${ms}ms${extra ? ` · ${extra}` : ""}`);
+}
+
 // ══════════════════════════════════════════════════════════════
 // SERVER HEALTH & DEVICE LIST
 // ══════════════════════════════════════════════════════════════
@@ -646,6 +672,7 @@ function readinessSummary(payload) {
 
 async function checkReadiness({ quiet = true } = {}) {
   if (!backendOnline) { inferenceReady = false; return false; }
+  const started = performance.now();
   try {
     const res = await apiFetch("/ready", { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
@@ -659,9 +686,11 @@ async function checkReadiness({ quiet = true } = {}) {
       el.deviceInfoBanner.querySelector("span:last-child").textContent = `Inference runtime degraded: ${summary}`;
       if (!quiet) toastOnce(`Inference runtime is not ready: ${summary}`, "error", 8000);
     }
+    logEndpointTiming("/ready", started, inferenceReady);
     syncQueueControls();
     return inferenceReady;
   } catch (err) {
+    logEndpointTiming("/ready", started, false, err.message);
     readinessDetails = null;
     inferenceReady = false;
     setStatus("offline", "Depth Engine: Degraded", `Readiness check failed · ${err.message}`);
@@ -673,11 +702,14 @@ async function checkReadiness({ quiet = true } = {}) {
 
 async function loadCacheMetrics() {
   if (!backendOnline || document.hidden) return false;
+  const started = performance.now();
   try {
     const res = await apiFetch("/cache/metrics", { signal: AbortSignal.timeout(3000) });
     applyCacheMetrics(await res.json());
+    logEndpointTiming("/cache/metrics", started, true);
     return true;
-  } catch {
+  } catch (err) {
+    logEndpointTiming("/cache/metrics", started, false, err.message);
     return false;
   }
 }
@@ -692,16 +724,18 @@ function deviceBadge(devs, primary) {
 
 async function checkLive({ quiet = false } = {}) {
   if (!quiet) setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
+  const started = performance.now();
   try {
     const res = await apiFetch("/live", { signal: AbortSignal.timeout(2500) });
     const data = await res.json();
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
-    setStatus("online","Depth Engine: Online",`Backend live · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
+    setStatus("online","Depth Engine: Detected",`Backend live · checking inference readiness`, deviceBadge(state.devices, state.primaryDevice));
+    logEndpointTiming("/live", started, true);
     syncQueueControls();
-    await loadDevices(state.devices, state.primaryDevice);
     return true;
   } catch (err) {
+    logEndpointTiming("/live", started, false, err.message);
     backendOnline = false;
     inferenceReady = false;
     setStatus("offline","Depth Engine: Offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
@@ -714,6 +748,7 @@ async function checkLive({ quiet = false } = {}) {
 
 async function checkDiagnostics({ quiet = true } = {}) {
   if (!backendOnline) return false;
+  const started = performance.now();
   state.healthAbort?.abort();
   state.healthAbort = new AbortController();
   try {
@@ -728,9 +763,11 @@ async function checkDiagnostics({ quiet = true } = {}) {
     setStatus("online","Depth Engine: Online",`PyTorch ${data.torch_version} · ${primary} · diagnostics ${data.status || "ok"} · ${accelText}`,badge);
     await loadDevices(devs, primary);
     updateDeviceInfoBanner(`${badge} · ${accelText}`);
+    logEndpointTiming("/health", started, true, data.status || "ok");
     if (data.status === "degraded" && !quiet) toastOnce("Diagnostics degraded; inference remains available.","warning");
     return true;
   } catch (err) {
+    logEndpointTiming("/health", started, false, err.message);
     if (backendOnline) {
       setStatus("online","Depth Engine: Online",`Diagnostics degraded · ${err.message}`, deviceBadge(state.devices, state.primaryDevice));
       if (!quiet) toastOnce(`Diagnostics check failed: ${err.message}`, "warning", 5000);
@@ -887,6 +924,37 @@ function switchPanel(name) {
 el.navBtns.forEach(b => b.addEventListener("click", () => switchPanel(b.dataset.panel)));
 
 // ══════════════════════════════════════════════════════════════
+// GROUND TRUTH MODE
+// ══════════════════════════════════════════════════════════════
+const GT_ALLOWED = /\.(png|tif|tiff|npy)$/i;
+function syncGtUi() {
+  if (!el.gtToggle) return;
+  state.gtMode = Boolean(el.gtToggle.checked);
+  if (el.gtUpload) el.gtUpload.hidden = !state.gtMode;
+  if (el.fileInput) el.fileInput.multiple = !state.gtMode;
+  if (!state.gtMode) {
+    state.gtFile = null;
+    if (el.gtFileInput) el.gtFileInput.value = "";
+    if (el.gtFileName) el.gtFileName.textContent = "No GT file selected";
+  }
+  syncQueueControls();
+}
+function setGtFile(file) {
+  if (!file) return;
+  if (!GT_ALLOWED.test(file.name)) { toast("GT depth must be PNG, TIFF, or NPY", "warning"); return; }
+  if (file.size > 20*1024*1024) { toast("GT depth exceeds 20 MB", "warning"); return; }
+  state.gtFile = file;
+  if (el.gtFileName) el.gtFileName.textContent = file.name;
+  syncQueueControls();
+}
+el.gtToggle?.addEventListener("change", () => {
+  syncGtUi();
+  toast(state.gtMode ? "GT mode enabled — select one image and one GT depth file" : "GT mode disabled — standard batch upload restored", "info");
+});
+el.gtFileInput?.addEventListener("change", () => { setGtFile(el.gtFileInput.files[0]); });
+el.clearGtBtn?.addEventListener("click", () => { state.gtFile=null; if (el.gtFileInput) el.gtFileInput.value=""; if (el.gtFileName) el.gtFileName.textContent="No GT file selected"; syncQueueControls(); });
+
+// ══════════════════════════════════════════════════════════════
 // FILE HANDLING
 // ══════════════════════════════════════════════════════════════
 const ALLOWED = /^image\//;
@@ -900,6 +968,7 @@ function fmtSize(b) {
 function addFiles(list) {
   let added = 0;
   for (const file of list) {
+    if (state.gtMode && state.files.length + added >= 1) { toast("GT mode accepts exactly one source image", "warning"); break; }
     if (!ALLOWED.test(file.type)) { toast(`Skipped "${file.name}" — not an image`,"warning"); continue; }
     if (file.size > 20*1024*1024) { toast(`Skipped "${file.name}" — exceeds 20 MB`,"warning"); continue; }
     if (state.files.some(f=>f.file.name===file.name&&f.file.size===file.size)) continue;
@@ -944,8 +1013,9 @@ function syncQueueControls() {
   const has = state.files.length>0;
   el.clearBtn.disabled = !has || Boolean(state.abort);
   const ready = engineReady();
-  el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !ready;
-  if (el.runBtn) el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready; open Diagnostics or check /ready" : ""));
+  const gtBlocked = state.gtMode && (state.files.length !== 1 || !state.gtFile);
+  el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !ready || gtBlocked;
+  if (el.runBtn) el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready; open Diagnostics or check /ready" : (gtBlocked ? "GT mode requires exactly one source image and one GT depth file" : "")));
 }
 
 function setFileSt(id,cls,txt) {
@@ -1037,7 +1107,7 @@ async function runBatch() {
     },120);
 
     try {
-      const result=await inferOne(entry.file,model,colormap,device,state.abort.signal);
+      const result=await inferOne(entry.file,model,colormap,device,state.abort.signal,state.gtMode?"full":"fast",state.gtMode?"color,gray":"color",state.gtMode?state.gtFile:null,state.gtMode);
       clearInterval(tick);
       updateEstimate("workspace",model,device,result.latency_ms);
       entry.result=result; entry.status="done";
@@ -1077,12 +1147,14 @@ async function runBatch() {
   }
 }
 
-async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs="color") {
+async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs="color",gtFile=null,gtRequired=false) {
   const fd=new FormData();
   fd.append("file",file); fd.append("model",model);
   fd.append("colormap",colormap); fd.append("device",device);
   fd.append("metrics", metrics);
   fd.append("outputs", outputs);
+  if (gtFile) fd.append("gt_file", gtFile);
+  if (gtRequired) fd.append("gt_required", "true");
   if (!engineReady()) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
   const res=await apiFetch("/estimate",{
     method:"POST", body:fd,
@@ -1137,7 +1209,7 @@ function appendGalleryItem(r) {
       </div>
       <div class="gallery-stats-row">
         <span>Latency <strong>${r.latency_ms}ms</strong></span>
-        <span>SSIM <strong>${(m.ssim??0).toFixed(3)}</strong></span>
+        <span>Proxy <strong>${Number.isFinite(Number(m.ssim)) ? Number(m.ssim).toFixed(3) : "—"}</strong></span>
         <span>${r.resolution?.width}×${r.resolution?.height}</span>
       </div>
     </div>`;
@@ -1160,11 +1232,14 @@ const METRIC_GROUPS = [
   { id:"error", icon:"⨯", label:"Core Error Metrics",
     note:"Computed from predicted depth distribution only (no ground truth required). Values reflect self-consistency of the depth map.",
     metrics:[
-      {key:"mae",label:"MAE (Mean Absolute Error)",unit:"",desc:"Average magnitude of deviation from depth mean. Lower = more uniform depth field.",needsGT:false},
-      {key:"rmse",label:"RMSE (Root Mean Squared Error)",unit:"",desc:"Square-root of mean squared deviation from depth mean. Penalises large outliers more than MAE.",needsGT:false},
-      {key:"log_rmse",label:"Log RMSE",unit:"",desc:"RMSE computed in log-depth space — more sensitive to relative errors at small depth values.",needsGT:false},
+      {key:"mae",label:"Mean Absolute Deviation from Predicted Mean",unit:"",desc:"Prediction-only mean absolute deviation from the predicted depth mean. Proxy statistic, not GT MAE.",needsGT:false},
+      {key:"rmse",label:"RMS Deviation from Predicted Mean",unit:"",desc:"Prediction-only RMS deviation from the predicted depth mean. Proxy statistic, not GT RMSE.",needsGT:false},
+      {key:"log_rmse",label:"Log-Depth Deviation",unit:"",desc:"Prediction-only log-depth deviation around the predicted mean; not benchmark Log RMSE.",needsGT:false},
       {key:"abs_rel",label:"Absolute Relative Error (Abs Rel)",unit:"",desc:"Mean of |pred−GT|/GT. Standard MDE benchmark metric. Requires ground-truth depth.",needsGT:true},
       {key:"sq_rel",label:"Squared Relative Error (Sq Rel)",unit:"",desc:"Mean of (pred−GT)²/GT. Penalises large relative errors. Requires ground-truth depth.",needsGT:true},
+      {key:"gt_mae",label:"True MAE vs GT",unit:"",desc:"Mean absolute error after median-scale alignment to valid GT pixels.",needsGT:true},
+      {key:"gt_rmse",label:"True RMSE vs GT",unit:"",desc:"Root mean squared error after median-scale alignment to valid GT pixels.",needsGT:true},
+      {key:"gt_log_rmse",label:"True Log RMSE vs GT",unit:"",desc:"Log-depth RMSE after median-scale alignment to valid GT pixels.",needsGT:true},
     ]},
   { id:"accuracy", icon:"◔", label:"Threshold Accuracy",
     note:"δ metrics require ground-truth depth maps and cannot be computed here.",
@@ -1175,23 +1250,23 @@ const METRIC_GROUPS = [
     ]},
   { id:"scaleinv", icon:"⇲", label:"Scale-Invariant Metrics",
     metrics:[
-      {key:"silog",label:"SILog (Scale-Invariant Log Error)",unit:"",desc:"Measures log-depth variance after removing global scale. Lower = better structure preservation.",needsGT:false},
+      {key:"silog",label:"Log-Depth Dispersion Proxy",unit:"",desc:"Prediction-only log-depth dispersion proxy. True SILog requires GT.",needsGT:false},
       {key:"dynamic_range",label:"Dynamic Range",unit:" bits",desc:"Log₂ ratio of max/min non-zero depth. Larger = more depth variation captured.",needsGT:false},
       {key:"entropy",label:"Shannon Entropy",unit:" bits",desc:"Entropy of the depth histogram. Higher = more uniformly distributed depth values.",needsGT:false},
       {key:"coverage",label:"Depth Coverage",unit:"%",desc:"Fraction of histogram bins with ≥1% of peak count. Higher = depth values spread across the full range.",needsGT:false,pct:true},
     ]},
   { id:"structural", icon:"◬", label:"Structural & Geometric Metrics",
     metrics:[
-      {key:"ssim",label:"SSIM (Structural Similarity)",unit:"",desc:"Compares depth map structure to grayscale input. Range 0–1; higher means the depth map preserves scene structure.",needsGT:false},
+      {key:"ssim",label:"RGB–Depth Structural Proxy",unit:"",desc:"Proxy comparing predicted depth structure to grayscale RGB input; not reference SSIM.",needsGT:false},
       {key:"gradient_mean",label:"Gradient Mean",unit:"",desc:"Mean Sobel gradient magnitude over the depth map. Higher = more depth edges/transitions.",needsGT:false},
       {key:"gradient_std",label:"Gradient Std Dev",unit:"",desc:"Variation in gradient strength. High std means some regions have sharp edges while others are smooth.",needsGT:false},
-      {key:"gradient_error",label:"Gradient Error",unit:"",desc:"Proxy for edge detail in the depth map (mean gradient). Higher = more preserved depth boundaries.",needsGT:false},
+      {key:"gradient_error",label:"Depth Edge Proxy",unit:"",desc:"Prediction-only edge-detail proxy equal to mean depth gradient; not GT gradient error.",needsGT:false},
       {key:"edge_density",label:"Edge Density",unit:"%",desc:"Fraction of pixels with gradient > mean+std. Indicates how richly detailed the depth edges are.",needsGT:false,pct:true},
       {key:"surface_normal_error",label:"Surface Normal Error",unit:"",desc:"Requires ground-truth normals derived from GT depth. Not computable without GT.",needsGT:true},
     ]},
   { id:"perceptual", icon:"◉", label:"Perceptual & Consistency Metrics",
     metrics:[
-      {key:"psnr",label:"PSNR (Peak Signal-to-Noise Ratio)",unit:" dB",desc:"Signal quality of the depth map relative to its own mean.",needsGT:false},
+      {key:"psnr",label:"Depth Variance PSNR Proxy",unit:" dB",desc:"Prediction-only PSNR-like variance proxy; true PSNR requires a reference depth map.",needsGT:false},
       {key:"lpips",label:"LPIPS (Perceptual Similarity)",unit:"",desc:"Learned perceptual metric. Requires a reference depth map. Not computable without GT.",needsGT:true},
     ]},
   { id:"ranking", icon:"≋", label:"Ranking / Relative Depth Metrics",
@@ -1208,7 +1283,20 @@ function valColor(key,val) {
   return "";
 }
 
-function renderMetricsAccordion(metrics) {
+function metricUnavailableReason(metrics, key, mode, needsGT) {
+  const unavailable = metrics?.unavailable || {};
+  if (unavailable[key] === "not_requested_fast_mode") return "Not requested in fast mode";
+  if (unavailable[key] === "needs_gt_depth_upload" || needsGT) return "Needs GT depth upload";
+  if (unavailable[key] === "not_implemented") return "Not implemented yet";
+  if (unavailable[key]) return String(unavailable[key]).replace(/_/g," ");
+  if (mode === "fast") return "Not requested in fast mode";
+  return "—";
+}
+
+function renderMetricsAccordion(resultOrMetrics) {
+  const metrics = resultOrMetrics?.metrics || resultOrMetrics || {};
+  const mode = resultOrMetrics?.metrics_mode || "full";
+  const hasGt = Boolean(resultOrMetrics?.gt_metadata?.provided);
   el.lightboxMetrics.innerHTML = "";
   METRIC_GROUPS.forEach((group,gi) => {
     const div=document.createElement("div");
@@ -1233,14 +1321,15 @@ function renderMetricsAccordion(metrics) {
       const raw=metrics?.[m.key];
       const isNull=raw===null||raw===undefined;
       let valText,cls;
-      if (m.needsGT && isNull) { valText="N/A (needs GT)"; cls="na"; }
-      else if (isNull)         { valText="—"; cls="na"; }
+      if (m.needsGT && isNull) { valText=hasGt ? metricUnavailableReason(metrics,m.key,mode,true) : "Needs GT depth upload"; cls="na"; }
+      else if (isNull)         { valText=metricUnavailableReason(metrics,m.key,mode,false); cls="na"; }
       else if (m.pct)          { valText=`${(raw*100).toFixed(1)}%`; cls=valColor(m.key,raw); }
       else                     { valText=`${raw}${m.unit||""}`; cls=valColor(m.key,raw); }
+      const badge = m.needsGT ? '<span class="metric-badge gt">GT</span>' : (metrics?.proxy_metrics && Object.prototype.hasOwnProperty.call(metrics.proxy_metrics,m.key) ? '<span class="metric-badge">Proxy</span>' : '');
       const row=document.createElement("div"); row.className="metric-row";
       row.innerHTML=`
         <div class="metric-row-left">
-          <span class="metric-row-name">${m.label}</span>
+          <span class="metric-row-name">${m.label}${badge}</span>
           <span class="metric-row-desc">${m.desc}</span>
         </div>
         <span class="metric-row-val ${cls}">${valText}</span>`;
@@ -1287,7 +1376,7 @@ function openLightbox(r) {
     r.colormap, r.device_used, `${r.latency_ms} ms`,
     r.cached?"cached":null, `${r.resolution?.width}×${r.resolution?.height}`,
   ].filter(Boolean).map(t=>`<span class="lb-tag">${esc(t)}</span>`).join("");
-  renderMetricsAccordion(r.metrics);
+  renderMetricsAccordion(r);
   if (lightboxCloseTimer) { clearTimeout(lightboxCloseTimer); lightboxCloseTimer=null; }
   el.lightboxBackdrop.hidden=false;
   el.lightboxBackdrop.classList.remove("is-closing","is-open");
@@ -1471,7 +1560,9 @@ function renderBenchmark(data) {
   el.benchSpeedup.textContent = data?.comparison?.speedup ? `${data.comparison.speedup}×` : "—";
   el.benchThroughput.textContent = Number.isFinite(Number(onnx?.throughput_fps)) ? `${Number(onnx.throughput_fps).toFixed(2)} fps` : "—";
   el.benchMemory.textContent = data?.memory_snapshot?.process_rss_mb ? `${data.memory_snapshot.process_rss_mb} MB` : "—";
-  el.benchProvider.textContent = onnx?.status === "ok" ? "ONNX Ready" : "ONNX Unavailable";
+  const provider = onnx?.provider || onnx?.diagnostics?.runtime?.selected_provider || data?.onnx_diagnostics?.runtime?.selected_provider;
+  const cpuFallback = onnx?.uses_cpu_fallback || onnx?.diagnostics?.runtime?.uses_cpu_fallback || data?.onnx_diagnostics?.runtime?.uses_cpu_fallback;
+  el.benchProvider.textContent = onnx?.status === "ok" ? `ONNX Ready${provider ? ` · ${provider}` : ""}${cpuFallback ? " · CPU fallback" : ""}` : `ONNX ${onnx?.state || "Unavailable"}`;
   el.benchStatus.textContent = onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path}` : (onnx?.reason || "Benchmark completed with warnings");
   renderBenchmarkChart(data);
 }
@@ -1510,6 +1601,100 @@ el.benchmarkRunBtn?.addEventListener("click", () => {
   clearTimeout(window.__depthlensBenchmarkTimer);
   window.__depthlensBenchmarkTimer = setTimeout(runBenchmark, 250);
 });
+
+
+// ══════════════════════════════════════════════════════════════
+// EXPERIMENT WORKSPACE
+// ══════════════════════════════════════════════════════════════
+function scalarMetric(result, key) {
+  const metrics = result?.metrics || {};
+  return metrics[key] ?? metrics.gt_metrics?.[key] ?? metrics.proxy_metrics?.[key] ?? metrics.prediction_stats?.[key] ?? null;
+}
+function experimentRows() {
+  return state.experiment.results.map((r, i) => ({
+    index: i + 1,
+    filename: r.filename,
+    model: r.model,
+    device: r.device_used,
+    latency_ms: r.latency_ms,
+    abs_rel: scalarMetric(r, "abs_rel"),
+    rmse: scalarMetric(r, "gt_rmse") ?? scalarMetric(r, "rmse"),
+    delta_1: scalarMetric(r, "delta_1"),
+    gt: Boolean(r.gt_metadata?.provided),
+    warnings: [...(r.metrics?.warnings || []), ...(r.gt_metadata?.warnings || [])].join(" | "),
+  }));
+}
+function renderExperiment() {
+  const rows = experimentRows();
+  el.experimentCount.textContent = rows.length;
+  const latencies = rows.map(r => Number(r.latency_ms)).filter(Number.isFinite);
+  el.experimentAvgLatency.textContent = latencies.length ? `${(latencies.reduce((a,b)=>a+b,0)/latencies.length).toFixed(0)} ms` : "—";
+  const abs = rows.map(r => Number(r.abs_rel)).filter(Number.isFinite);
+  el.experimentBestAbsRel.textContent = abs.length ? Math.min(...abs).toFixed(4) : "—";
+  el.experimentStatusMetric.textContent = rows.length ? "Ready" : "Idle";
+  el.experimentExportJsonBtn.disabled = !rows.length;
+  el.experimentExportCsvBtn.disabled = !rows.length;
+  el.experimentTableBody.innerHTML = rows.length ? rows.map(r => `
+    <tr><td>${esc(r.filename)}</td><td>${esc(r.model)}</td><td>${esc(r.device)}</td><td>${r.latency_ms} ms</td><td>${r.abs_rel ?? "—"}</td><td>${r.rmse ?? "—"}</td><td>${r.delta_1 ?? "—"}</td><td>${r.gt ? "GT" : "Image-only"}${r.warnings ? ` · ${esc(r.warnings)}` : ""}</td></tr>
+  `).join("") : '<tr><td colspan="8">No experiment results yet.</td></tr>';
+  el.experimentPreviews.innerHTML = state.experiment.results.map(r => `
+    <article class="experiment-card">
+      <div class="experiment-card-head"><span>${esc(r.filename)}</span><span>${r.latency_ms} ms</span></div>
+      <div class="experiment-preview-grid">
+        <div class="experiment-preview-tile"><img src="${r.originalSrc || ''}" alt="RGB input"><span>RGB</span></div>
+        <div class="experiment-preview-tile"><img src="data:image/png;base64,${r.depth_map || ''}" alt="Predicted depth"><span>Predicted</span></div>
+        ${r.gt_depth_map ? `<div class="experiment-preview-tile"><img src="data:image/png;base64,${r.gt_depth_map}" alt="GT depth"><span>GT</span></div>` : `<div class="experiment-preview-tile"><span>GT unavailable</span></div>`}
+        ${r.error_heatmap ? `<div class="experiment-preview-tile"><img src="data:image/png;base64,${r.error_heatmap}" alt="Error heatmap"><span>Error</span></div>` : `<div class="experiment-preview-tile"><span>Error map unavailable</span></div>`}
+      </div>
+    </article>
+  `).join("");
+}
+async function runExperiment() {
+  if (!engineReady()) {
+    const ok = await checkHealth();
+    if (!ok) { toast("Inference runtime is not ready", "error"); return; }
+  }
+  if (!state.files.length) { toast("Add images in the Workspace queue before running an experiment", "warning"); return; }
+  if (state.gtMode && (state.files.length !== 1 || !state.gtFile)) { toast("GT experiments require exactly one image and one GT file", "warning"); return; }
+  const model=selModel(), colormap=selCmap(), device=selDevice();
+  state.experiment = { name: el.experimentName?.value || "DepthLens validation run", results: [], startedAt: new Date().toISOString() };
+  el.experimentStatus.textContent = "Running experiment…";
+  el.experimentRunBtn.disabled = true;
+  try {
+    for (const entry of state.files) {
+      const result = await inferOne(entry.file, model, colormap, device, null, state.gtMode ? "full" : "fast", "color,gray", state.gtMode ? state.gtFile : null, state.gtMode);
+      state.experiment.results.push({...result, originalSrc: entry.thumb, filename: entry.file.name, experiment_name: state.experiment.name});
+      renderExperiment();
+    }
+    el.experimentStatus.textContent = `Completed ${state.experiment.results.length} result(s) for ${state.experiment.name}.`;
+    toast("Experiment complete", "success");
+  } catch (err) {
+    el.experimentStatus.textContent = err.message;
+    toast(`Experiment failed: ${err.message}`, "error", 6000);
+  } finally {
+    el.experimentRunBtn.disabled = false;
+  }
+}
+function exportBlob(name, type, content) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href:url, download:name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function exportExperimentJson() {
+  const payload = { run_name: state.experiment.name, started_at: state.experiment.startedAt, exported_at: new Date().toISOString(), results: state.experiment.results };
+  exportBlob(`${state.experiment.name.replace(/[^a-z0-9_-]+/gi,"_")}.json`, "application/json", JSON.stringify(payload,null,2));
+}
+function exportExperimentCsv() {
+  const rows = experimentRows();
+  const header = ["filename","model","device","latency_ms","abs_rel","rmse","delta_1","gt","warnings"];
+  const csv = [header.join(","), ...rows.map(r => header.map(k => `"${String(r[k] ?? "").replace(/"/g,'""')}"`).join(","))].join("\n");
+  exportBlob(`${(state.experiment.name||"experiment").replace(/[^a-z0-9_-]+/gi,"_")}.csv`, "text/csv", csv);
+}
+el.experimentRunBtn?.addEventListener("click", runExperiment);
+el.experimentExportJsonBtn?.addEventListener("click", exportExperimentJson);
+el.experimentExportCsvBtn?.addEventListener("click", exportExperimentCsv);
 
 // ══════════════════════════════════════════════════════════════
 // TOAST
@@ -1583,9 +1768,10 @@ async function init() {
     switchPanel("main");
     await checkLive();
     await checkReadiness({ quiet: false });
-    await checkDiagnostics({ quiet: true });
-    await loadCacheMetrics();
+    state.initializingBackend = false;
+    syncQueueControls();
     startPollingLoops();
+    Promise.allSettled([checkDiagnostics({ quiet: true }), loadCacheMetrics()]);
   } catch (err) {
     backendOnline = false;
     setStatus("offline", "Depth Engine: Offline", `Backend URL resolution failed: ${err.message}`);
