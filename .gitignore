@@ -42,3 +42,33 @@ logs/
 .vscode/
 .idea/
 *.swp
+
+# Codex / local development generated files
+.venv/
+node_modules/
+frontend/node_modules/
+app/node_modules/
+electron/node_modules/
+.cache/
+.codex/env.sh
+.codex/logs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Model and benchmark artifacts
+models/onnx/*.onnx
+backend/onnx_weights/*.onnx
+*.onnx.tmp
+*.onnx.partial
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Runtime files
+*.pid
+backend.pid
+*.log
