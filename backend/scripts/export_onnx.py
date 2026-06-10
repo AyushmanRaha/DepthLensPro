@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.depth_models import MIDAS_REPO, ONNX_INPUT_SIZE, onnx_model_path  # noqa: E402
-from backend.services.inference import SUPPORTED_MODELS  # noqa: E402
+from backend.model_metadata import SUPPORTED_MODELS  # noqa: E402
 
 
 def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:

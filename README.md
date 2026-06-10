@@ -39,7 +39,7 @@ The application is optimized for local-first image processing, secure desktop pa
 ### Core Engine & AI
 
 - Monocular depth estimation using MiDaS-family models: `MiDaS_small`, `DPT_Hybrid`, and `DPT_Large`.
-- ONNX Runtime execution when exported static graphs are available, with explicit diagnostics for missing weights, missing runtime imports, provider fallback, and CPU-only execution.
+- ONNX Runtime execution when exported static graphs are available, with automatic first-benchmark ONNX graph export, explicit diagnostics for missing weights, missing runtime imports, provider fallback, and CPU-only execution.
 - Single-image and batch inference, with batch requests capped at **10 images**.
 - Supported source uploads: `PNG`, `JPG/JPEG`, `WEBP`, and `BMP`.
 - Optional Ground Truth mode for one source image plus one GT depth file (`PNG`, `TIFF`, or `NPY`, **20 MB** max) to compute benchmark metrics without changing the standard image-only workflow.
@@ -151,7 +151,7 @@ DepthLensPro exposes operational signals suitable for local diagnostics, release
 | Memory telemetry | `GET /health` | Memory status, pressure percentage, limit threshold, total bytes, available bytes, and used bytes. |
 | Disk telemetry | `GET /health` | Disk status, monitored path, usage percentage, limit threshold, total bytes, free bytes, and used bytes. |
 | Cache metrics | `GET /cache/metrics` and `GET /health` | Redis availability, backend type, hit/miss counts, fallback failures, keyspace size, and TTL. |
-| Runtime benchmarks | `GET /benchmark` and `GET /api/benchmark` | PyTorch versus ONNX Runtime latency, throughput, memory, speedup comparison, and explicit ONNX states (`available`, `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `runtime_error`, `unavailable`). |
+| Runtime benchmarks | `GET /benchmark` and `GET /api/benchmark` | PyTorch versus ONNX Runtime latency, throughput, memory, speedup comparison, automatic missing-graph export when enabled, and explicit ONNX states (`available`, `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `export_failed`, `runtime_error`, `unavailable`). |
 | ONNX diagnostics | `GET /onnx/status`, `/ready`, and `/health` | Supported model IDs, expected weight paths, file sizes, ONNX Runtime import status, available providers, selected provider/fallback, and export commands. |
 | Session analytics | Desktop workspace | Processed image count, latency history, average/min/max latency, throughput, total inference time, cache hits, and error count. |
 | Experiment validation | Desktop Experiments panel | Named local runs, image/GT metadata, latency, metrics, warnings, side-by-side previews, error heatmaps when GT is valid, and JSON/CSV exports. |
@@ -184,7 +184,7 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
 >
 > **Cache note:** Redis is optional. If Redis is unavailable or not installed, the backend logs the condition and falls back to an in-memory cache automatically.
 >
-> **Repeatable dependency note:** Always run the backend dependency install/verify step before launching, testing, or building. This is safe to repeat and ensures new or updated backend requirements are installed after a fresh clone, `git pull`, branch switch, or code update. Continue only after `python -m pip check` finishes without errors.
+> **Repeatable dependency note:** Always run the backend dependency install/verify step before launching, testing, or building. This is safe to repeat and ensures new or updated backend requirements are installed after a fresh clone, `git pull`, branch switch, or code update. Continue only after `python -m pip check` finishes without errors. Performance Analysis also requires ONNX export/runtime packages (`onnx`, `onnxruntime`, and `onnxscript`), which are installed from `backend/requirements.txt`; missing `.onnx` graph files are exported automatically the first time a benchmark is run unless `DEPTHLENS_AUTO_EXPORT_ONNX=false`.
 
 ### Prerequisites
 
@@ -933,8 +933,8 @@ On Windows, use the matching activation command from section B before the same `
 | `acceleration_ok: false` | A GPU backend failed the runtime probe; CPU inference remains available. |
 | `/health` reports degraded status | Inspect memory pressure and disk usage telemetry for threshold violations. |
 | Redis cache unavailable | Verify Redis host, port, credentials, and container health; the backend uses in-memory fallback automatically. |
-| Missing ONNX weights | This is not fatal. Run `python backend/scripts/export_onnx.py --model MiDaS_small` (or another supported model) or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files. ONNX weights are generated artifacts and are not committed. |
-| `/benchmark` reports ONNX unavailable | Check `curl http://127.0.0.1:8765/onnx/status?device=auto`. The response distinguishes `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `runtime_error`, and CPU/provider fallback. PyTorch benchmark/inference can still run. |
+| Missing ONNX weights | Performance Analysis now exports the selected model automatically on the first benchmark run when `DEPTHLENS_AUTO_EXPORT_ONNX` is unset or true. To pre-generate graphs manually, run `python backend/scripts/export_onnx.py --all` after installing `backend/requirements.txt`, or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files. ONNX weights are generated artifacts and are not committed. |
+| `/benchmark` reports ONNX unavailable | Check `curl http://127.0.0.1:8765/onnx/status?device=auto`. The response distinguishes `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `export_failed`, `runtime_error`, and CPU/provider fallback. If automatic export fails, verify that `onnx`, `onnxruntime`, `onnxscript`, `torch`, `torchvision`, and `timm` were installed by repeating section B. PyTorch benchmark/inference can still run. |
 | ONNX uses CPU fallback | The installed ONNX Runtime package does not expose the preferred provider for the selected device. This is valid and platform-neutral; install a provider-enabled runtime locally if acceleration is required. |
 | GT upload rejected | Ensure the file is PNG, TIFF, or NPY, under 20 MB, numeric/single-channel where required, and contains finite positive valid pixels. Standard image-only inference remains unaffected. |
 | GT metrics look scale-adjusted | MiDaS predicts relative depth. DepthLensPro resizes GT to prediction resolution and applies median scale alignment before Abs Rel, Sq Rel, MAE, RMSE, Log RMSE, and δ metrics. |
