@@ -183,6 +183,8 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
 > **First run:** model weights may be downloaded through `torch.hub` the first time a model is lazily loaded. Subsequent runs use the local model cache. Optional background warmup is available with `DEPTHLENS_PRELOAD_MODEL=true`, `DEPTHLENS_WARMUP_MODEL=MiDaS_small`, and `DEPTHLENS_WARMUP_DEVICE=auto`; warmup failure does not break `/live` or lazy inference.
 >
 > **Cache note:** Redis is optional. If Redis is unavailable or not installed, the backend logs the condition and falls back to an in-memory cache automatically.
+>
+> **Repeatable dependency note:** Always run the backend dependency install/verify step before launching, testing, or building. This is safe to repeat and ensures new or updated backend requirements are installed after a fresh clone, `git pull`, branch switch, or code update. Continue only after `python -m pip check` finishes without errors.
 
 ### Prerequisites
 
@@ -192,26 +194,108 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
 - Git
 - Optional: Redis for distributed cache validation
 
-### A. Native App Build / Install by Platform
+### A. Get the Repository in Downloads
+
+Keep the working copy under the user Downloads folder on every supported platform. The repository URL is shown as a placeholder because this checkout does not declare a Git remote.
+
+#### macOS / Linux
+
+```bash
+cd ~/Downloads
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+cd DepthLensPro
+```
+
+#### Windows PowerShell
+
+```powershell
+cd "$env:USERPROFILE\Downloads"
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+cd DepthLensPro
+```
+
+#### Windows Command Prompt
+
+```bat
+cd %USERPROFILE%\Downloads
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+cd DepthLensPro
+```
+
+### B. Install and Verify Backend Dependencies
+
+DepthLensPro stores Python backend requirements in `backend/requirements.txt`. The virtual environment is created at the repository root as `venv/` because packaged Electron builds copy `../venv` into the native app resources. Run these commands from inside `backend/` every time before a terminal launch, backend-only launch, native build, native test, rebuild, or run after pulling changes.
+
+#### macOS / Linux
+
+```bash
+cd ~/Downloads/DepthLensPro
+
+cd backend
+python3 -m venv ../venv
+source ../venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+```
+
+#### Windows PowerShell
+
+```powershell
+cd "$env:USERPROFILE\Downloads\DepthLensPro"
+
+cd backend
+py -3 -m venv ..\venv
+..\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+```
+
+If PowerShell blocks virtual environment activation, run this once in the same PowerShell profile and then activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+#### Windows Command Prompt
+
+```bat
+cd %USERPROFILE%\Downloads\DepthLensPro
+
+cd backend
+py -3 -m venv ..\venv
+..\venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+```
+
+### C. Native App Build / Install by Platform
+
+Run the backend dependency install/verify commands in section B first, then install Electron dependencies from `electron-app/` and build the supported ARM package. Native build and test commands do **not** replace the backend dependency step; repeat section B after `git pull`, branch switching, dependency file changes, or before rebuilding a newer app version.
 
 #### macOS Native App Build
 
-Builds unsigned macOS artifacts for **Apple Silicon (`arm64`) only**. `npm run build:mac` cleans old packaged outputs first, builds the Apple Silicon target, and scans for duplicate app bundles. For reproducible packaged builds, create the repo-root `venv/` before running electron-builder because `electron-app/package.json` includes `../venv` as an `extraResources` entry.
-
-Do **not** open both `dist/mac` and `dist/mac-arm64`. `electron-app/dist/mac/DepthLens Pro.app` is stale/unsupported if it exists from an older x64 or universal build. The intended local Apple Silicon build output is:
+Builds unsigned macOS artifacts for **Apple Silicon (`arm64`) only**. `npm run build:mac` cleans old packaged outputs first, builds the Apple Silicon target, and scans for duplicate app bundles. The intended local Apple Silicon build output is:
 
 ```text
 electron-app/dist/mac-arm64/DepthLens Pro.app
 ```
 
 ```bash
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
-cd DepthLensPro
+cd ~/Downloads/DepthLensPro
 
-python3 -m venv venv
-source venv/bin/activate
+cd backend
+python3 -m venv ../venv
+source ../venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r backend/requirements.txt
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
 
 cd electron-app
 npm install
@@ -230,13 +314,15 @@ xattr -cr "/Applications/DepthLens Pro.app"
 Builds a **Windows ARM64 only** NSIS installer. Run these commands from PowerShell so the Windows virtual environment layout is used (`venv\Scripts\python.exe`). Windows x64 builds are unsupported and intentionally fail.
 
 ```powershell
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
-cd DepthLensPro
+cd "$env:USERPROFILE\Downloads\DepthLensPro"
 
-py -3 -m venv venv
-.\venv\Scripts\Activate.ps1
+cd backend
+py -3 -m venv ..\venv
+..\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r backend\requirements.txt
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
 
 cd electron-app
 npm install
@@ -246,19 +332,20 @@ npm run build:win:arm64
 
 Run the generated installer from `electron-app\dist\`, then launch **DepthLens Pro** from the Start menu or desktop shortcut. Packaged builds expect the prepared `venv/`, `backend/`, and `frontend/` resources to be present in the installer resources.
 
-
 #### Linux ARM Native App Build
 
-Builds a **Linux ARM64/aarch64 only** AppImage. Prepare the repo-root virtual environment first so electron-builder can copy `backend/`, `frontend/`, and `venv/` into packaged resources.
+Builds a **Linux ARM64/aarch64 only** AppImage. Prepare and verify the repo-root virtual environment first so electron-builder can copy `backend/`, `frontend/`, and `venv/` into packaged resources.
 
 ```bash
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
-cd DepthLensPro
+cd ~/Downloads/DepthLensPro
 
-python3 -m venv venv
-source venv/bin/activate
+cd backend
+python3 -m venv ../venv
+source ../venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r backend/requirements.txt
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
 
 cd electron-app
 npm install
@@ -268,106 +355,113 @@ npm run build:linux:arm64
 
 Run the generated ARM64 AppImage from `electron-app/dist/`. Linux x64 builds are intentionally unsupported.
 
+#### Native App Development Test
+
+Use this when you want to test the native shell without creating an installer. Run section B first, then:
+
+```bash
+cd ~/Downloads/DepthLensPro/electron-app
+npm install
+npm run verify:resources
+npm start
+```
+
+On Windows PowerShell, use the same commands after entering `cd "$env:USERPROFILE\Downloads\DepthLensPro\electron-app"`.
+
 #### End-User Installation from Release Artifacts
 
 - **macOS:** Download the latest `DMG`, mount it, drag **DepthLens Pro** into `/Applications`, and launch the app.
 - **Windows ARM:** Download the latest Windows ARM installer (`.exe`), run it, and launch **DepthLens Pro** from the Start menu or desktop shortcut. Windows x64 is unsupported.
 - **Linux ARM:** Build or download the ARM64/aarch64 AppImage and run one copy of **DepthLens Pro**. Linux x64 is unsupported.
 
-#### Fresh macOS Reinstall / Remove Duplicate App Entries
+### D. Terminal-Only Local Test / Development
 
-Use this when Spotlight shows more than one **DepthLens Pro** icon or when old `dist/mac` output exists. The commands remove only known app bundles and packaged build output; they do not delete source files, user data, unrelated apps, or Python environments.
+Use this path when you want to run the full app from terminals without creating a native installer. Repeat the backend dependency install/verify step before every launch, especially after pulling changes or switching branches.
 
-```bash
-cd /Users/user/Downloads/DepthLensPro/electron-app
-npm run kill:backend
-npm run clean:dist
-npm run clean:install
-npm run build:mac
-open "dist/mac-arm64/DepthLens Pro.app"
-```
-
-`npm run reinstall:mac` performs the same safe flow, builds only macOS arm64, and prints the exact app path to open: `electron-app/dist/mac-arm64/DepthLens Pro.app`.
-
-#### Duplicate Spotlight Icons
-
-Two Spotlight icons usually mean multiple app bundles with the same name exist, not that one bundle installed itself twice. Common duplicate locations are:
-
-- `/Applications/DepthLens Pro.app`
-- `~/Applications/DepthLens Pro.app`
-- `electron-app/dist/mac/DepthLens Pro.app` (stale/unsupported)
-- `electron-app/dist/mac-arm64/DepthLens Pro.app`
-
-Scan first:
-
-```bash
-npm run scan:apps
-```
-
-Then remove duplicates safely:
-
-```bash
-npm run clean:install
-npm run clean:dist
-npm run clean:spotlight
-```
-
-After deleting duplicate bundles, Spotlight can take time to update. Avoid aggressive system-wide reindexing by default; remove duplicate app bundles first and wait for indexing to settle.
-
-### B. Terminal-Only Local Test / Development
-
-Use this path when you want to test the app locally without creating a native installer. `npm start` launches Electron, starts FastAPI on `127.0.0.1:8765`, and keeps the backend URL synchronized with the frontend.
-
-#### macOS / Linux Terminal-Only Development Test
-
-```bash
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
-cd DepthLensPro
-
-python3 -m venv venv
-source venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r backend/requirements.txt
-
-cd electron-app
-npm install
-npm start
-```
-
-#### Windows PowerShell Terminal-Only Development Test
-
-```powershell
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
-cd DepthLensPro
-
-py -3 -m venv venv
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r backend\requirements.txt
-
-cd electron-app
-npm install
-npm start
-```
-
-### Backend-Only Smoke Test
-
-Run the backend without Electron when validating API routes or working in a terminal-only environment.
+The Electron development command is the simplest full-app terminal workflow: one terminal runs Electron, and Electron starts FastAPI on `127.0.0.1:8765` automatically.
 
 #### macOS / Linux
 
 ```bash
-cd DepthLensPro
-source venv/bin/activate
-python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+cd ~/Downloads/DepthLensPro
+
+cd backend
+python3 -m venv ../venv
+source ../venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
+cd electron-app
+npm install
+npm start
 ```
 
 #### Windows PowerShell
 
 ```powershell
-cd DepthLensPro
-.\venv\Scripts\Activate.ps1
+cd "$env:USERPROFILE\Downloads\DepthLensPro"
+
+cd backend
+py -3 -m venv ..\venv
+..\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
+cd electron-app
+npm install
+npm start
+```
+
+#### Windows Command Prompt
+
+```bat
+cd %USERPROFILE%\Downloads\DepthLensPro
+
+cd backend
+py -3 -m venv ..\venv
+..\venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
+cd electron-app
+npm install
+npm start
+```
+
+#### Backend and Static Frontend in Separate Windows
+
+Use two terminals when validating API routes separately from the renderer. Terminal 1 starts the backend from the repository root after section B has passed:
+
+```bash
+cd ~/Downloads/DepthLensPro
+source venv/bin/activate
 python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+
+For Windows PowerShell, use `cd "$env:USERPROFILE\Downloads\DepthLensPro"` and `.\venv\Scripts\Activate.ps1` before the same `python -m uvicorn ...` command. For Windows Command Prompt, use `cd %USERPROFILE%\Downloads\DepthLensPro` and `venv\Scripts\activate.bat`.
+
+Terminal 2 can open `frontend/index.html` directly in a browser or use the Electron development command from `electron-app/` if you want the native shell. If opening the static frontend directly, start the backend first and optionally set `localStorage.depthlens_api_url` to `http://127.0.0.1:8765`.
+
+```bash
+cd ~/Downloads/DepthLensPro/frontend
+open index.html      # macOS
+xdg-open index.html  # Linux
+```
+
+```powershell
+cd "$env:USERPROFILE\Downloads\DepthLensPro\frontend"
+start index.html
+```
+
+```bat
+cd %USERPROFILE%\Downloads\DepthLensPro\frontend
+start index.html
 ```
 
 Liveness, diagnostics, and route checks:
@@ -391,9 +485,167 @@ npm run backend:smoke
 npm run verify:resources
 ```
 
-### Docker Compose
+### E. Update, Rebuild, and Run the Latest Code
+
+After every `git pull`, branch switch, or dependency file change, install and verify backend dependencies again from `backend/` before launching, testing, or building. Then install/update Electron dependencies from `electron-app/`.
+
+#### macOS / Linux
 
 ```bash
+cd ~/Downloads/DepthLensPro
+git pull
+
+cd backend
+if [ ! -d ../venv ]; then python3 -m venv ../venv; fi
+source ../venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
+cd electron-app
+npm install
+npm run verify:resources
+
+# Run the updated code from terminal:
+npm start
+
+# Or rebuild a new native app version instead:
+npm run build:mac        # macOS Apple Silicon
+npm run build:linux:arm64 # Linux ARM64/aarch64
+```
+
+#### Windows PowerShell
+
+```powershell
+cd "$env:USERPROFILE\Downloads\DepthLensPro"
+git pull
+
+cd backend
+if (!(Test-Path "..\venv")) { py -3 -m venv ..\venv }
+..\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
+cd electron-app
+npm install
+npm run verify:resources
+
+# Run the updated code from terminal:
+npm start
+
+# Or rebuild a new native app version instead:
+npm run build:win:arm64
+```
+
+#### Windows Command Prompt
+
+```bat
+cd %USERPROFILE%\Downloads\DepthLensPro
+git pull
+
+cd backend
+if not exist ..\venv py -3 -m venv ..\venv
+..\venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
+cd electron-app
+npm install
+npm run verify:resources
+
+REM Run the updated code from terminal:
+npm start
+
+REM Or rebuild a new native app version instead:
+npm run build:win:arm64
+```
+
+### F. Remove Old Native App Builds and Cached Data
+
+Use this before a fresh native install when old build output, stale app bundles, caches, logs, or backend pid files may conflict with a new build. These commands remove app settings, logs, caches, and local DepthLens Pro runtime data. Back up any user-created exports or files stored in those app data folders before running cleanup.
+
+#### macOS
+
+```bash
+cd ~/Downloads/DepthLensPro
+
+rm -rf electron-app/dist electron-app/build electron-app/out electron-app/release electron-app/.tauri electron-app/.electron
+rm -rf frontend/dist frontend/build
+rm -rf backend/__pycache__ backend/.pytest_cache
+
+rm -rf "/Applications/DepthLens Pro.app"
+rm -rf "$HOME/Applications/DepthLens Pro.app"
+rm -rf "$HOME/Library/Application Support/DepthLens Pro"
+rm -rf "$HOME/Library/Caches/DepthLens Pro"
+rm -rf "$HOME/Library/Logs/DepthLens Pro"
+rm -f "$HOME/Library/Preferences/com.ayushmanraha.depthlens-pro.plist"
+```
+
+You can also run `npm run clean:dist`, `npm run clean:install`, and `npm run scan:apps` from `electron-app/` for the macOS build-output and duplicate-app cleanup helpers that are already included in this repository.
+
+#### Linux
+
+```bash
+cd ~/Downloads/DepthLensPro
+
+rm -rf electron-app/dist electron-app/build electron-app/out electron-app/release electron-app/.tauri electron-app/.electron
+rm -rf frontend/dist frontend/build
+rm -rf backend/__pycache__ backend/.pytest_cache
+
+rm -rf "$HOME/.config/DepthLens Pro"
+rm -rf "$HOME/.cache/DepthLens Pro"
+rm -rf "$HOME/.local/share/DepthLens Pro"
+rm -rf "$HOME/.local/state/DepthLens Pro"
+```
+
+#### Windows PowerShell
+
+```powershell
+cd "$env:USERPROFILE\Downloads\DepthLensPro"
+
+Remove-Item -Recurse -Force .\electron-app\dist, .\electron-app\build, .\electron-app\out, .\electron-app\release, .\electron-app\.tauri, .\electron-app\.electron -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force .\frontend\dist, .\frontend\build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force .\backend\__pycache__, .\backend\.pytest_cache -ErrorAction SilentlyContinue
+
+Remove-Item -Recurse -Force "$env:APPDATA\DepthLens Pro" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\DepthLens Pro" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Temp\DepthLens Pro" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:USERPROFILE\AppData\Local\Programs\DepthLens Pro" -ErrorAction SilentlyContinue
+```
+
+#### Windows Command Prompt
+
+```bat
+cd %USERPROFILE%\Downloads\DepthLensPro
+
+rmdir /s /q electron-app\dist 2>nul
+rmdir /s /q electron-app\build 2>nul
+rmdir /s /q electron-app\out 2>nul
+rmdir /s /q electron-app\release 2>nul
+rmdir /s /q electron-app\.tauri 2>nul
+rmdir /s /q electron-app\.electron 2>nul
+rmdir /s /q frontend\dist 2>nul
+rmdir /s /q frontend\build 2>nul
+rmdir /s /q backend\__pycache__ 2>nul
+rmdir /s /q backend\.pytest_cache 2>nul
+
+rmdir /s /q "%APPDATA%\DepthLens Pro" 2>nul
+rmdir /s /q "%LOCALAPPDATA%\DepthLens Pro" 2>nul
+rmdir /s /q "%LOCALAPPDATA%\Temp\DepthLens Pro" 2>nul
+rmdir /s /q "%USERPROFILE%\AppData\Local\Programs\DepthLens Pro" 2>nul
+```
+
+### G. Docker Compose
+
+Docker Compose is available for backend-plus-Redis validation. It does not replace the native desktop packaging flow.
+
+```bash
+cd ~/Downloads/DepthLensPro
 docker compose up --build
 ```
 
@@ -639,16 +891,24 @@ DepthLensPro/
 
 ## Validation & CI
 
-Run the local quality gates before opening a pull request:
+Run the backend dependency install/verify step from `backend/` before local validation, then run the quality gates from the repository root:
 
 ```bash
+cd ~/Downloads/DepthLensPro
+cd backend
+source ../venv/bin/activate 2>/dev/null || { python3 -m venv ../venv && source ../venv/bin/activate; }
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip check
+cd ..
+
 black --check .
 ruff check .
 mypy backend/
 pytest
 ```
 
-The GitHub Actions pipeline runs the same core checks for formatting, linting, typing, and tests. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution requirements.
+On Windows, use the matching activation command from section B before the same `python -m pip ...`, `black`, `ruff`, `mypy`, and `pytest` checks. The GitHub Actions pipeline runs the same core checks for formatting, linting, typing, and tests. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution requirements.
 
 ---
 
@@ -656,7 +916,7 @@ The GitHub Actions pipeline runs the same core checks for formatting, linting, t
 
 | Issue | Recommended Action |
 |---|---|
-| `ModuleNotFoundError: No module named 'backend'` | Launch from the repo/resources root with `python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765`. Electron sets `cwd` and `PYTHONPATH` automatically; for packaging, create the repo-root `venv/` and run `npm run verify:resources`. |
+| Backend imports fail or `ModuleNotFoundError` appears | Reinstall and verify backend dependencies from `~/Downloads/DepthLensPro/backend` using section B. Do not install backend dependencies from `frontend/`, `electron-app/`, or another subfolder. Activate the repo-root `venv/` before backend commands, repeat this after `git pull`, branch switching, or dependency file changes, then launch from the repo/resources root with `python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765`. |
 | Frontend reports that the engine is offline | Confirm the backend answers `curl http://127.0.0.1:8765/live`; if `/live` fails, Electron did not start the backend or the selected port is wrong. |
 | Frontend reports that the engine is degraded | Confirm `curl http://127.0.0.1:8765/ready`; required modules such as `cv2`, `torch`, `numpy`, FastAPI, Uvicorn, and Pillow must import successfully before inference controls are enabled. |
 | Uvicorn is running but app still reports offline | Verify the port matches `DEPTHLENS_BACKEND_PORT` and that `/live` returns `service: "DepthLens Pro API"`; a different service on the port is treated as a conflict. |
