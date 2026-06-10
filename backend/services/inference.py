@@ -261,7 +261,7 @@ def _b64(img: np.ndarray) -> str:
 
 def _raw_hash(raw: bytes) -> str:
     """Return a stable content hash for raw image bytes."""
-    return hashlib.md5(raw).hexdigest()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _depth_cache_key(raw: bytes, model: str, dev: str, max_dim: int | None) -> str:
