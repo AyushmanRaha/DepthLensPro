@@ -37,6 +37,7 @@ applyTheme(getSavedTheme(), false);
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8765";
 let API = null;
 let apiResolved = false;
+let apiResolutionPromise = null;
 let backendOnline = false;
 let inferenceReady = false;
 let readinessDetails = null;
@@ -48,33 +49,48 @@ function normalizeApiBaseUrl(url) {
 
 async function resolveApiBaseUrl() {
   if (apiResolved && API) return API;
+  if (apiResolutionPromise) return apiResolutionPromise;
 
-  let resolved = null;
-  runningInElectron = Boolean(window.electronAPI?.getBackendUrl);
-  if (runningInElectron) {
-    resolved = await window.electronAPI.getBackendUrl();
-    const platform = await window.electronAPI.getPlatform?.() || window.electronAPI.platform;
-    if (platform === "darwin") document.body.classList.add("macos");
-  } else {
-    resolved = window.DEPTHLENS_API_URL;
-    try { resolved = resolved || localStorage.getItem("depthlens_api_url"); } catch {}
+  apiResolutionPromise = (async () => {
+    let resolved = null;
+    runningInElectron = Boolean(window.electronAPI?.getBackendUrl);
+    if (runningInElectron) {
+      resolved = await window.electronAPI.getBackendUrl();
+      const platform = await window.electronAPI.getPlatform?.() || window.electronAPI.platform;
+      if (platform === "darwin") document.body.classList.add("macos");
+    } else {
+      resolved = window.DEPTHLENS_API_URL;
+      try { resolved = resolved || localStorage.getItem("depthlens_api_url"); } catch {}
+    }
+
+    API = normalizeApiBaseUrl(resolved || DEFAULT_API_BASE_URL);
+    apiResolved = true;
+    console.log(`[DepthLens] Resolved backend URL: ${API}`);
+    if (!runningInElectron) console.warn("[DepthLens] Electron bridge unavailable; running in browser/file mode. Start the backend manually or set DEPTHLENS_API_URL/localStorage.");
+    return API;
+  })();
+
+  try {
+    return await apiResolutionPromise;
+  } catch (err) {
+    apiResolutionPromise = null;
+    apiResolved = false;
+    throw err;
   }
+}
 
-  API = normalizeApiBaseUrl(resolved || DEFAULT_API_BASE_URL);
-  apiResolved = true;
-  console.log(`[DepthLens] Resolved backend URL: ${API}`);
-  if (!runningInElectron) console.warn("[DepthLens] Electron bridge unavailable; running in browser/file mode. Start the backend manually or set DEPTHLENS_API_URL/localStorage.");
-  return API;
+function buildApiUrl(base, path) {
+  const route = String(path || "");
+  return `${base}${route.startsWith("/") ? route : `/${route}`}`;
 }
 
 function apiUrl(path) {
-  if (!apiResolved || !API) throw new Error("Backend URL has not been resolved yet");
-  const route = String(path || "");
-  return `${API}${route.startsWith("/") ? route : `/${route}`}`;
+  return buildApiUrl(API || DEFAULT_API_BASE_URL, path);
 }
 
 async function apiFetch(path, options = {}) {
-  const url = apiUrl(path);
+  const base = await resolveApiBaseUrl();
+  const url = buildApiUrl(base, path);
   try {
     const res = await fetch(url, options);
     if (!res.ok) {
@@ -112,12 +128,19 @@ const state = {
   compareAbort: null,
   healthAbort: null,
   benchmarkAbort: null,
-  pollTimers: [],
+  pollTimers: {},
+  pollMode: null,
+  pollControllers: {},
+  pollInFlight: {},
+  pollEpoch: 0,
   lastToast: { message: "", at: 0 },
   compareFile: null,
   devices: {},
   primaryDevice: "cpu",
   deviceFilter: "all",
+  deviceListSignature: "",
+  deviceFilterSignature: "",
+  selectedDevice: null,
   timing: { workspace: {}, compare: {} },
   compareView: { metricKey: "latency_ms", open: true, results: [] },
   initializingBackend: true,
@@ -474,23 +497,48 @@ function initLatencyChart() {
   });
 }
 
+function applyChartPalette(chart, c) {
+  if (!chart) return;
+  const tooltip = chart.options?.plugins?.tooltip;
+  if (tooltip) {
+    tooltip.backgroundColor = c.tooltip;
+    tooltip.borderColor = c.ttBrd;
+    tooltip.titleColor = c.ttTitle;
+    tooltip.bodyColor = c.ttBody;
+  }
+  const legend = chart.options?.plugins?.legend;
+  if (legend?.labels) legend.labels.color = c.ttTitle;
+  if (chart.options?.scales?.x) {
+    if (chart.options.scales.x.grid) chart.options.scales.x.grid.color = c.grid;
+    if (chart.options.scales.x.ticks) chart.options.scales.x.ticks.color = c.ttTitle;
+  }
+  if (chart.options?.scales?.y) {
+    if (chart.options.scales.y.grid) chart.options.scales.y.grid.color = c.grid;
+    if (chart.options.scales.y.ticks) chart.options.scales.y.ticks.color = c.tick;
+  }
+}
+
 function updateChartTheme() {
-  if (!latencyChart) return;
   const c = chartColors();
-  latencyChart.data.datasets[0].borderColor      = c.line;
-  latencyChart.data.datasets[0].backgroundColor  = c.fill;
-  latencyChart.options.plugins.tooltip.backgroundColor = c.tooltip;
-  latencyChart.options.plugins.tooltip.borderColor     = c.ttBrd;
-  latencyChart.options.plugins.tooltip.titleColor      = c.ttTitle;
-  latencyChart.options.plugins.tooltip.bodyColor       = c.ttBody;
-  latencyChart.options.scales.y.grid.color  = c.grid;
-  latencyChart.options.scales.y.ticks.color = c.tick;
-  latencyChart.update("none");
+  if (latencyChart) {
+    latencyChart.data.datasets[0].borderColor = c.line;
+    latencyChart.data.datasets[0].backgroundColor = c.fill;
+    applyChartPalette(latencyChart, c);
+    latencyChart.update("none");
+  }
 
   if (compareChart && state.compareView.results.length) {
-    renderCompareChart(state.compareView.results, state.compareView.metricKey);
+    renderCompareChart(state.compareView.results, state.compareView.metricKey, { preserveInstance: true });
   }
-  if (benchmarkChart) benchmarkChart.update("none");
+  if (benchmarkChart) {
+    applyChartPalette(benchmarkChart, c);
+    const ds = benchmarkChart.data?.datasets?.[0];
+    if (ds) {
+      ds.backgroundColor = ds.data.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
+      ds.borderColor = ds.data.map(v => v === null ? "#5e6f81" : c.barBrd);
+    }
+    benchmarkChart.update("none");
+  }
 }
 
 function pushLatency(ms) {
@@ -516,36 +564,54 @@ function renderCompareSummary(results) {
     const cell = document.createElement("div");
     cell.className = "compare-metric-cell";
     if (!valid.length) {
-      cell.innerHTML = `<span class="compare-metric-label">${spec.label}</span><span class="compare-metric-values">Unavailable</span>`;
+      cell.innerHTML = `<span class="compare-metric-label">${esc(spec.label)}</span><span class="compare-metric-values">Unavailable</span>`;
       el.compareMetricGrid.appendChild(cell); return;
     }
     const sorted = [...valid].sort((a,b) => spec.better === "higher" ? b.value-a.value : a.value-b.value);
     const [best, runnerUp] = sorted;
-    const cleanName = s => s.replace("MiDaS_","").replace("DPT_","DPT ");
+    const cleanName = s => esc(s).replace("MiDaS_","").replace("DPT_","DPT ");
     cell.innerHTML = `
-      <span class="compare-metric-label">${spec.label}</span>
+      <span class="compare-metric-label">${esc(spec.label)}</span>
       <div class="compare-metric-values">
-        <span>Best: ${cleanName(best.model)} <strong>${spec.fmt(best.value)}</strong></span>
-        ${runnerUp ? `<span>2nd: ${cleanName(runnerUp.model)} <strong>${spec.fmt(runnerUp.value)}</strong></span>` : ""}
+        <span>Best: ${cleanName(best.model)} <strong>${esc(spec.fmt(best.value))}</strong></span>
+        ${runnerUp ? `<span>2nd: ${cleanName(runnerUp.model)} <strong>${esc(spec.fmt(runnerUp.value))}</strong></span>` : ""}
       </div>`;
     el.compareMetricGrid.appendChild(cell);
   });
 }
 
-function renderCompareChart(results, metricKey = state.compareView.metricKey) {
+function renderCompareChart(results, metricKey = state.compareView.metricKey, { preserveInstance = false } = {}) {
   const metric = COMPARE_METRICS.find(m => m.key === metricKey) || COMPARE_METRICS[0];
   const values = results.map(r => {
     const v = Number(compareMetricValue(r, metric));
     return Number.isFinite(v) ? v : null;
   });
+  const labels = results.map(r => escText(r.model).replace("MiDaS_","").replace("DPT_","DPT "));
   el.compareChartCard.hidden = false;
   const c = chartColors();
-  const ctx = $("#compareChart").getContext("2d");
-  if (compareChart) compareChart.destroy();
+  const ctx = $("#compareChart")?.getContext("2d");
+  if (!ctx) return;
+  if (compareChart && preserveInstance) {
+    compareChart.data.labels = labels;
+    compareChart.data.datasets[0].label = metric.label;
+    compareChart.data.datasets[0].data = values;
+    compareChart.data.datasets[0].backgroundColor = values.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
+    compareChart.data.datasets[0].borderColor = values.map(v => v === null ? "#5e6f81" : c.barBrd);
+    compareChart.options.scales.y.ticks.callback = v => metric.fmt(v);
+    compareChart.options.plugins.tooltip.callbacks.label = ctx => ctx.raw === null ? "Not available" : metric.fmt(ctx.raw);
+    applyChartPalette(compareChart, c);
+    compareChart.update("none");
+    return;
+  }
+  if (compareChart) {
+    const oldChart = compareChart;
+    compareChart = null;
+    oldChart.destroy();
+  }
   compareChart = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: results.map(r => r.model.replace("MiDaS_","").replace("DPT_","DPT ")),
+      labels,
       datasets: [{
         label: metric.label,
         data: values,
@@ -700,11 +766,11 @@ async function checkReadiness({ quiet = true } = {}) {
   }
 }
 
-async function loadCacheMetrics() {
+async function loadCacheMetrics({ signal } = {}) {
   if (!backendOnline || document.hidden) return false;
   const started = performance.now();
   try {
-    const res = await apiFetch("/cache/metrics", { signal: AbortSignal.timeout(3000) });
+    const res = await apiFetch("/cache/metrics", { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) });
     applyCacheMetrics(await res.json());
     logEndpointTiming("/cache/metrics", started, true);
     return true;
@@ -722,11 +788,11 @@ function deviceBadge(devs, primary) {
   return "CPU";
 }
 
-async function checkLive({ quiet = false } = {}) {
+async function checkLive({ quiet = false, signal } = {}) {
   if (!quiet) setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
   const started = performance.now();
   try {
-    const res = await apiFetch("/live", { signal: AbortSignal.timeout(2500) });
+    const res = await apiFetch("/live", { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2500)]) : AbortSignal.timeout(2500) });
     const data = await res.json();
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
@@ -746,13 +812,14 @@ async function checkLive({ quiet = false } = {}) {
   }
 }
 
-async function checkDiagnostics({ quiet = true } = {}) {
+async function checkDiagnostics({ quiet = true, signal } = {}) {
   if (!backendOnline) return false;
   const started = performance.now();
-  state.healthAbort?.abort();
-  state.healthAbort = new AbortController();
+  const controller = signal ? null : new AbortController();
+  if (!signal) state.healthAbort = controller;
+  const requestSignal = signal || controller.signal;
   try {
-    const res = await apiFetch("/health", { signal: AbortSignal.any([state.healthAbort.signal, AbortSignal.timeout(6000)]) });
+    const res = await apiFetch("/health", { signal: AbortSignal.any([requestSignal, AbortSignal.timeout(6000)]) });
     const data = await res.json();
     applyCacheMetrics(data.cache_metrics);
     const devs = data.devices || state.devices || {};
@@ -794,6 +861,33 @@ function autoDeviceLabel(devs, primary) {
   return `Prefers CPU · ${preferred.name||primary}`;
 }
 
+function deviceListSignature(devs = {}, filters = null, primary = state.primaryDevice) {
+  return JSON.stringify({
+    primary,
+    devices: Object.entries(devs).map(([key, info]) => [
+      key,
+      info?.name || "",
+      info?.type || "",
+      info?.chip || "",
+      info?.memory_gb || "",
+      info?.hardware_name || "",
+      info?.compute_classes || [],
+    ]).sort((a,b) => a[0].localeCompare(b[0])),
+    filters,
+  });
+}
+
+function cssEscapeValue(value) {
+  if (window.CSS?.escape) return CSS.escape(String(value));
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+
+function currentSelectedDevice(fallback = "auto") {
+  const domValue = $('input[name="device"]:checked', el.deviceSelector)?.value;
+  const candidate = domValue || state.selectedDevice || window._savedDevice || fallback || "auto";
+  return candidate === "auto" || state.devices?.[candidate] ? candidate : "auto";
+}
+
 async function loadDevices(devs, primaryFromHealth = null) {
   if (!devs || !Object.keys(devs).length) {
     try {
@@ -805,12 +899,14 @@ async function loadDevices(devs, primaryFromHealth = null) {
   }
   const keys = Object.keys(devs);
   if (!keys.length) return;
+  const previousSelection = currentSelectedDevice("auto");
   state.devices = devs;
   const primary = primaryFromHealth && devs[primaryFromHealth] ? primaryFromHealth
     : devs.mps ? "mps" : keys.includes("cuda:0") ? "cuda:0" : keys.includes("xpu:0") ? "xpu:0" : keys[0];
   state.primaryDevice = primary;
-  const savedRaw = window._savedDevice || "auto";
+  const savedRaw = previousSelection || window._savedDevice || "auto";
   const saved = savedRaw === "auto" || devs[savedRaw] ? savedRaw : "auto";
+  state.selectedDevice = saved;
 
   const withKinds = Object.entries(devs).map(([key,info]) => ({key,info,kinds:classifyKinds(info)}));
   const kindsPresent = {
@@ -826,42 +922,66 @@ async function loadDevices(devs, primaryFromHealth = null) {
   ];
   if (!filters.find(f=>f.id===state.deviceFilter)) state.deviceFilter = "all";
 
-  el.deviceTypeToggle.hidden = filters.length <= 1;
-  el.deviceTypeToggle.innerHTML = "";
-  filters.forEach(f => {
-    const b = document.createElement("button");
-    b.type="button"; b.className=`device-filter-btn ${state.deviceFilter===f.id?"active":""}`;
-    b.textContent = f.label;
-    b.addEventListener("click",() => {
-      state.deviceFilter = f.id;
-      const current = $('input[name="device"]:checked')?.value || saved;
-      renderDeviceSelector(withKinds,primary,current,devs);
-      [...el.deviceTypeToggle.children].forEach(ch=>ch.classList.remove("active"));
-      b.classList.add("active");
+  const filterSig = JSON.stringify({ filters: filters.map(f=>f.id), devices: deviceListSignature(devs, null, primary) });
+  if (state.deviceFilterSignature !== filterSig) {
+    state.deviceFilterSignature = filterSig;
+    el.deviceTypeToggle.hidden = filters.length <= 1;
+    el.deviceTypeToggle.innerHTML = "";
+    filters.forEach(f => {
+      const b = document.createElement("button");
+      b.type="button"; b.className=`device-filter-btn ${state.deviceFilter===f.id?"active":""}`;
+      b.textContent = f.label;
+      b.addEventListener("click",() => {
+        state.deviceFilter = f.id;
+        state.selectedDevice = currentSelectedDevice(saved);
+        renderDeviceSelector(withKinds,primary,state.selectedDevice,devs, { force: true });
+        [...el.deviceTypeToggle.children].forEach(ch=>ch.classList.remove("active"));
+        b.classList.add("active");
+      });
+      el.deviceTypeToggle.appendChild(b);
     });
-    el.deviceTypeToggle.appendChild(b);
-  });
+  } else {
+    [...el.deviceTypeToggle.children].forEach(ch=>ch.classList.toggle("active", ch.textContent.toLowerCase() === state.deviceFilter));
+  }
 
   renderDeviceSelector(withKinds, primary, saved, devs);
 
   [el.compareDevice, el.benchmarkDevice].filter(Boolean).forEach(select => {
+    const selectCurrent = select.value || saved;
+    const selectSig = deviceListSignature(devs, null, primary);
+    if (select.dataset.deviceSignature === selectSig) {
+      if (selectCurrent === "auto" || devs[selectCurrent]) select.value = selectCurrent;
+      return;
+    }
+    select.dataset.deviceSignature = selectSig;
     select.innerHTML = "";
     const autoOpt = document.createElement("option");
     autoOpt.value="auto"; autoOpt.textContent=`Auto (${autoDeviceLabel(devs,primary)})`;
-    autoOpt.selected = saved==="auto";
     select.appendChild(autoOpt);
     Object.entries(devs).forEach(([key,info]) => {
       const opt = document.createElement("option");
       opt.value=key; opt.textContent=info.name||key;
-      opt.selected = saved!=="auto" && key===saved;
       select.appendChild(opt);
     });
+    select.value = (selectCurrent === "auto" || devs[selectCurrent]) ? selectCurrent : saved;
   });
 }
 
-function renderDeviceSelector(deviceEntries, primary, saved, devs) {
+function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = false } = {}) {
+  const visibleKeys = deviceEntries.filter(({kinds}) => matchesDeviceFilter(kinds, state.deviceFilter)).map(({key}) => key);
+  const sig = deviceListSignature(devs, { filter: state.deviceFilter, visibleKeys }, primary);
+  const selected = saved === "auto" || devs?.[saved] ? saved : "auto";
+  if (!force && state.deviceListSignature === sig) {
+    const input = $(`input[name="device"][value="${cssEscapeValue(selected)}"]`, el.deviceSelector);
+    if (input && !input.checked) {
+      input.checked = true;
+      $$(".device-opt", el.deviceSelector).forEach(l => l.classList.toggle("selected", l.dataset.device === selected));
+    }
+    return;
+  }
+  state.deviceListSignature = sig;
   el.deviceSelector.innerHTML = "";
-  const autoChecked = saved==="auto" || !saved;
+  const autoChecked = selected==="auto" || !selected;
   const auto = document.createElement("label");
   auto.className = "device-opt"+(autoChecked?" selected":"");
   auto.dataset.device = "auto";
@@ -885,17 +1005,17 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs) {
       : isMps  ? `Apple ${info.chip||"Silicon"} · Metal + Neural Engine · ${classLabel}`
       : isXpu  ? `XPU backend · ${classLabel}`
       : `${info.hardware_name||"System processor"} · ${classLabel||"CPU"}`;
-    const checked = saved===key;
+    const checked = selected===key;
     const lbl = document.createElement("label");
     lbl.className = "device-opt"+(checked?" selected":"");
     lbl.dataset.device = key;
     lbl.innerHTML = `
-      <input type="radio" name="device" value="${key}" ${checked?"checked":""} />
+      <input type="radio" name="device" value="${esc(key)}" ${checked?"checked":""} />
       <div class="device-opt-inner">
-        <span class="device-opt-icon">${icon}</span>
+        <span class="device-opt-icon">${esc(icon)}</span>
         <div>
           <span class="device-opt-name">${esc(info.name||key)}</span>
-          <span class="device-opt-sub">${sub}</span>
+          <span class="device-opt-sub">${esc(sub)}</span>
         </div>
       </div>`;
     el.deviceSelector.appendChild(lbl);
@@ -903,6 +1023,7 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs) {
 
   $$(".device-opt input", el.deviceSelector).forEach(inp => {
     inp.addEventListener("change", () => {
+      state.selectedDevice = inp.value;
       $$(".device-opt", el.deviceSelector).forEach(l => l.classList.remove("selected"));
       inp.closest(".device-opt").classList.add("selected");
       savePrefs();
@@ -1197,21 +1318,21 @@ function appendGalleryItem(r) {
   item.setAttribute("role","listitem"); item.setAttribute("tabindex","0");
   item.innerHTML = `
     <div class="gallery-img-wrap">
-      <img src="data:image/png;base64,${r.depth_map}" alt="Depth map — ${esc(r.filename)}" loading="lazy"/>
+      <img src="${safeDataImagePng(r.depth_map)}" alt="Depth map — ${esc(r.filename)}" loading="lazy"/>
       <div class="gallery-overlay">◍</div>
     </div>
     <div class="gallery-meta">
       <div class="gallery-filename" title="${esc(r.filename)}">${esc(r.filename)}</div>
       <div class="gallery-tags">
-        <span class="gallery-tag">${r.model?.replace("MiDaS_","").replace("DPT_","DPT ")}</span>
-        <span class="gallery-tag">${r.colormap}</span>
-        <span class="gallery-tag">${r.device_used||""}</span>
+        <span class="gallery-tag">${esc(r.model?.replace("MiDaS_","").replace("DPT_","DPT "))}</span>
+        <span class="gallery-tag">${esc(r.colormap)}</span>
+        <span class="gallery-tag">${esc(r.device_used||"")}</span>
         ${r.cached?'<span class="gallery-tag">cached</span>':""}
       </div>
       <div class="gallery-stats-row">
-        <span>Latency <strong>${r.latency_ms}ms</strong></span>
+        <span>Latency <strong>${esc(Number.isFinite(Number(r.latency_ms)) ? `${Number(r.latency_ms)}ms` : "—")}</strong></span>
         <span>Proxy <strong>${Number.isFinite(Number(m.ssim)) ? Number(m.ssim).toFixed(3) : "—"}</strong></span>
-        <span>${r.resolution?.width}×${r.resolution?.height}</span>
+        <span>${esc(r.resolution?.width ?? "?")}×${esc(r.resolution?.height ?? "?")}</span>
       </div>
     </div>`;
   item.addEventListener("click",()=>openLightbox(r));
@@ -1305,7 +1426,7 @@ function renderMetricsAccordion(resultOrMetrics) {
     const hdr=document.createElement("div");
     hdr.className="metric-group-header"; hdr.setAttribute("role","button");
     hdr.setAttribute("tabindex","0"); hdr.setAttribute("aria-expanded","false");
-    hdr.innerHTML=`<span><span class="mg-icon">${group.icon}</span>${group.label}</span><span class="mg-toggle">▾</span>`;
+    hdr.innerHTML=`<span><span class="mg-icon">${esc(group.icon)}</span>${esc(group.label)}</span><span class="mg-toggle">▾</span>`;
     hdr.addEventListener("click",()=>toggleAccordion(div));
     hdr.addEventListener("keydown",e=>{ if (e.key==="Enter"||e.key===" "){e.preventDefault();toggleAccordion(div);} });
     const body=document.createElement("div");
@@ -1330,10 +1451,10 @@ function renderMetricsAccordion(resultOrMetrics) {
       const row=document.createElement("div"); row.className="metric-row";
       row.innerHTML=`
         <div class="metric-row-left">
-          <span class="metric-row-name">${m.label}${badge}</span>
-          <span class="metric-row-desc">${m.desc}</span>
+          <span class="metric-row-name">${esc(m.label)}${badge}</span>
+          <span class="metric-row-desc">${esc(m.desc)}</span>
         </div>
-        <span class="metric-row-val ${cls}">${valText}</span>`;
+        <span class="metric-row-val ${esc(cls)}">${esc(valText)}</span>`;
       content.appendChild(row);
     });
     body.appendChild(content); div.appendChild(hdr); div.appendChild(body);
@@ -1355,7 +1476,7 @@ function updateBlendPreview() {
   if (el.lbRangeValue) el.lbRangeValue.textContent=`${Math.round(v*100)}%`;
 }
 
-let lightboxCloseTimer=null, bodyScrollY=0;
+let lightboxCloseTimer=null, lightboxTransitionCleanup=null, bodyScrollY=0;
 function lockBodyScroll() {
   bodyScrollY=window.scrollY||window.pageYOffset||0;
   document.body.classList.add("modal-open");
@@ -1368,9 +1489,10 @@ function unlockBodyScroll() {
 }
 
 function openLightbox(r) {
+  if (lightboxTransitionCleanup) { lightboxTransitionCleanup(); lightboxTransitionCleanup=null; }
   state.lb.current=r;
   el.lbOrigImg.src=r.originalSrc||"";
-  el.lbDepthImg.src=`data:image/png;base64,${r.depth_map}`;
+  el.lbDepthImg.src=safeDataImagePng(r.depth_map);
   el.lbSlider.value=50; updateBlendPreview();
   el.lbTags.innerHTML=[
     r.model?.replace("MiDaS_","").replace("DPT_","DPT "),
@@ -1387,22 +1509,28 @@ function openLightbox(r) {
 }
 
 function closeLightbox() {
-  if (el.lightboxBackdrop.hidden||el.lightboxBackdrop.classList.contains("is-closing")) return;
+  if (el.lightboxBackdrop.hidden) return;
+  if (el.lightboxBackdrop.classList.contains("is-closing")) return;
+  if (lightboxTransitionCleanup) { lightboxTransitionCleanup(); lightboxTransitionCleanup=null; }
   el.lightboxBackdrop.classList.remove("is-open");
   el.lightboxBackdrop.classList.add("is-closing");
+  let finalized = false;
   const finalize=()=>{
+    if (finalized) return;
+    finalized = true;
+    if (lightboxCloseTimer) { clearTimeout(lightboxCloseTimer); lightboxCloseTimer=null; }
+    if (lightboxTransitionCleanup) { lightboxTransitionCleanup(); lightboxTransitionCleanup=null; }
     el.lightboxBackdrop.hidden=true;
     el.lightboxBackdrop.classList.remove("is-mounted","is-closing");
     unlockBodyScroll(); state.lb.current=null;
   };
   const onDone=(ev)=>{
     if (ev.target!==el.lightboxBackdrop) return;
-    el.lightboxBackdrop.removeEventListener("transitionend",onDone); finalize();
+    finalize();
   };
-  el.lightboxBackdrop.addEventListener("transitionend",onDone);
-  lightboxCloseTimer=setTimeout(()=>{
-    el.lightboxBackdrop.removeEventListener("transitionend",onDone); finalize();
-  },420);
+  lightboxTransitionCleanup = () => el.lightboxBackdrop.removeEventListener("transitionend",onDone);
+  el.lightboxBackdrop.addEventListener("transitionend",onDone, { once: true });
+  lightboxCloseTimer=setTimeout(finalize,420);
 }
 
 el.lightboxClose.addEventListener("click",closeLightbox);
@@ -1436,6 +1564,7 @@ async function runComparison() {
   const models=["midas_small","dpt_hybrid","dpt_large"];
   state.compareAbort=new AbortController();
   el.compareRunBtn.disabled=true; el.compareCancelBtn.hidden=false;
+  state.compareView.results=[];
   el.compareProgressBlock.hidden=false; el.compareResults.innerHTML="";
   el.compareChartCard.hidden=true; el.compareMetricGrid.innerHTML="";
   if (!engineReady()) {
@@ -1495,12 +1624,13 @@ async function runComparison() {
 function renderCompareCard(r) {
   $(".compare-placeholder")?.remove();
   const card=document.createElement("div"); card.className="compare-card";
-  const lbl=r.model_display_name || r.model?.replace("midas_","MiDaS ").replace("dpt_","DPT ").replace("MiDaS_","").replace("DPT_","DPT ");
+  const lbl=esc(r.model_display_name || r.model?.replace("midas_","MiDaS ").replace("dpt_","DPT ").replace("MiDaS_","").replace("DPT_","DPT ") || "Model");
+  const latency = Number.isFinite(Number(r.latency_ms)) ? `${Number(r.latency_ms)} ms` : "—";
   const warning = r.fallback_used ? `<div class="compare-warning">ONNX unavailable · ${esc(r.engine_used || "PyTorch")} fallback · ${esc(r.device_used || "")}</div>` : `<div class="compare-warning">${esc(r.engine_used || "")} · ${esc(r.device_used || "")}</div>`;
   card.innerHTML=`
-    <div class="compare-card-header">${lbl} <span class="latency-badge">${r.latency_ms} ms</span></div>
+    <div class="compare-card-header">${lbl} <span class="latency-badge">${esc(latency)}</span></div>
     ${warning}
-    <img src="data:image/png;base64,${r.depth_map}" alt="Depth map — ${lbl}" loading="lazy"/>`;
+    <img src="${safeDataImagePng(r.depth_map)}" alt="Depth map — ${lbl}" loading="lazy"/>`;
   el.compareResults.appendChild(card);
 }
 
@@ -1523,16 +1653,26 @@ function renderBenchmarkChart(data) {
   const c = chartColors();
   const ctx = $("#benchmarkChart")?.getContext("2d");
   if (!ctx) return;
-  if (benchmarkChart) benchmarkChart.destroy();
+  const labels = results.map(r => r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch");
+  const dataValues = values.map(v => Number.isFinite(v) ? v : null);
+  if (benchmarkChart) {
+    benchmarkChart.data.labels = labels;
+    benchmarkChart.data.datasets[0].data = dataValues;
+    benchmarkChart.data.datasets[0].backgroundColor = dataValues.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
+    benchmarkChart.data.datasets[0].borderColor = dataValues.map(v => v === null ? "#5e6f81" : c.barBrd);
+    applyChartPalette(benchmarkChart, c);
+    benchmarkChart.update("none");
+    return;
+  }
   benchmarkChart = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: results.map(r => r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch"),
+      labels,
       datasets: [{
         label: "Average latency (ms)",
-        data: values.map(v => Number.isFinite(v) ? v : null),
-        backgroundColor: values.map(v => Number.isFinite(v) ? c.bar : "rgba(127,140,153,.45)"),
-        borderColor: values.map(v => Number.isFinite(v) ? c.barBrd : "#5e6f81"),
+        data: dataValues,
+        backgroundColor: dataValues.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar),
+        borderColor: dataValues.map(v => v === null ? "#5e6f81" : c.barBrd),
         borderWidth: 1.5,
         borderRadius: 4,
       }],
@@ -1642,16 +1782,16 @@ function renderExperiment() {
   el.experimentExportJsonBtn.disabled = !rows.length;
   el.experimentExportCsvBtn.disabled = !rows.length;
   el.experimentTableBody.innerHTML = rows.length ? rows.map(r => `
-    <tr><td>${esc(r.filename)}</td><td>${esc(r.model)}</td><td>${esc(r.engine)} · ${esc(r.device)}</td><td>${r.latency_ms} ms</td><td>${r.abs_rel ?? "Requires GT"}</td><td>${r.rmse ?? "Requires GT"}</td><td>${r.delta_1 ?? "Requires GT"}</td><td>${r.gt ? "GT" : "Image-only"}${r.warnings ? ` · ${esc(r.warnings)}` : ""}</td></tr>
+    <tr><td>${esc(r.filename)}</td><td>${esc(r.model)}</td><td>${esc(r.engine)} · ${esc(r.device)}</td><td>${esc(r.latency_ms)} ms</td><td>${esc(r.abs_rel ?? "Requires GT")}</td><td>${esc(r.rmse ?? "Requires GT")}</td><td>${esc(r.delta_1 ?? "Requires GT")}</td><td>${r.gt ? "GT" : "Image-only"}${r.warnings ? ` · ${esc(r.warnings)}` : ""}</td></tr>
   `).join("") : '<tr><td colspan="8">No experiment results yet.</td></tr>';
   el.experimentPreviews.innerHTML = state.experiment.results.map(r => `
     <article class="experiment-card">
-      <div class="experiment-card-head"><span>${esc(r.filename)}</span><span>${r.latency_ms} ms</span></div>
+      <div class="experiment-card-head"><span>${esc(r.filename)}</span><span>${esc(r.latency_ms)} ms</span></div>
       <div class="experiment-preview-grid">
-        <div class="experiment-preview-tile"><img src="${r.originalSrc || ''}" alt="RGB input"><span>RGB</span></div>
-        <div class="experiment-preview-tile"><img src="data:image/png;base64,${r.depth_map || ''}" alt="Predicted depth"><span>Predicted</span></div>
-        ${r.gt_depth_map ? `<div class="experiment-preview-tile"><img src="data:image/png;base64,${r.gt_depth_map}" alt="GT depth"><span>GT</span></div>` : `<div class="experiment-preview-tile"><span>GT unavailable</span></div>`}
-        ${r.error_heatmap ? `<div class="experiment-preview-tile"><img src="data:image/png;base64,${r.error_heatmap}" alt="Error heatmap"><span>Error</span></div>` : `<div class="experiment-preview-tile"><span>Error map unavailable</span></div>`}
+        <div class="experiment-preview-tile"><img src="${String(r.originalSrc || '').startsWith('data:image/') ? esc(r.originalSrc) : ''}" alt="RGB input"><span>RGB</span></div>
+        <div class="experiment-preview-tile"><img src="${safeDataImagePng(r.depth_map)}" alt="Predicted depth"><span>Predicted</span></div>
+        ${r.gt_depth_map ? `<div class="experiment-preview-tile"><img src="${safeDataImagePng(r.gt_depth_map)}" alt="GT depth"><span>GT</span></div>` : `<div class="experiment-preview-tile"><span>GT unavailable</span></div>`}
+        ${r.error_heatmap ? `<div class="experiment-preview-tile"><img src="${safeDataImagePng(r.error_heatmap)}" alt="Error heatmap"><span>Error</span></div>` : `<div class="experiment-preview-tile"><span>Error map unavailable</span></div>`}
       </div>
     </article>
   `).join("");
@@ -1682,13 +1822,28 @@ async function runExperiment() {
     el.experimentRunBtn.disabled = false;
   }
 }
+const activeBlobUrls = new Set();
+function revokeBlobUrl(url) {
+  if (!activeBlobUrls.has(url)) return;
+  activeBlobUrls.delete(url);
+  URL.revokeObjectURL(url);
+}
 function exportBlob(name, type, content) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
+  activeBlobUrls.add(url);
+  while (activeBlobUrls.size > 20) revokeBlobUrl(activeBlobUrls.values().next().value);
   const a = Object.assign(document.createElement("a"), { href:url, download:name });
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  document.body.appendChild(a);
+  requestAnimationFrame(() => {
+    a.click();
+    a.remove();
+    setTimeout(() => revokeBlobUrl(url), 60_000);
+  });
 }
+window.addEventListener("pagehide", () => {
+  [...activeBlobUrls].forEach(revokeBlobUrl);
+});
 function exportExperimentJson() {
   const payload = { run_name: state.experiment.name, started_at: state.experiment.startedAt, exported_at: new Date().toISOString(), results: state.experiment.results };
   exportBlob(`${state.experiment.name.replace(/[^a-z0-9_-]+/gi,"_")}.json`, "application/json", JSON.stringify(payload,null,2));
@@ -1729,34 +1884,85 @@ function toast(msg, type="info", dur=3500) {
 // ══════════════════════════════════════════════════════════════
 function dlB64(name,b64) {
   const a=Object.assign(document.createElement("a"),{
-    href:`data:image/png;base64,${b64}`,
-    download:name.match(/\.[^.]+$/)?name:name+".png",
+    href:safeDataImagePng(b64),
+    download:String(name).match(/\.[^.]+$/)?String(name):`${String(name)}.png`,
   });
+  if (!a.href) return;
   document.body.appendChild(a); a.click(); a.remove();
 }
 
 function esc(s) {
-  return String(s)
+  return String(s ?? "")
     .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
+function escText(s) {
+  return String(s ?? "");
+}
+
+function safeDataImagePng(b64) {
+  const value = String(b64 || "");
+  return /^[A-Za-z0-9+/=\r\n]+$/.test(value) ? `data:image/png;base64,${value.replace(/\s/g,"")}` : "";
+}
+
+
+function stopPollingLoops({ abort = true } = {}) {
+  Object.values(state.pollTimers).forEach(clearInterval);
+  state.pollTimers = {};
+  state.pollMode = null;
+  state.pollEpoch += 1;
+  if (abort) {
+    Object.values(state.pollControllers).forEach(controller => controller?.abort());
+    state.pollControllers = {};
+    state.pollInFlight = {};
+  }
+}
+
+function runPollingTask(name, fn) {
+  if (state.pollInFlight[name]) return;
+  const controller = new AbortController();
+  const epoch = state.pollEpoch;
+  state.pollControllers[name]?.abort();
+  state.pollControllers[name] = controller;
+  state.pollInFlight[name] = true;
+  Promise.resolve(fn(controller.signal))
+    .catch(err => {
+      if (err.name !== "AbortError" && epoch === state.pollEpoch) console.debug(`[DepthLens] ${name} poll failed: ${err.message}`);
+    })
+    .finally(() => {
+      if (state.pollControllers[name] === controller) {
+        delete state.pollControllers[name];
+        state.pollInFlight[name] = false;
+      }
+    });
+}
+
+function addPollingInterval(name, intervalMs, fn) {
+  state.pollTimers[name] = setInterval(() => runPollingTask(name, fn), intervalMs);
+}
 
 function startPollingLoops() {
-  state.pollTimers.forEach(clearInterval);
-  state.pollTimers = [];
-  state.pollTimers.push(setInterval(() => {
-    checkLive({ quiet: true });
-  }, document.hidden ? 30_000 : 10_000));
-  state.pollTimers.push(setInterval(() => {
-    if (!document.hidden) checkDiagnostics({ quiet: true });
-  }, document.hidden ? 120_000 : 60_000));
-  state.pollTimers.push(setInterval(() => {
-    if (!document.hidden) loadCacheMetrics();
-  }, document.hidden ? 120_000 : 45_000));
+  const mode = document.hidden ? "hidden" : "visible";
+  if (state.pollMode === mode && Object.keys(state.pollTimers).length) return;
+  stopPollingLoops();
+  state.pollMode = mode;
+  state.pollEpoch += 1;
+  if (document.hidden) {
+    addPollingInterval("live", 30_000, signal => checkLive({ quiet: true, signal }));
+    return;
+  }
+  addPollingInterval("live", 10_000, signal => checkLive({ quiet: true, signal }));
+  addPollingInterval("diagnostics", 60_000, signal => checkDiagnostics({ quiet: true, signal }));
+  addPollingInterval("cacheMetrics", 45_000, signal => loadCacheMetrics({ signal }));
 }
 
-document.addEventListener("visibilitychange", startPollingLoops);
+document.addEventListener("visibilitychange", () => {
+  startPollingLoops();
+  if (!document.hidden) {
+    runPollingTask("live", signal => checkLive({ quiet: true, signal }));
+  }
+});
 
 // ══════════════════════════════════════════════════════════════
 // INITIALIZATION
