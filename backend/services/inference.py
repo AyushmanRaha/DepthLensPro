@@ -20,6 +20,11 @@ from starlette.concurrency import run_in_threadpool
 from backend.config import settings
 from backend.depth_models import ONNXExecutionEngine, onnx_model_path
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
+from backend.services.ground_truth import (
+    GroundTruthError,
+    compute_ground_truth_metrics,
+    decode_ground_truth,
+)
 
 log = logging.getLogger("depthlens")
 
@@ -262,6 +267,89 @@ def _ssim(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean(num / (den + 1e-10)))
 
 
+GT_METRIC_KEYS = {
+    "abs_rel",
+    "sq_rel",
+    "gt_mae",
+    "gt_rmse",
+    "gt_log_rmse",
+    "delta_1",
+    "delta_2",
+    "delta_3",
+    "gt_ssim",
+    "gt_psnr",
+    "lpips",
+    "ordinal_error",
+    "surface_normal_error",
+}
+PROXY_METRIC_KEYS = {
+    "mae",
+    "rmse",
+    "log_rmse",
+    "silog",
+    "psnr",
+    "ssim",
+    "gradient_error",
+}
+FULL_ONLY_KEYS = {
+    "median",
+    "mae",
+    "rmse",
+    "log_rmse",
+    "silog",
+    "psnr",
+    "dynamic_range",
+    "coverage",
+    "ssim",
+    "gradient_mean",
+    "gradient_std",
+    "gradient_error",
+    "edge_density",
+}
+
+
+def _with_metric_groups(
+    flat: dict[str, Any],
+    mode: str,
+    *,
+    gt_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    prediction_keys = {
+        "min",
+        "max",
+        "mean",
+        "std",
+        "median",
+        "dynamic_range",
+        "entropy",
+        "coverage",
+        "histogram",
+    }
+    proxy_keys = PROXY_METRIC_KEYS | {"gradient_mean", "gradient_std", "edge_density"}
+    grouped: dict[str, Any] = {
+        "prediction_stats": {k: flat[k] for k in prediction_keys if k in flat},
+        "proxy_metrics": {k: flat[k] for k in proxy_keys if k in flat},
+        "gt_metrics": {},
+        "unavailable": {},
+        "warnings": [],
+    }
+    if mode == "fast":
+        for key in sorted(FULL_ONLY_KEYS):
+            grouped["unavailable"][key] = "not_requested_fast_mode"
+    for key in sorted(GT_METRIC_KEYS):
+        grouped["unavailable"][key] = "needs_gt_depth_upload"
+    if gt_result:
+        flat.update(gt_result.get("metrics", {}))
+        grouped["gt_metrics"].update(gt_result.get("metrics", {}))
+        grouped["warnings"].extend(gt_result.get("warnings", []))
+        for key, reason in gt_result.get("unavailable", {}).items():
+            grouped["unavailable"][key] = reason
+        for key in grouped["gt_metrics"]:
+            grouped["unavailable"].pop(key, None)
+    flat.update(grouped)
+    return flat
+
+
 def _compute_fast_metrics(depth: np.ndarray) -> dict[str, Any]:
     """Compute lightweight metrics for interactive workspace inference."""
     depth32 = depth.astype(np.float32, copy=False)
@@ -282,12 +370,20 @@ def _compute_fast_metrics(depth: np.ndarray) -> dict[str, Any]:
     }
 
 
-def _metrics_for_mode(depth: np.ndarray, img_bgr: np.ndarray, mode: str) -> dict[str, Any]:
+def _metrics_for_mode(
+    depth: np.ndarray,
+    img_bgr: np.ndarray,
+    mode: str,
+    *,
+    gt_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if mode == "none":
-        return {}
-    if mode == "fast":
-        return _compute_fast_metrics(depth)
-    return _compute_metrics(depth, img_bgr)
+        base: dict[str, Any] = {}
+    elif mode == "fast":
+        base = _compute_fast_metrics(depth)
+    else:
+        base = _compute_metrics(depth, img_bgr)
+    return _with_metric_groups(base, mode, gt_result=gt_result)
 
 
 def _get_cached_depth(cache_key: str) -> tuple[np.ndarray, dict[str, int]] | None:
@@ -399,6 +495,11 @@ def process_image(
     metrics: str | None = None,
     outputs: str | None = None,
     max_dim: int | None = None,
+    gt_raw: bytes | None = None,
+    gt_filename: str | None = None,
+    gt_required: bool = False,
+    gt_scale: float | None = None,
+    gt_invalid_value: float | None = None,
 ) -> dict[str, Any]:
     """Decode, infer, colorize, and package one image response."""
     metrics_mode = normalize_metrics_mode(metrics)
@@ -418,8 +519,34 @@ def process_image(
         lat = 0.0
         depth_cached = True
 
+    gt_result: dict[str, Any] | None = None
+    gt_metadata: dict[str, Any] = {"provided": False}
+    gt_visualizations: dict[str, str] = {}
+    if gt_raw:
+        try:
+            gt_payload = decode_ground_truth(
+                gt_raw,
+                gt_filename,
+                invalid_value=gt_invalid_value,
+                scale=gt_scale,
+            )
+            gt_result = compute_ground_truth_metrics(
+                depth,
+                gt_payload.depth,
+                metadata=gt_payload.metadata,
+                invalid_value=gt_invalid_value,
+            )
+            gt_metadata = gt_result["metadata"]
+            gt_visualizations = gt_result.get("visualizations", {})
+        except GroundTruthError:
+            raise
+        except Exception as exc:
+            raise GroundTruthError(f"Ground-truth metric computation failed: {exc}") from exc
+    elif gt_required:
+        raise GroundTruthError("Ground-truth mode requires a GT depth file")
+
     payload: dict[str, Any] = {
-        "metrics": _metrics_for_mode(depth, img, metrics_mode),
+        "metrics": _metrics_for_mode(depth, img, metrics_mode, gt_result=gt_result),
         "latency_ms": lat,
         "model": model,
         "colormap": colormap,
@@ -430,7 +557,9 @@ def process_image(
         "depth_cached": depth_cached,
         "metrics_mode": metrics_mode,
         "outputs": list(output_set),
+        "gt_metadata": gt_metadata,
     }
+    payload.update(gt_visualizations)
     if "color" in output_set:
         payload["depth_map"] = _b64(_colorize(depth, colormap))
     if "gray" in output_set:
@@ -448,10 +577,28 @@ async def process_image_async(
     metrics: str | None = None,
     outputs: str | None = None,
     max_dim: int | None = None,
+    gt_raw: bytes | None = None,
+    gt_filename: str | None = None,
+    gt_required: bool = False,
+    gt_scale: float | None = None,
+    gt_invalid_value: float | None = None,
 ) -> dict[str, Any]:
     """Run the blocking decode/inference/encode pipeline off the ASGI event loop."""
 
     async with _INFERENCE_SEMAPHORE:
         return await run_in_threadpool(
-            process_image, raw, model, colormap, device, filename, metrics, outputs, max_dim
+            process_image,
+            raw,
+            model,
+            colormap,
+            device,
+            filename,
+            metrics,
+            outputs,
+            max_dim,
+            gt_raw,
+            gt_filename,
+            gt_required,
+            gt_scale,
+            gt_invalid_value,
         )

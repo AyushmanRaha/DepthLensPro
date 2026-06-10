@@ -123,6 +123,7 @@
             <button class="nav-btn active" data-panel="main">WORKSPACE</button>
             <button class="nav-btn" data-panel="compare">COMPARE</button>
             <button class="nav-btn" data-panel="performance">PERFORMANCE</button>
+            <button class="nav-btn" data-panel="experiments">EXPERIMENTS</button>
             <button class="nav-btn" data-panel="about">ABOUT</button>
           </nav>
 
@@ -417,6 +418,36 @@
 
               <ul class="file-queue" id="fileQueue" aria-label="Queued files" aria-live="polite"></ul>
 
+              <div class="gt-controls" id="gtControls">
+                <label class="gt-toggle" for="gtToggle">
+                  <input type="checkbox" id="gtToggle" />
+                  <span class="gt-toggle-track" aria-hidden="true"></span>
+                  <span class="gt-toggle-copy">
+                    <strong>Upload ground truth data</strong>
+                    <span>Optional; enables benchmark metrics for one image + one GT file.</span>
+                  </span>
+                </label>
+                <div class="gt-upload" id="gtUpload" hidden>
+                  <div class="gt-upload-row">
+                    <label class="btn btn-outline btn-sm" for="gtFileInput">Select GT Depth</label>
+                    <span class="gt-file-name" id="gtFileName">No GT file selected</span>
+                    <button class="btn btn-ghost btn-sm" id="clearGtBtn" type="button">Clear GT</button>
+                  </div>
+                  <p class="gt-help">
+                    Ground Truth depth: PNG/TIFF/NPY, single-channel depth preferred. Max 20 MB.
+                    GT mode processes one image + one GT file at a time. GT is resized to prediction resolution and median-scale aligned for benchmark metrics.
+                  </p>
+                  <input
+                    type="file"
+                    id="gtFileInput"
+                    accept=".png,.tif,.tiff,.npy,image/png,image/tiff,application/octet-stream"
+                    style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;"
+                    tabindex="-1"
+                    aria-hidden="true"
+                  />
+                </div>
+              </div>
+
               <div class="action-row">
                 <button class="btn btn-ghost" id="clearBtn" type="button" disabled>Clear All</button>
                 <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>✕ Cancel</button>
@@ -539,6 +570,39 @@
         </div>
       </main>
 
+
+      <!-- ── Experiment validation panel ──────────────────────────────── -->
+      <main class="panel" id="panel-experiments" hidden>
+        <div class="about-layout">
+          <div class="card about-card">
+            <h2 class="card-title"><span class="card-icon">▣</span> Experiment Workspace</h2>
+            <p class="compare-desc">
+              Name a local validation run, execute the current image queue, inspect outputs, and export reproducible JSON/CSV evidence. GT mode uses the optional Workspace ground-truth pair.
+            </p>
+            <div class="experiment-toolbar">
+              <label class="cmap-label" for="experimentName">Run Name</label>
+              <input class="select-input experiment-name" id="experimentName" value="DepthLens validation run" />
+              <button class="btn btn-primary btn-sm" id="experimentRunBtn" type="button">Run Experiment</button>
+              <button class="btn btn-ghost btn-sm" id="experimentExportJsonBtn" type="button" disabled>Export JSON</button>
+              <button class="btn btn-ghost btn-sm" id="experimentExportCsvBtn" type="button" disabled>Export CSV</button>
+            </div>
+            <p class="gt-help" id="experimentStatus">Use the Workspace queue and optional GT toggle, then run an experiment.</p>
+            <div class="metrics-grid benchmark-grid" id="experimentSummary">
+              <div class="metric-cell"><span class="metric-value" id="experimentCount">0</span><span class="metric-label">Results</span><span class="metric-desc">Images captured in this run</span></div>
+              <div class="metric-cell"><span class="metric-value" id="experimentAvgLatency">—</span><span class="metric-label">Avg Latency</span><span class="metric-desc">Server-side inference timing</span></div>
+              <div class="metric-cell"><span class="metric-value" id="experimentBestAbsRel">—</span><span class="metric-label">Best Abs Rel</span><span class="metric-desc">Available only with valid GT</span></div>
+              <div class="metric-cell"><span class="metric-value" id="experimentStatusMetric">Idle</span><span class="metric-label">Status</span><span class="metric-desc">Warnings and export readiness</span></div>
+            </div>
+            <div class="experiment-table-wrap">
+              <table class="about-table" id="experimentTable">
+                <thead><tr><th>Image</th><th>Model</th><th>Device</th><th>Latency</th><th>Abs Rel</th><th>RMSE</th><th>δ&lt;1.25</th><th>Status</th></tr></thead>
+                <tbody id="experimentTableBody"><tr><td colspan="8">No experiment results yet.</td></tr></tbody>
+              </table>
+            </div>
+            <div class="experiment-previews" id="experimentPreviews"></div>
+          </div>
+        </div>
+      </main>
 
       <!-- ── Performance analysis panel ───────────────────────────────── -->
       <main class="panel" id="panel-performance" hidden>

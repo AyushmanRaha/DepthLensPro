@@ -39,13 +39,15 @@ The application is optimized for local-first image processing, secure desktop pa
 ### Core Engine & AI
 
 - Monocular depth estimation using MiDaS-family models: `MiDaS_small`, `DPT_Hybrid`, and `DPT_Large`.
-- ONNX Runtime execution when exported static graphs are available, with one-time warnings and automatic PyTorch fallback when weights are missing.
+- ONNX Runtime execution when exported static graphs are available, with explicit diagnostics for missing weights, missing runtime imports, provider fallback, and CPU-only execution.
 - Single-image and batch inference, with batch requests capped at **10 images**.
-- Supported uploads: `PNG`, `JPG/JPEG`, `WEBP`, and `BMP`.
+- Supported source uploads: `PNG`, `JPG/JPEG`, `WEBP`, and `BMP`.
+- Optional Ground Truth mode for one source image plus one GT depth file (`PNG`, `TIFF`, or `NPY`, **20 MB** max) to compute benchmark metrics without changing the standard image-only workflow.
 - Selective output generation for colorized and/or grayscale depth maps so interactive workspace requests avoid unnecessary encoding.
 - Colormap options: `inferno`, `plasma`, `viridis`, `magma`, `jet`, `hot`, `bone`, and `turbo`.
 - Runtime model comparison across supported architectures with side-by-side outputs and metric charts.
-- Depth-quality and consistency metrics including SSIM, SILog, PSNR, entropy, dynamic range, histogram coverage, gradient statistics, and edge density.
+- Experiment Workspace for named local validation runs, side-by-side RGB/prediction/GT/error previews, and JSON/CSV exports.
+- Prediction statistics, proxy/self-consistency diagnostics, and true GT benchmark metrics are separated so proxy values are not presented as standard accuracy metrics.
 
 ### System Architecture & Observability
 
@@ -53,15 +55,15 @@ The application is optimized for local-first image processing, secure desktop pa
 - Redis-backed response cache plus normalized-depth reuse keyed by image, model, resolved device, and max dimension, with TTL control and in-memory fallback.
 - Structured runtime configuration through environment variables and optional `.env` values.
 - JSON structured logging for collector-friendly backend logs.
-- Lightweight liveness, inference readiness, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration signals exposed through API endpoints.
+- Lightweight liveness, inference readiness, ONNX status, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration signals exposed through API endpoints.
 - Docker and Docker Compose support for backend-plus-Redis execution.
 
 ### Desktop Client
 
 - Electron desktop shell with automatic FastAPI child-process lifecycle management.
 - Sandboxed renderer, `contextIsolation` enabled, `nodeIntegration` disabled, and navigation constrained to loopback origins.
-- Splash screen while Electron waits for lightweight `/live`, followed by renderer `/ready` checks that verify inference dependencies before enabling generation; full diagnostics can finish later.
-- Drag-and-drop upload workflow with progress, adaptive ETA, cancellation, result cards, lightbox metrics, and download actions.
+- Splash screen while Electron waits for lightweight `/live`, followed by progressive renderer startup: `/live` shows the backend is reachable, `/ready` gates inference controls, and `/health`, `/devices`, plus cache metrics load afterward with developer timing logs.
+- Drag-and-drop upload workflow with progress, adaptive ETA, cancellation, optional GT pairing, result cards, lightbox metrics, and download actions.
 - Persistent user preferences for model, colormap, theme, and compute device.
 - Responsive workspace panels for generation, model comparison, session analytics, and application details.
 - Animated landing experience with theme-aware vector background and liquid-metal logo transition.
@@ -130,7 +132,7 @@ FastAPI ASGI Backend
 | Image processing | OpenCV Headless, NumPy, Pillow | Input normalization, depth-map post-processing, PNG encoding without desktop GUI library requirements |
 | Cache | Redis with in-memory fallback | TTL-based reuse of repeated inference results |
 | Configuration | `pydantic-settings` with fallback shim | Environment and `.env` driven backend configuration |
-| Observability | JSON logging, `/live`, `/ready`, `/health`, `/devices`, `/benchmark`, `/cache/metrics` | Liveness, inference readiness, runtime state, resource telemetry, benchmark reporting |
+| Observability | JSON logging, `/live`, `/ready`, `/health`, `/devices`, `/onnx/status`, `/benchmark`, `/cache/metrics` | Liveness, inference readiness, ONNX provider/weight diagnostics, runtime state, resource telemetry, benchmark reporting |
 | Delivery | Docker, Docker Compose, GitHub Actions | Containerized backend, Redis stack, quality gates |
 
 ---
@@ -149,8 +151,10 @@ DepthLensPro exposes operational signals suitable for local diagnostics, release
 | Memory telemetry | `GET /health` | Memory status, pressure percentage, limit threshold, total bytes, available bytes, and used bytes. |
 | Disk telemetry | `GET /health` | Disk status, monitored path, usage percentage, limit threshold, total bytes, free bytes, and used bytes. |
 | Cache metrics | `GET /cache/metrics` and `GET /health` | Redis availability, backend type, hit/miss counts, fallback failures, keyspace size, and TTL. |
-| Runtime benchmarks | `GET /benchmark` and `GET /api/benchmark` | PyTorch versus ONNX Runtime latency, throughput, memory, and speedup comparison. |
+| Runtime benchmarks | `GET /benchmark` and `GET /api/benchmark` | PyTorch versus ONNX Runtime latency, throughput, memory, speedup comparison, and explicit ONNX states (`available`, `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `runtime_error`, `unavailable`). |
+| ONNX diagnostics | `GET /onnx/status`, `/ready`, and `/health` | Supported model IDs, expected weight paths, file sizes, ONNX Runtime import status, available providers, selected provider/fallback, and export commands. |
 | Session analytics | Desktop workspace | Processed image count, latency history, average/min/max latency, throughput, total inference time, cache hits, and error count. |
+| Experiment validation | Desktop Experiments panel | Named local runs, image/GT metadata, latency, metrics, warnings, side-by-side previews, error heatmaps when GT is valid, and JSON/CSV exports. |
 
 ---
 
@@ -523,11 +527,23 @@ Base URL: `http://127.0.0.1:8765`
   "depth_map": "<base64 PNG>",
   "grayscale": "<base64 PNG>",
   "metrics": {
-    "ssim": 0.812,
-    "silog": 7.43,
-    "psnr": 28.5,
     "entropy": 6.82,
-    "dynamic_range": 8.14
+    "dynamic_range": 8.14,
+    "prediction_stats": { "mean": 0.51, "std": 0.18, "entropy": 6.82 },
+    "proxy_metrics": { "ssim": 0.812, "silog": 7.43, "psnr": 28.5 },
+    "gt_metrics": { "abs_rel": 0.124, "gt_rmse": 0.42, "delta_1": 0.84 },
+    "unavailable": { "lpips": "not_implemented" },
+    "warnings": ["Resized GT to prediction resolution using nearest-neighbor alignment."]
+  },
+  "gt_metadata": {
+    "provided": true,
+    "format": "png",
+    "original_shape": [768, 1024],
+    "aligned_shape": [768, 1024],
+    "valid_pixel_count": 786000,
+    "invalid_pixel_count": 432,
+    "alignment_policy": "gt_resize_to_prediction:none",
+    "scale_alignment": "median_scale"
   },
   "latency_ms": 31.4,
   "model": "MiDaS_small",
@@ -549,16 +565,26 @@ Base URL: `http://127.0.0.1:8765`
 
 | Metric | Category | Description |
 |---|---|---|
-| `ssim` | No ground truth required | Structural similarity between grayscale input and predicted depth map. |
-| `silog` | No ground truth required | Scale-invariant log-depth variance after global scale normalization. |
-| `psnr` | No ground truth required | Peak signal-to-noise ratio of the depth map relative to its mean. |
-| `entropy` | No ground truth required | Shannon entropy of the predicted depth histogram. |
-| `dynamic_range` | No ground truth required | Log-ratio of maximum to minimum non-zero depth. |
-| `coverage` | No ground truth required | Fraction of histogram bins above the coverage threshold. |
-| `gradient_mean` / `gradient_std` | No ground truth required | Sobel-gradient strength and variation in the generated depth map. |
-| `edge_density` | No ground truth required | Fraction of pixels with gradient magnitude above adaptive threshold. |
-| `mae` / `rmse` / `log_rmse` | Self-consistency proxy | Error metrics relative to the predicted depth mean. |
-| `abs_rel`, `sq_rel`, `delta_1/2/3`, `lpips`, `ordinal_error`, `surface_normal_error` | Ground truth required | Reported as unavailable unless a ground-truth depth reference is supplied by a future workflow. |
+| `min`, `max`, `mean`, `std`, `median`, `entropy`, `dynamic_range`, `coverage` | Prediction statistics | Distribution summaries of the normalized predicted depth map. These do not require GT and are not benchmark accuracy metrics. |
+| `ssim` | Proxy/self-consistency | **RGB–Depth Structural Proxy** comparing grayscale input structure to predicted depth. This is not reference SSIM. |
+| `silog` | Proxy/self-consistency | **Log-Depth Dispersion Proxy** computed from prediction-only log-depth variation. True SILog requires GT. |
+| `psnr` | Proxy/self-consistency | **Depth Variance PSNR Proxy** relative to the predicted depth mean. True PSNR requires a reference/GT map. |
+| `mae` / `rmse` / `log_rmse` | Proxy/self-consistency | **Mean Absolute Deviation from Predicted Mean**, **RMS Deviation from Predicted Mean**, and **Log-Depth Deviation**. These are not standard GT MAE/RMSE/Log RMSE. |
+| `gradient_mean` / `gradient_std` / `gradient_error` / `edge_density` | Prediction geometry/proxy | Sobel-gradient statistics over the predicted depth map. `gradient_error` is displayed as **Depth Edge Proxy** because it is not a GT error. |
+| `abs_rel`, `sq_rel`, `gt_mae`, `gt_rmse`, `gt_log_rmse`, `delta_1/2/3` | Ground truth benchmark metrics | Computed only when a valid optional GT file is uploaded. MiDaS relative depth is median-scale aligned to valid GT pixels before metric calculation. |
+| `lpips`, `ordinal_error`, `surface_normal_error`, `gt_ssim`, `gt_psnr` | Ground truth required / not implemented | Reported with explicit unavailable reasons until implemented safely. |
+
+### Ground Truth Mode and Metric Alignment
+
+Ground Truth upload is optional. Standard image-only generation and multi-image queues remain unchanged when the Workspace toggle is off. When **Upload ground truth data** is enabled, DepthLensPro processes exactly one source image plus one GT file at a time and blocks generation until both are selected.
+
+Supported GT formats are `.png`, `.tif`/`.tiff`, and `.npy` with a **20 MB** limit. Single-channel depth is preferred. Multi-channel PNG/TIFF files are converted to grayscale with a warning; multi-channel NPY arrays are rejected unless shaped `H×W×1`. EXR, PFM, PDF reports, and 16-bit predicted-depth export are not implemented in this pass to avoid non-portable or heavy dependencies.
+
+For shape mismatches, the backend resizes GT to the prediction resolution with nearest-neighbor sampling. Because MiDaS predicts relative depth, GT metrics use median scale alignment between valid predicted pixels and valid GT pixels. Invalid, non-finite, zero, or negative GT pixels are masked. Responses include `gt_metadata`, metric warnings, optional `gt_depth_map`, and an `error_heatmap` PNG when GT is valid.
+
+### Experiment Workspace
+
+The Experiments panel provides a lightweight local validation workflow. Users name a run, execute the current Workspace queue, inspect a results table/leaderboard, view RGB/predicted/GT/error side-by-side previews where available, and export JSON or CSV reports. Exports are browser/Electron-safe local downloads and work across supported ARM desktop targets without cloud services or OS-specific paths. The panel uses the same theme tokens as the rest of DepthLensPro, so dark and light modes remain supported.
 
 ### Model Reference
 
@@ -647,8 +673,11 @@ The GitHub Actions pipeline runs the same core checks for formatting, linting, t
 | `acceleration_ok: false` | A GPU backend failed the runtime probe; CPU inference remains available. |
 | `/health` reports degraded status | Inspect memory pressure and disk usage telemetry for threshold violations. |
 | Redis cache unavailable | Verify Redis host, port, credentials, and container health; the backend uses in-memory fallback automatically. |
-| Missing ONNX weights | This is not fatal. Export the required graph or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files; otherwise the backend logs a one-time warning and uses PyTorch fallback. |
-| `/benchmark` reports ONNX unavailable | Export the required graph or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files; PyTorch benchmark/inference can still run. |
+| Missing ONNX weights | This is not fatal. Run `python backend/scripts/export_onnx.py --model MiDaS_small` (or another supported model) or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files. ONNX weights are generated artifacts and are not committed. |
+| `/benchmark` reports ONNX unavailable | Check `curl http://127.0.0.1:8765/onnx/status?device=auto`. The response distinguishes `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `runtime_error`, and CPU/provider fallback. PyTorch benchmark/inference can still run. |
+| ONNX uses CPU fallback | The installed ONNX Runtime package does not expose the preferred provider for the selected device. This is valid and platform-neutral; install a provider-enabled runtime locally if acceleration is required. |
+| GT upload rejected | Ensure the file is PNG, TIFF, or NPY, under 20 MB, numeric/single-channel where required, and contains finite positive valid pixels. Standard image-only inference remains unaffected. |
+| GT metrics look scale-adjusted | MiDaS predicts relative depth. DepthLensPro resizes GT to prediction resolution and applies median scale alignment before Abs Rel, Sq Rel, MAE, RMSE, Log RMSE, and δ metrics. |
 
 ### Backend Readiness and Stale Backend Recovery
 

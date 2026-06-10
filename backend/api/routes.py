@@ -61,6 +61,12 @@ def run_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
     return impl(model=model, device=device, iterations=iterations)
 
 
+def onnx_status_payload(device: str = "auto") -> dict[str, Any]:
+    from backend.services.onnx_diagnostics import onnx_status_payload as impl
+
+    return impl(device=device)
+
+
 def process_image(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return cast(dict[str, Any], _inference().process_image(*args, **kwargs))
 
@@ -131,12 +137,30 @@ async def process_image_async(
     metrics: str | None = None,
     outputs: str | None = None,
     max_dim: int | None = None,
+    gt_raw: bytes | None = None,
+    gt_filename: str | None = None,
+    gt_required: bool = False,
+    gt_scale: float | None = None,
+    gt_invalid_value: float | None = None,
 ) -> dict[str, Any]:
     """Offload blocking image inference while preserving route-level monkeypatching."""
 
     async with _ROUTE_INFERENCE_SEMAPHORE:
         return await run_in_threadpool(
-            process_image, raw, model, colormap, device, filename, metrics, outputs, max_dim
+            process_image,
+            raw,
+            model,
+            colormap,
+            device,
+            filename,
+            metrics,
+            outputs,
+            max_dim,
+            gt_raw,
+            gt_filename,
+            gt_required,
+            gt_scale,
+            gt_invalid_value,
         )
 
 
@@ -342,9 +366,16 @@ async def health() -> dict[str, Any]:
         cache_metrics = {"status": "degraded", "error": str(exc)}
         cache_error = str(exc)
     cache_ms = _elapsed_ms(cache_started)
+    try:
+        onnx = onnx_status_payload(best)
+        onnx_error = None
+    except Exception as exc:
+        log.warning("ONNX diagnostics degraded: %s", exc)
+        onnx = {"status": "degraded", "error": str(exc)}
+        onnx_error = str(exc)
 
     status = _telemetry_status(memory, disk)
-    if device_meta.get("error") or accel_meta.get("error") or cache_error:
+    if device_meta.get("error") or accel_meta.get("error") or cache_error or onnx_error:
         status = "degraded"
 
     return {
@@ -362,6 +393,7 @@ async def health() -> dict[str, Any]:
         "xpu_available": any(k.startswith("xpu:") for k in devs),
         "acceleration_ok": accel_ok,
         "acceleration_checks": checks,
+        "onnx": onnx,
         "warmup": {
             "enabled": settings.DEPTHLENS_PRELOAD_MODEL,
             "model": settings.DEPTHLENS_WARMUP_MODEL,
@@ -402,6 +434,13 @@ async def list_devices() -> dict[str, Any]:
     return {"devices": devs, "primary_device": primary, "cached": meta.get("cached", False)}
 
 
+@router.get("/onnx/status")
+async def onnx_status(device: str = "auto") -> dict[str, Any]:
+    """Expose static ONNX weight and runtime provider diagnostics."""
+
+    return await run_in_threadpool(onnx_status_payload, device=device)
+
+
 @router.get("/models")
 async def list_models() -> dict[str, list[dict[str, str]]]:
     return {"models": [{"id": k, **v} for k, v in SUPPORTED_MODELS.items()]}
@@ -439,6 +478,10 @@ async def estimate(
     metrics: str = Form(settings.DEPTHLENS_DEFAULT_METRICS),
     outputs: str = Form(settings.DEPTHLENS_DEFAULT_OUTPUTS),
     max_dim: int | None = Form(None),
+    gt_file: UploadFile | None = File(None),
+    gt_required: bool = Form(False),
+    gt_scale: float | None = Form(None),
+    gt_invalid_value: float | None = Form(None),
 ) -> JSONResponse:
     if model not in SUPPORTED_MODELS:
         raise HTTPException(422, f"Unknown model '{model}'")
@@ -464,16 +507,43 @@ async def estimate(
     if len(raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
         raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
 
+    gt_raw: bytes | None = None
+    gt_filename: str | None = None
+    if gt_file is not None:
+        gt_raw = await gt_file.read()
+        gt_filename = gt_file.filename
+        if len(gt_raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
+            raise HTTPException(413, f"Ground-truth file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+    elif gt_required:
+        raise HTTPException(422, "Ground-truth mode requires a GT depth file")
+
     resolved = str(_resolve(device))
-    ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
-    cached = _cache_service().get(ck)
+    # GT metrics depend on uploaded labels and must not reuse image-only cached payloads.
+    ck = (
+        None
+        if gt_raw is not None or gt_required
+        else _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
+    )
+    cached = _cache_service().get(ck) if ck is not None else None
     if cached is not None:
         log.info("Cache hit: %r", file.filename)
         return JSONResponse({**cached, "cached": True})
 
     try:
         result = await process_image_async(
-            raw, model, colormap, resolved, file.filename, metrics, outputs, max_dim
+            raw,
+            model,
+            colormap,
+            resolved,
+            file.filename,
+            metrics,
+            outputs,
+            max_dim,
+            gt_raw,
+            gt_filename,
+            gt_required,
+            gt_scale,
+            gt_invalid_value,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -481,7 +551,8 @@ async def estimate(
         log.exception("Inference failed")
         raise HTTPException(500, f"Inference error: {exc}") from exc
 
-    _cache_service().set(ck, result)
+    if ck is not None:
+        _cache_service().set(ck, result)
     log.info(
         "✅ %r | %s | %s | %s ms",
         file.filename,

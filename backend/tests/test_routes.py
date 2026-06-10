@@ -93,6 +93,7 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
         metrics: str | None = None,
         outputs: str | None = None,
         max_dim: int | None = None,
+        *args: Any,
     ) -> dict[str, Any]:
         calls["count"] += 1
         return {
@@ -257,6 +258,7 @@ def test_estimate_metrics_and_outputs_modes(monkeypatch: Any) -> None:
         metrics: str | None = None,
         outputs: str | None = None,
         max_dim: int | None = None,
+        *args: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "metrics": {} if metrics == "none" else {"mode": metrics},
@@ -294,3 +296,38 @@ def test_estimate_metrics_and_outputs_modes(monkeypatch: Any) -> None:
         if absent:
             assert absent not in payload
         assert payload["metrics"] == expected_metrics
+
+
+def test_estimate_gt_required_without_file_returns_clear_error(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+    response = client.post(
+        "/estimate",
+        files={"file": ("sample.png", io.BytesIO(_png_bytes()), "image/png")},
+        data={
+            "model": "MiDaS_small",
+            "colormap": "inferno",
+            "device": "auto",
+            "gt_required": "true",
+        },
+    )
+    assert response.status_code == 422
+    assert "GT depth file" in response.json()["detail"]
+
+
+def test_onnx_status_route_reports_paths_and_providers() -> None:
+    response = client.get("/onnx/status?device=cpu")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "MiDaS_small" in payload["supported_model_ids"]
+    small = payload["models"]["MiDaS_small"]
+    assert small["expected_path"].endswith("MiDaS_small.onnx")
+    assert "runtime" in small
+    assert "available_providers" in payload["runtime"]
