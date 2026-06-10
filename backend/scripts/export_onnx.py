@@ -11,6 +11,7 @@ import argparse
 import inspect
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.depth_models import MIDAS_REPO, onnx_model_path  # noqa: E402
-from backend.model_registry import MODEL_REGISTRY, get_model_spec, normalize_model_id  # noqa: E402
+from backend.model_registry import (  # noqa: E402
+    MODEL_REGISTRY,
+    get_model_spec,
+    normalize_model_id,
+    onnx_output_path,
+)
 from backend.services.onnx_diagnostics import create_onnx_session  # noqa: E402
 
 
@@ -53,7 +59,7 @@ def export_model_to_onnx(
 
     canonical = normalize_model_id(model_id)
     spec = get_model_spec(canonical)
-    path = onnx_model_path(canonical, output_dir)
+    path = onnx_output_path(canonical, output_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     shape = input_shape or (1, 3, spec.input_size[0], spec.input_size[1])
 
@@ -79,8 +85,12 @@ def export_model_to_onnx(
 
     strategies = ["legacy_torch_onnx_export", "dynamo_export"]
     for strategy in strategies:
-        path.unlink(missing_ok=True)
+        tmp_path: Path | None = None
         try:
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp.onnx", delete=False
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
             kwargs: dict[str, Any] = {
                 "export_params": True,
                 "opset_version": opset,
@@ -94,9 +104,11 @@ def export_model_to_onnx(
             elif strategy == "dynamo_export":
                 continue
             with torch.no_grad():
-                torch.onnx.export(model, (dummy,), os.fspath(path), **kwargs)
-            ok, error = _validate_onnx(path, canonical)
+                torch.onnx.export(model, (dummy,), os.fspath(tmp_path), **kwargs)
+            ok, error = _validate_onnx(tmp_path, canonical)
             if ok:
+                os.replace(tmp_path, path)
+                tmp_path = None
                 return {
                     "ok": True,
                     "model_id": canonical,
@@ -111,10 +123,9 @@ def export_model_to_onnx(
         except Exception as exc:
             errors.append(f"{strategy}: {type(exc).__name__}: {exc}")
         finally:
-            if path.exists() and path.stat().st_size <= 0:
-                path.unlink(missing_ok=True)
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
 
-    path.unlink(missing_ok=True)
     return {
         "ok": False,
         "model_id": canonical,

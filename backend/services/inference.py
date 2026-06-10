@@ -18,7 +18,7 @@ import torch
 from starlette.concurrency import run_in_threadpool
 
 from backend.config import settings
-from backend.depth_models import ONNXExecutionEngine, onnx_model_path
+from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services.ground_truth import (
@@ -208,11 +208,13 @@ def _infer_with_metadata(
                 }
             except Exception as exc:
                 warnings.append(f"ONNX unavailable ({type(exc).__name__}); used PyTorch fallback")
-                onnx_detail = {**resolved, "runtime_error": f"{type(exc).__name__}: {exc}"}
+                fallback_reason = f"{type(exc).__name__}: {exc}"
+                onnx_detail = {**resolved, "runtime_error": fallback_reason}
                 log.warning(
                     "ONNX inference unavailable for %s; falling back to PyTorch: %s", model_id, exc
                 )
         else:
+            fallback_reason = str(resolved.get("error") or "missing_file")
             warnings.append("ONNX model missing; used PyTorch fallback")
             if model_id not in _ONNX_MISSING_WARNED:
                 log.warning(
@@ -230,6 +232,9 @@ def _infer_with_metadata(
         "device_requested": device_str,
         "device_used": device_str,
         "fallback_used": requested in {"auto", "onnx", "onnxruntime"} and bool(warnings),
+        "fallback_reason": warnings[-1] if warnings else None,
+        "onnx_path": (onnx_detail or {}).get("onnx_path")
+        or (onnx_detail or {}).get("expected_path"),
         "warnings": warnings,
         "onnx": onnx_detail,
     }

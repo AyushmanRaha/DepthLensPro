@@ -33,10 +33,18 @@ def test_normalize_unknown_model_raises_structured_error() -> None:
     assert "midas_small" in exc.value.valid_models
 
 
-def test_resolve_missing_onnx_never_returns_empty_path(tmp_path: Path) -> None:
+def test_resolve_missing_onnx_read_mode_does_not_return_fake_path(tmp_path: Path) -> None:
     payload = resolve_onnx_path("midas_small", output_dir=tmp_path)
-    assert payload["onnx_path"]
-    assert Path(payload["onnx_path"]).is_absolute()
+    assert payload["onnx_path"] is None
+    assert Path(payload["expected_path"]).is_absolute()
+    assert payload["exists"] is False
+    assert payload["error"] == "missing_file"
+
+
+def test_resolve_write_mode_returns_canonical_destination(tmp_path: Path) -> None:
+    payload = resolve_onnx_path("midas_small", output_dir=tmp_path, for_write=True)
+    assert payload["onnx_path"] == str((tmp_path / "midas_small.onnx").resolve())
+    assert payload["expected_path"] == payload["onnx_path"]
     assert payload["exists"] is False
     assert payload["error"] == "missing_file"
 
@@ -58,6 +66,23 @@ def test_depthlenspro_model_dir_env_override(monkeypatch: Any, tmp_path: Path) -
     expected.write_bytes(b"onnx")
     monkeypatch.setenv("DEPTHLENSPRO_MODEL_DIR", str(tmp_path))
     payload = resolve_onnx_path("DPT_Hybrid")
-    assert payload["source"] == "env"
+    assert payload["source"] == "env_model_dir"
     assert payload["onnx_path"] == str(expected.resolve())
     assert payload["exists"] is True
+
+
+def test_onnx_weights_dir_env_override(monkeypatch: Any, tmp_path: Path) -> None:
+    expected = tmp_path / "midas_small.onnx"
+    expected.write_bytes(b"onnx")
+    monkeypatch.delenv("DEPTHLENSPRO_MODEL_DIR", raising=False)
+    monkeypatch.delenv("DEPTHLENS_ONNX_DIR", raising=False)
+    monkeypatch.setenv("ONNX_WEIGHTS_DIR", str(tmp_path))
+    payload = resolve_onnx_path("midas_small")
+    assert payload["source"] == "env_weights_dir"
+    assert payload["onnx_path"] == str(expected.resolve())
+
+
+def test_export_and_inference_paths_share_canonical_location(tmp_path: Path) -> None:
+    read_payload = resolve_onnx_path("dpt_large", output_dir=tmp_path)
+    write_payload = resolve_onnx_path("dpt_large", output_dir=tmp_path, for_write=True)
+    assert read_payload["expected_path"] == write_payload["onnx_path"]

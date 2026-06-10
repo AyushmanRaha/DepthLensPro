@@ -6,6 +6,7 @@ import importlib
 import os
 import platform
 import sys
+from pathlib import Path
 from typing import Any
 
 from backend.model_registry import MODEL_REGISTRY, get_model_spec, resolve_onnx_path
@@ -53,6 +54,30 @@ def onnx_runtime_info(device: str = "auto") -> dict[str, Any]:
     return info
 
 
+def _explicit_path_payload(model: str, model_path: str | os.PathLike[str]) -> dict[str, Any]:
+    try:
+        spec = get_model_spec(model)
+    except Exception:
+        display_name = None
+        model_id = model
+    else:
+        display_name = spec.display_name
+        model_id = spec.model_id
+    path = Path(model_path).expanduser().resolve()
+    exists = path.is_file()
+    return {
+        "model_id": model_id,
+        "display_name": display_name,
+        "onnx_path": os.fspath(path),
+        "expected_path": os.fspath(path),
+        "exists": exists,
+        "size_bytes": path.stat().st_size if exists else None,
+        "source": "explicit",
+        "error": None if exists else "missing_file",
+        "candidates": [os.fspath(path)],
+    }
+
+
 def create_onnx_session(
     model: str,
     device: str = "auto",
@@ -63,19 +88,9 @@ def create_onnx_session(
     """Safely create an ONNX Runtime session only after validating path/providers."""
 
     resolved = (
-        resolve_onnx_path(model)
-        if model_path is None
-        else {
-            **resolve_onnx_path(model),
-            "onnx_path": os.fspath(model_path),
-            "exists": bool(os.fspath(model_path)) and os.path.isfile(model_path),
-            "size_bytes": (
-                os.path.getsize(model_path)
-                if bool(os.fspath(model_path)) and os.path.isfile(model_path)
-                else None
-            ),
-            "source": "explicit",
-        }
+        _explicit_path_payload(model, model_path)
+        if model_path is not None
+        else resolve_onnx_path(model)
     )
     try:
         spec = get_model_spec(model)
@@ -93,9 +108,9 @@ def create_onnx_session(
     if not path or not isinstance(path, str):
         return {
             "ok": False,
-            "error_code": "ONNX_MODEL_PATH_EMPTY",
-            "message": f"ONNX path is empty for {spec.display_name}",
-            "expected_path": path,
+            "error_code": "ONNX_MODEL_MISSING",
+            "message": f"ONNX file missing for {spec.display_name}; PyTorch fallback is available.",
+            "expected_path": resolved.get("expected_path"),
             "fallback_allowed": True,
             "path": resolved,
         }
@@ -104,7 +119,7 @@ def create_onnx_session(
             "ok": False,
             "error_code": "ONNX_MODEL_MISSING",
             "message": f"ONNX file missing for {spec.display_name}; PyTorch fallback is available.",
-            "expected_path": path,
+            "expected_path": resolved.get("expected_path") or path,
             "fallback_allowed": True,
             "path": resolved,
         }
@@ -112,7 +127,9 @@ def create_onnx_session(
         return {
             "ok": False,
             "error_code": "ONNX_MODEL_EMPTY",
-            "message": f"ONNX file is empty for {spec.display_name}; PyTorch fallback is available.",
+            "message": (
+                f"ONNX file is empty for {spec.display_name}; " "PyTorch fallback is available."
+            ),
             "expected_path": path,
             "fallback_allowed": True,
             "path": resolved,
@@ -124,7 +141,10 @@ def create_onnx_session(
         return {
             "ok": False,
             "error_code": "ONNXRUNTIME_MISSING",
-            "message": "onnxruntime is not installed or cannot be imported; PyTorch fallback is available.",
+            "message": (
+                "onnxruntime is not installed or cannot be imported; "
+                "PyTorch fallback is available."
+            ),
             "technical_detail": f"{type(exc).__name__}: {exc}",
             "fallback_allowed": True,
             "path": resolved,
@@ -136,7 +156,10 @@ def create_onnx_session(
         return {
             "ok": False,
             "error_code": "ONNX_PROVIDER_UNAVAILABLE",
-            "message": "No compatible ONNX Runtime provider is available; PyTorch fallback is available.",
+            "message": (
+                "No compatible ONNX Runtime execution provider is available; "
+                "PyTorch fallback is available."
+            ),
             "available_providers": available,
             "requested_device": device,
             "fallback_allowed": True,
@@ -158,7 +181,10 @@ def create_onnx_session(
         return {
             "ok": False,
             "error_code": "ONNX_SESSION_INIT_FAILED",
-            "message": f"ONNX Runtime could not load {spec.display_name}; PyTorch fallback is available.",
+            "message": (
+                f"ONNX Runtime could not load {spec.display_name} from {path}; "
+                "PyTorch fallback is available."
+            ),
             "technical_detail": f"{type(exc).__name__}: {exc}",
             "providers_used": providers,
             "available_providers": available,
@@ -167,32 +193,53 @@ def create_onnx_session(
         }
 
 
+def _status_from_session_result(session_result: dict[str, Any], runtime: dict[str, Any]) -> str:
+    if session_result.get("ok"):
+        return "available"
+    error_code = session_result.get("error_code")
+    if error_code in {"ONNX_MODEL_MISSING", "ONNX_MODEL_PATH_EMPTY"}:
+        return "missing"
+    if error_code in {"ONNX_MODEL_EMPTY", "ONNX_SESSION_INIT_FAILED"}:
+        return "invalid/corrupt"
+    if error_code == "ONNXRUNTIME_MISSING" or not runtime.get("importable"):
+        return "runtime_unavailable"
+    if error_code == "ONNX_PROVIDER_UNAVAILABLE":
+        return "provider_unavailable"
+    return "invalid/corrupt"
+
+
 def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
     resolved = resolve_onnx_path(model)
     runtime = onnx_runtime_info(device)
-    state = "available"
     if resolved.get("error") == "unknown_model":
         state = "unknown_model"
-    elif not runtime.get("importable"):
-        state = "onnxruntime_missing"
-    elif not resolved.get("exists"):
-        state = "missing_model_file"
-    elif int(resolved.get("size_bytes") or 0) <= 0:
-        state = "empty_model_file"
-    elif runtime.get("provider_state") == "provider_unavailable":
-        state = "provider_unavailable"
+        session_result: dict[str, Any] = {"ok": False, "error_code": "UNKNOWN_MODEL"}
+    else:
+        if resolved.get("onnx_path"):
+            session_result = create_onnx_session(
+                model, device, model_path=resolved.get("onnx_path")
+            )
+        else:
+            session_result = create_onnx_session(model, device)
+        state = _status_from_session_result(session_result, runtime)
     return {
         "model": resolved.get("model_id") or model,
         "display_name": resolved.get("display_name"),
-        "expected_path": resolved.get("onnx_path"),
+        "expected_path": resolved.get("expected_path") or resolved.get("onnx_path"),
+        "selected_path": resolved.get("onnx_path"),
         "exists": bool(resolved.get("exists")),
         "size_bytes": resolved.get("size_bytes") or 0,
         "state": state,
         "path": resolved,
+        "providers_used": session_result.get("providers_used", []),
+        "available_providers": session_result.get(
+            "available_providers", runtime.get("available_providers", [])
+        ),
+        "error_code": session_result.get("error_code"),
+        "message": session_result.get("message"),
+        "technical_detail": session_result.get("technical_detail"),
         "recommended_export_command": (
-            None
-            if resolved.get("exists")
-            else export_command(str(resolved.get("model_id") or model))
+            None if state == "available" else export_command(str(resolved.get("model_id") or model))
         ),
         "runtime": runtime,
     }

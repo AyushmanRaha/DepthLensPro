@@ -42,7 +42,8 @@ def _auto_export_lock(model: str) -> threading.Lock:
 def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any]:
     """Export missing ONNX weights on demand for benchmark comparisons."""
 
-    if onnx_diag.get("state") not in {"missing_weights", "missing_model_file"}:
+    exportable_states = {"missing_weights", "missing_model_file", "missing", "invalid/corrupt"}
+    if onnx_diag.get("state") not in exportable_states:
         return onnx_diag
     if not _env_flag("DEPTHLENS_AUTO_EXPORT_ONNX", True):
         return onnx_diag
@@ -50,8 +51,21 @@ def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any
     requested_device = str(onnx_diag.get("runtime", {}).get("requested_device", "auto"))
     with _auto_export_lock(model):
         refreshed = onnx_model_status(model, requested_device)
-        if refreshed.get("state") not in {"missing_weights", "missing_model_file"}:
+        if refreshed.get("state") not in exportable_states:
             return refreshed
+
+        if refreshed.get("state") == "invalid/corrupt":
+            corrupt_path = refreshed.get("selected_path") or refreshed.get("path", {}).get(
+                "onnx_path"
+            )
+            if corrupt_path:
+                try:
+                    os.replace(corrupt_path, f"{corrupt_path}.corrupt")
+                except OSError:
+                    try:
+                        os.remove(corrupt_path)
+                    except OSError:
+                        pass
 
         try:
             from backend.scripts.export_onnx import export_model
@@ -191,7 +205,7 @@ def run_benchmark(
             onnx_result = _unavailable(
                 "onnxruntime", str(exc), "runtime_error", {"diagnostics": onnx_diag}
             )
-    elif onnx_diag["state"] in {"missing_weights", "missing_model_file"}:
+    elif onnx_diag["state"] in {"missing_weights", "missing_model_file", "missing"}:
         command = onnx_diag["recommended_export_command"]
         onnx_result = _unavailable(
             "onnxruntime",
@@ -199,7 +213,7 @@ def run_benchmark(
             "missing_model_file",
             {"diagnostics": onnx_diag},
         )
-    elif onnx_diag["state"] == "onnxruntime_missing":
+    elif onnx_diag["state"] in {"onnxruntime_missing", "runtime_unavailable"}:
         onnx_result = _unavailable(
             "onnxruntime",
             "onnxruntime is not installed or cannot be imported",
@@ -211,6 +225,13 @@ def run_benchmark(
             "onnxruntime",
             "No compatible ONNX Runtime execution provider is available",
             "provider_unavailable",
+            {"diagnostics": onnx_diag},
+        )
+    elif onnx_diag["state"] == "invalid/corrupt":
+        onnx_result = _unavailable(
+            "onnxruntime",
+            "ONNX weights are invalid or corrupt",
+            "invalid/corrupt",
             {"diagnostics": onnx_diag},
         )
     elif onnx_diag["state"] == "export_failed":

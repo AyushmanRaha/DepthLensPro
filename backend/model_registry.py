@@ -124,14 +124,47 @@ def supported_models_payload() -> list[dict[str, Any]]:
 
 
 def _candidate_dirs(output_dir: str | os.PathLike[str] | None = None) -> list[tuple[str, Path]]:
+    """Return deterministic ONNX search/write directories in priority order."""
+
     if output_dir:
         return [("explicit", Path(output_dir).expanduser())]
     if os.getenv("DEPTHLENSPRO_MODEL_DIR"):
         base = Path(os.environ["DEPTHLENSPRO_MODEL_DIR"]).expanduser()
-        return [("env", base / "onnx"), ("env", base)]
+        return [("env_model_dir", base / "onnx"), ("env_model_dir_legacy", base)]
     if os.getenv("DEPTHLENS_ONNX_DIR"):
-        return [("env", Path(os.environ["DEPTHLENS_ONNX_DIR"]).expanduser())]
+        return [("env_onnx_dir", Path(os.environ["DEPTHLENS_ONNX_DIR"]).expanduser())]
+    if os.getenv("ONNX_WEIGHTS_DIR"):
+        return [("env_weights_dir", Path(os.environ["ONNX_WEIGHTS_DIR"]).expanduser())]
     return [("repo", DEFAULT_ONNX_DIR), ("legacy", LEGACY_ONNX_DIR), ("cache", USER_CACHE_ONNX_DIR)]
+
+
+def _path_payload(
+    spec: ModelSpec,
+    *,
+    selected_path: Path | None,
+    selected_source: str | None,
+    candidates: list[tuple[str, Path]],
+    error: str | None,
+    expected_path: Path | None = None,
+) -> dict[str, Any]:
+    exists = bool(selected_path and selected_path.is_file())
+    size = selected_path.stat().st_size if selected_path and exists else None
+    reported_expected_path = expected_path or selected_path
+    return {
+        "model_id": spec.model_id,
+        "display_name": spec.display_name,
+        "onnx_path": os.fspath(selected_path) if selected_path else None,
+        "expected_path": os.fspath(reported_expected_path) if reported_expected_path else None,
+        "exists": exists,
+        "size_bytes": size,
+        "source": selected_source,
+        "error": (
+            error
+            if error is not None
+            else ("empty_file" if exists and int(size or 0) <= 0 else None)
+        ),
+        "candidates": [os.fspath(path) for _, path in candidates],
+    }
 
 
 def resolve_onnx_path(
@@ -140,7 +173,13 @@ def resolve_onnx_path(
     *,
     for_write: bool = False,
 ) -> dict[str, Any]:
-    """Resolve an absolute ONNX path and report existence without returning empty paths."""
+    """Resolve ONNX paths deterministically for reads or writes.
+
+    Read mode returns only an existing file in ``onnx_path``. Missing files are
+    reported with ``onnx_path=None`` and the canonical destination in
+    ``expected_path`` so callers cannot accidentally treat a guessed path as a
+    valid model. Write mode always returns the canonical write destination.
+    """
 
     try:
         spec = get_model_spec(model)
@@ -149,12 +188,14 @@ def resolve_onnx_path(
             "model_id": model or "",
             "display_name": None,
             "onnx_path": None,
+            "expected_path": None,
             "exists": False,
             "size_bytes": None,
             "source": None,
             "error": "unknown_model",
             "error_code": exc.error_code,
             "valid_models": exc.valid_models,
+            "candidates": [],
         }
 
     dirs = _candidate_dirs(output_dir)
@@ -162,45 +203,45 @@ def resolve_onnx_path(
         (source, (directory / spec.onnx_filename).resolve()) for source, directory in dirs
     ]
     if not candidates:
-        return {
-            "model_id": spec.model_id,
-            "display_name": spec.display_name,
-            "onnx_path": None,
-            "exists": False,
-            "size_bytes": None,
-            "source": None,
-            "error": "empty_path",
-        }
+        return _path_payload(
+            spec,
+            selected_path=None,
+            selected_source=None,
+            candidates=[],
+            error="empty_path",
+        )
 
-    selected_source, selected_path = candidates[0]
+    canonical_source, canonical_path = candidates[0]
+    if for_write:
+        return _path_payload(
+            spec,
+            selected_path=canonical_path,
+            selected_source=canonical_source,
+            candidates=candidates,
+            error=None if canonical_path.is_file() else "missing_file",
+            expected_path=canonical_path,
+        )
+
     for source, path in candidates:
-        if path.exists():
-            selected_source, selected_path = source, path
-            break
-    if for_write and output_dir is None and not any(path.exists() for _, path in candidates):
-        selected_source, selected_path = candidates[0]
+        if path.is_file():
+            error = "empty_file" if path.stat().st_size <= 0 else None
+            return _path_payload(
+                spec,
+                selected_path=path,
+                selected_source=source,
+                candidates=candidates,
+                error=error,
+                expected_path=canonical_path,
+            )
 
-    path_str = os.fspath(selected_path)
-    exists = selected_path.is_file()
-    size = selected_path.stat().st_size if exists else None
-    error = None
-    if not path_str:
-        error = "empty_path"
-    elif not exists:
-        error = "missing_file"
-    elif not size or size <= 0:
-        error = "empty_file"
-
-    return {
-        "model_id": spec.model_id,
-        "display_name": spec.display_name,
-        "onnx_path": path_str,
-        "exists": exists,
-        "size_bytes": size,
-        "source": selected_source,
-        "error": error,
-        "candidates": [os.fspath(path) for _, path in candidates],
-    }
+    return _path_payload(
+        spec,
+        selected_path=None,
+        selected_source=None,
+        candidates=candidates,
+        error="missing_file",
+        expected_path=canonical_path,
+    )
 
 
 def onnx_output_path(model: str | None, output_dir: str | os.PathLike[str] | None = None) -> Path:
