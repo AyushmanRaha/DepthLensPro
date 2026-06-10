@@ -8,58 +8,66 @@ import os
 import platform
 import shutil
 import time
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from backend.config import settings
 from backend.api.live import SERVICE_VERSION
+from backend.config import settings
+from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 
 
-def _available_devices():
+def _available_devices() -> dict[str, Any]:
     from backend.utils.hardware import _available_devices as impl
+
     return impl()
 
 
-def _default_device_key():
+def _default_device_key() -> str:
     from backend.utils.hardware import _default_device_key as impl
+
     return impl()
 
 
-def _acceleration_checks(devs):
+def _acceleration_checks(devs: dict[str, Any]) -> dict[str, dict[str, Any]]:
     from backend.utils.hardware import _acceleration_checks as impl
+
     return impl(devs)
 
 
-def _resolve(device):
+def _resolve(device: str) -> Any:
     from backend.utils.hardware import _resolve as impl
+
     return impl(device)
 
 
-def _inference():
+def _inference() -> Any:
     from backend.services import inference
+
     return inference
 
 
-def _cache_service():
+def _cache_service() -> Any:
     from backend.services import cache_service
+
     return cache_service
 
 
-def run_benchmark(model: str, device: str, iterations: int):
+def run_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
     from backend.services.benchmarks import run_benchmark as impl
+
     return impl(model=model, device=device, iterations=iterations)
 
 
-def process_image(*args, **kwargs):
-    return _inference().process_image(*args, **kwargs)
+def process_image(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], _inference().process_image(*args, **kwargs))
 
 
-def loaded_model_keys():
+def loaded_model_keys() -> list[str]:
     try:
-        return _inference().loaded_model_keys()
+        return cast(list[str], _inference().loaded_model_keys())
     except Exception as exc:
         log.warning("Loaded model inspection degraded: %s", exc)
         return []
@@ -67,27 +75,38 @@ def loaded_model_keys():
 
 def _torch_version() -> str | None:
     try:
-        return __import__("torch").__version__
+        return cast(str, __import__("torch").__version__)
     except Exception as exc:
         log.warning("Torch version inspection degraded: %s", exc)
         return None
 
 
-def _fhash(*args, **kwargs):
-    return _inference()._fhash(*args, **kwargs)
+def _fhash(*args: Any, **kwargs: Any) -> str:
+    return cast(str, _inference()._fhash(*args, **kwargs))
 
 
-def normalize_metrics_mode(*args, **kwargs):
-    return _inference().normalize_metrics_mode(*args, **kwargs)
+def normalize_metrics_mode(*args: Any, **kwargs: Any) -> str:
+    return cast(str, _inference().normalize_metrics_mode(*args, **kwargs))
 
 
-def parse_outputs(*args, **kwargs):
-    return _inference().parse_outputs(*args, **kwargs)
+def parse_outputs(*args: Any, **kwargs: Any) -> list[str]:
+    return cast(list[str], _inference().parse_outputs(*args, **kwargs))
+
 
 log = logging.getLogger("depthlens")
 router = APIRouter()
 
+
+def _dependency_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(
+        503,
+        "Inference runtime is not ready. Check /ready for dependency diagnostics: "
+        f"{type(exc).__name__}: {exc}",
+    )
+
+
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
+MAX_UPLOAD_SIZE_MB = 20
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
 _PROBE_TTL_SECONDS = 10.0
@@ -368,6 +387,15 @@ async def health() -> dict[str, Any]:
     }
 
 
+@router.get("/ready")
+async def ready() -> dict[str, Any]:
+    """Report whether required inference dependencies are importable without loading models."""
+
+    from backend.services.diagnostics import readiness_payload
+
+    return await run_in_threadpool(readiness_payload)
+
+
 @router.get("/devices")
 async def list_devices() -> dict[str, Any]:
     devs, primary, meta = _cached_devices()
@@ -376,12 +404,12 @@ async def list_devices() -> dict[str, Any]:
 
 @router.get("/models")
 async def list_models() -> dict[str, list[dict[str, str]]]:
-    return {"models": [{"id": k, **v} for k, v in _inference().SUPPORTED_MODELS.items()]}
+    return {"models": [{"id": k, **v} for k, v in SUPPORTED_MODELS.items()]}
 
 
 @router.get("/colormaps")
 async def list_colormaps() -> dict[str, list[str]]:
-    return {"colormaps": list(_inference().COLORMAPS.keys())}
+    return {"colormaps": list(COLORMAP_NAMES)}
 
 
 @router.get("/api/benchmark")
@@ -397,6 +425,9 @@ async def benchmark(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        log.exception("Benchmark runtime unavailable")
+        raise _dependency_unavailable(exc) from exc
 
 
 @router.post("/estimate")
@@ -409,15 +440,17 @@ async def estimate(
     outputs: str = Form(settings.DEPTHLENS_DEFAULT_OUTPUTS),
     max_dim: int | None = Form(None),
 ) -> JSONResponse:
-    if model not in _inference().SUPPORTED_MODELS:
+    if model not in SUPPORTED_MODELS:
         raise HTTPException(422, f"Unknown model '{model}'")
-    if colormap not in _inference().COLORMAPS:
+    if colormap not in COLORMAP_NAMES:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
         metrics = normalize_metrics_mode(metrics)
         outputs = ",".join(parse_outputs(outputs))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise _dependency_unavailable(exc) from exc
 
     devs, _, _ = _cached_devices()
     avail = list(devs.keys()) + ["auto"]
@@ -428,8 +461,8 @@ async def estimate(
         raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
-    if len(raw) / 1024**2 > _inference().MAX_SIZE_MB:
-        raise HTTPException(413, f"File exceeds {_inference().MAX_SIZE_MB} MB limit")
+    if len(raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
+        raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
 
     resolved = str(_resolve(device))
     ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
@@ -471,22 +504,24 @@ async def batch(
 ) -> JSONResponse:
     if len(files) > 10:
         raise HTTPException(422, "Batch limit: 10 images")
-    if model not in _inference().SUPPORTED_MODELS:
+    if model not in SUPPORTED_MODELS:
         raise HTTPException(422, f"Unknown model '{model}'")
-    if colormap not in _inference().COLORMAPS:
+    if colormap not in COLORMAP_NAMES:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
         metrics = normalize_metrics_mode(metrics)
         outputs = ",".join(parse_outputs(outputs))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise _dependency_unavailable(exc) from exc
     resolved = str(_resolve(device))
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str | None]] = []
     for upload in files:
         try:
             raw = await upload.read()
-            if len(raw) / 1024**2 > _inference().MAX_SIZE_MB:
+            if len(raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
                 raise ValueError("File too large")
             ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
             cached = _cache_service().get(ck)
@@ -516,9 +551,9 @@ async def batch(
 async def cache_metrics() -> dict[str, Any]:
     """Expose live Redis/fallback cache metrics for frontend dashboards."""
 
-    return _cache_service().metrics()
+    return cast(dict[str, Any], _cache_service().metrics())
 
 
 @router.delete("/cache")
 async def clear_cache() -> dict[str, int]:
-    return {"cleared": _cache_service().clear()}
+    return {"cleared": int(_cache_service().clear())}

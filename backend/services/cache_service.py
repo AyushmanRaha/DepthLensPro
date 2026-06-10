@@ -22,7 +22,7 @@ redis = importlib.import_module("redis") if _REDIS_AVAILABLE else None
 
 _MEMORY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _MEMORY_LOCK = threading.RLock()
-_REDIS_LOCK = threading.Lock()
+_REDIS_LOCK = threading.RLock()
 _REDIS_POOL: Any | None = None
 _REDIS_CLIENT: Any | None = None
 _REDIS_DISABLED_UNTIL = 0.0

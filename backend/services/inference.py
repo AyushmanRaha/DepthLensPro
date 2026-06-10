@@ -19,26 +19,11 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.config import settings
 from backend.depth_models import ONNXExecutionEngine, onnx_model_path
+from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 
 log = logging.getLogger("depthlens")
 
-SUPPORTED_MODELS: dict[str, dict[str, str]] = {
-    "MiDaS_small": {
-        "label": "Small",
-        "description": "~30 ms · EfficientNet-Lite · CPU-friendly",
-        "compute": "CPU or GPU",
-    },
-    "DPT_Hybrid": {
-        "label": "Hybrid",
-        "description": "~120 ms · ViT-Hybrid · GPU recommended",
-        "compute": "GPU recommended",
-    },
-    "DPT_Large": {
-        "label": "Large",
-        "description": "~400 ms · ViT-Large · GPU required for speed",
-        "compute": "GPU required",
-    },
-}
+__all__ = ["COLORMAPS", "MAX_SIZE_MB", "SUPPORTED_MODELS"]
 
 COLORMAPS: dict[str, int] = {
     "inferno": cv2.COLORMAP_INFERNO,
@@ -50,6 +35,7 @@ COLORMAPS: dict[str, int] = {
     "bone": cv2.COLORMAP_BONE,
     "turbo": cv2.COLORMAP_TURBO,
 }
+assert set(COLORMAPS) == set(COLORMAP_NAMES)
 
 MAX_DIM = int(settings.DEPTHLENS_MAX_DIM)
 MAX_SIZE_MB = 20

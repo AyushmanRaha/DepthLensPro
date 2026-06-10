@@ -27,7 +27,8 @@ if (!singleInstanceLock) {
 
 // ── Constants ──────────────────────────────────────────────
 const BACKEND_HOST = "127.0.0.1";
-const BACKEND_PORT = Number.parseInt(process.env.DEPTHLENS_BACKEND_PORT || "8765", 10);
+const REQUESTED_BACKEND_PORT = Number.parseInt(process.env.DEPTHLENS_BACKEND_PORT || "8765", 10);
+let BACKEND_PORT = REQUESTED_BACKEND_PORT;
 let backendUrl = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
@@ -40,6 +41,17 @@ let backendOwnedByElectron = false;
 let backendPid = null;
 let backendMetadata = null;
 let shutdownInProgress = false;
+const backendOutputTail = [];
+
+function rememberBackendOutput(stream, message) {
+  const line = `[${stream}] ${message}`;
+  backendOutputTail.push(line);
+  while (backendOutputTail.length > 80) backendOutputTail.shift();
+}
+
+function backendOutputExcerpt() {
+  return backendOutputTail.slice(-30).join("\n") || "n/a";
+}
 
 // ── Resource paths ─────────────────────────────────────────
 function getResourcePath(...parts) {
@@ -123,6 +135,15 @@ function isPortAvailable(port, host = BACKEND_HOST) {
   });
 }
 
+async function findAvailableBackendPort(startPort = REQUESTED_BACKEND_PORT, host = BACKEND_HOST) {
+  const envPinned = Boolean(process.env.DEPTHLENS_BACKEND_PORT);
+  const maxAttempts = envPinned ? 1 : 25;
+  for (let offset = 0; offset < maxAttempts; offset += 1) {
+    const candidate = startPort + offset;
+    if (await isPortAvailable(candidate, host)) return candidate;
+  }
+  return null;
+}
 
 function getBackendPidPath() {
   return path.join(app.getPath("userData"), "backend.pid");
@@ -431,6 +452,7 @@ function waitForBackendReady(url, details, { timeoutMs = 45_000, intervalMs = 50
 
 // ── Start FastAPI Backend ──────────────────────────────────
 async function startBackend() {
+  BACKEND_PORT = REQUESTED_BACKEND_PORT;
   backendUrl = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
   const pythonPath = getPythonPath();
   const backendDir = getResourcePath("backend");
@@ -467,7 +489,16 @@ async function startBackend() {
   });
   if (!portAvailable) {
     log.warn("PORT_OCCUPIED", { port: BACKEND_PORT, liveKind: initialLiveProbe.kind });
-    await cleanupStaleBackendIfSafe(initialLiveProbe.kind || "live_probe_failed", details);
+    const fallbackPort = await findAvailableBackendPort(BACKEND_PORT + 1);
+    if (fallbackPort && !process.env.DEPTHLENS_BACKEND_PORT) {
+      BACKEND_PORT = fallbackPort;
+      backendUrl = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+      details.backendUrl = backendUrl;
+      details.command = details.command.replace(/--port\s+\d+/, `--port ${BACKEND_PORT}`);
+      log.warn("PORT_FALLBACK_SELECTED", { requestedPort: REQUESTED_BACKEND_PORT, backendUrl });
+    } else {
+      await cleanupStaleBackendIfSafe(initialLiveProbe.kind || "live_probe_failed", details);
+    }
   }
 
   if (path.isAbsolute(pythonPath) && !fs.existsSync(pythonPath)) {
@@ -480,6 +511,8 @@ async function startBackend() {
   if (!details.backendDirExists || !details.backendAppExists || !details.frontendDirExists || !details.frontendIndexExists) {
     throw createStartupError("Required app resources were not found. Run npm run verify:resources before packaging and ensure the repo-root venv exists.", details);
   }
+
+  args[args.indexOf("--port") + 1] = String(BACKEND_PORT);
 
   backendProcess = spawn(pythonPath, args, {
     cwd,
@@ -501,7 +534,7 @@ async function startBackend() {
     cwd,
     backendDir,
     pythonPath,
-    command,
+    command: `${pythonPath} ${args.join(" ")}`,
     startedAt: new Date().toISOString(),
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
@@ -512,12 +545,18 @@ async function startBackend() {
 
   backendProcess.stdout.on("data", (data) => {
     const msg = data.toString().trim();
-    if (msg) log.info(`[Backend stdout] ${msg}`);
+    if (msg) {
+      rememberBackendOutput("stdout", msg);
+      log.info(`[Backend stdout] ${msg}`);
+    }
   });
 
   backendProcess.stderr.on("data", (data) => {
     const msg = data.toString().trim();
-    if (msg) log.info(`[Backend stderr] ${msg}`);
+    if (msg) {
+      rememberBackendOutput("stderr", msg);
+      log.info(`[Backend stderr] ${msg}`);
+    }
   });
 
   backendProcess.on("error", (err) => {
