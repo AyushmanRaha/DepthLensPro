@@ -16,7 +16,7 @@ from backend.model_registry import (
     onnx_output_path,
     resolve_onnx_path,
 )
-from backend.utils.hardware import _default_device_key, _onnx_providers_for_device
+from backend.utils.hardware import _default_device_key
 
 MIDAS_REPO = "intel-isl/MiDaS"
 ONNX_INPUT_SIZE = (384, 384)
@@ -27,6 +27,29 @@ def onnx_model_path(model_name: str, output_dir: str | os.PathLike[str] | None =
     """Return the absolute expected static ONNX weight path for a supported model."""
 
     return onnx_output_path(model_name, output_dir=output_dir)
+
+
+def resize_onnx_depth(pred: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
+    """Resize ONNX depth maps with PyTorch-compatible bicubic semantics where possible.
+
+    OpenCV and PyTorch bicubic kernels are not bit-identical. ONNX uses OpenCV
+    here to avoid a torch dependency in the runtime resize path, then clamps to
+    the source depth range to reduce bicubic ringing at hard depth edges.
+    """
+
+    if pred.shape == output_shape:
+        return pred.astype(np.float32, copy=False)
+    import cv2
+
+    lo = float(np.nanmin(pred))
+    hi = float(np.nanmax(pred))
+    interpolation = int(getattr(cv2, "INTER_CUBIC", 2))
+    resized = cast(
+        np.ndarray,
+        cv2.resize(pred, (output_shape[1], output_shape[0]), interpolation=interpolation),
+    )
+    clipped = cast(np.ndarray, np.clip(resized, lo, hi).astype(np.float32, copy=False))
+    return clipped
 
 
 class ONNXExecutionEngine:
@@ -41,25 +64,35 @@ class ONNXExecutionEngine:
         self.model_id = normalize_model_id(model_name)
         self.spec = get_model_spec(self.model_id)
         self.model_name = self.spec.pytorch_model_name
-        if model_path:
-            self.model_path = Path(model_path).expanduser().resolve()
-            resolved = {
-                "onnx_path": os.fspath(self.model_path),
-                "exists": self.model_path.is_file(),
-                "size_bytes": self.model_path.stat().st_size if self.model_path.is_file() else None,
-                "error": None if self.model_path.is_file() else "missing_file",
-            }
-        else:
+        if model_path is None:
             resolved = resolve_onnx_path(self.model_id)
-            self.model_path = Path(str(resolved.get("onnx_path") or "")).expanduser().resolve()
-        if (
-            not str(self.model_path)
-            or not self.model_path.is_file()
-            or self.model_path.stat().st_size <= 0
-        ):
+            path_value = resolved.get("onnx_path")
+        else:
+            self.model_path = Path(model_path).expanduser().resolve()
+            exists = self.model_path.is_file()
+            resolved = {
+                "model_id": self.model_id,
+                "display_name": self.spec.display_name,
+                "onnx_path": os.fspath(self.model_path),
+                "expected_path": os.fspath(self.model_path),
+                "exists": exists,
+                "size_bytes": self.model_path.stat().st_size if exists else None,
+                "source": "explicit",
+                "error": None if exists else "missing_file",
+            }
+            path_value = resolved["onnx_path"]
+
+        if not path_value:
             raise FileNotFoundError(
                 f"ONNX weights are unavailable for {self.spec.display_name}: "
-                f"{resolved.get('onnx_path') or '<unresolved>'} ({resolved.get('error') or 'missing_file'})."
+                f"{resolved.get('expected_path') or '<unresolved>'} "
+                f"({resolved.get('error') or 'missing_file'})."
+            )
+        self.model_path = Path(str(path_value)).expanduser().resolve()
+        if not self.model_path.is_file() or self.model_path.stat().st_size <= 0:
+            raise FileNotFoundError(
+                f"ONNX weights are unavailable for {self.spec.display_name}: "
+                f"{self.model_path} ({resolved.get('error') or 'missing_file'})."
             )
 
         ort = importlib.import_module("onnxruntime")
@@ -119,16 +152,7 @@ class ONNXExecutionEngine:
         outputs = self.session.run([self.output_name], {self.input_name: batch})
         pred = np.asarray(outputs[0], dtype=np.float32)
         pred = np.squeeze(pred)
-        if pred.shape != img_rgb.shape[:2]:
-            import cv2
-
-            pred = cast(
-                np.ndarray,
-                cv2.resize(
-                    pred, (img_rgb.shape[1], img_rgb.shape[0]), interpolation=cv2.INTER_CUBIC
-                ),
-            )
-        return pred.astype(np.float32, copy=False)
+        return resize_onnx_depth(pred, img_rgb.shape[:2])
 
     def predict(self, img_rgb: np.ndarray) -> np.ndarray:
         """Compatibility alias for callers expecting a model-like predict method."""

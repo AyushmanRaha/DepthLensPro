@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.api.live import SERVICE_VERSION
 from backend.config import settings
-from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
+from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
 
 
