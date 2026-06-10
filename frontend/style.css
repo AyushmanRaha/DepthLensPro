@@ -698,6 +698,7 @@ body.macos .header-inner { padding-left: calc(78px + 0.5rem); }
 .file-status.pending  { color:var(--text-dim); }
 .file-status.running  { color:var(--warning); background:rgba(255,201,64,0.1); animation:blink 0.9s infinite; }
 .file-status.done     { color:var(--success); background:rgba(0,229,160,0.1); }
+.file-status.warning  { color:var(--warning); background:rgba(255,201,64,0.12); }
 .file-status.error    { color:var(--error); background:rgba(255,77,77,0.1); }
 .file-remove { background:none; border:none; color:var(--text-dim); font-size:0.85rem; padding:0.15rem; border-radius:3px; line-height:1; transition:var(--t); flex-shrink:0; }
 .file-remove:hover { color:var(--error); background:rgba(255,77,77,0.1); }
@@ -972,3 +973,5 @@ body.macos .header-inner { padding-left: calc(78px + 0.5rem); }
 .experiment-preview-tile { border:1px solid var(--border); border-radius:var(--r); background:var(--bg-surface); overflow:hidden; }
 .experiment-preview-tile img { width:100%; aspect-ratio:4/3; object-fit:contain; display:block; background:#020a14; }
 .experiment-preview-tile span { display:block; padding:0.25rem 0.38rem; font-family:var(--ff-mono); font-size:0.55rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; }
+
+.compare-warning { font-family:var(--ff-mono); font-size:0.68rem; color:var(--warning); margin:0.25rem 0 0.5rem; }

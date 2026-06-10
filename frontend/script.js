@@ -1110,8 +1110,9 @@ async function runBatch() {
       const result=await inferOne(entry.file,model,colormap,device,state.abort.signal,state.gtMode?"full":"fast",state.gtMode?"color,gray":"color",state.gtMode?state.gtFile:null,state.gtMode);
       clearInterval(tick);
       updateEstimate("workspace",model,device,result.latency_ms);
-      entry.result=result; entry.status="done";
-      setFileSt(entry.id,"done",`✓ ${result.latency_ms}ms`);
+      entry.result=result; entry.status=result.fallback_used?"completed_with_warning":"done";
+      setFileSt(entry.id,result.fallback_used?"warning":"done",`${result.fallback_used?"⚠":"✓"} ${result.latency_ms}ms${result.engine_used?` · ${result.engine_used}`:""}`);
+      if (result.fallback_used) toastOnce("Depth map generated using PyTorch fallback because ONNX is unavailable.", "warning", 4500);
       state.session.total++; state.session.totalInferenceMs+=result.latency_ms;
       if (result.cached) state.session.cached++;
       state.session.latencies.push(result.latency_ms);
@@ -1432,7 +1433,7 @@ el.compareCancelBtn.addEventListener("click",()=>{ state.compareAbort?.abort(); 
 async function runComparison() {
   if (!state.compareFile) return;
   const cmap=el.compareCmap.value, device=el.compareDevice.value;
-  const models=["MiDaS_small","DPT_Hybrid","DPT_Large"];
+  const models=["midas_small","dpt_hybrid","dpt_large"];
   state.compareAbort=new AbortController();
   el.compareRunBtn.disabled=true; el.compareCancelBtn.hidden=false;
   el.compareProgressBlock.hidden=false; el.compareResults.innerHTML="";
@@ -1494,9 +1495,11 @@ async function runComparison() {
 function renderCompareCard(r) {
   $(".compare-placeholder")?.remove();
   const card=document.createElement("div"); card.className="compare-card";
-  const lbl=r.model.replace("MiDaS_","").replace("DPT_","DPT ");
+  const lbl=r.model_display_name || r.model?.replace("midas_","MiDaS ").replace("dpt_","DPT ").replace("MiDaS_","").replace("DPT_","DPT ");
+  const warning = r.fallback_used ? `<div class="compare-warning">ONNX unavailable · ${esc(r.engine_used || "PyTorch")} fallback · ${esc(r.device_used || "")}</div>` : `<div class="compare-warning">${esc(r.engine_used || "")} · ${esc(r.device_used || "")}</div>`;
   card.innerHTML=`
     <div class="compare-card-header">${lbl} <span class="latency-badge">${r.latency_ms} ms</span></div>
+    ${warning}
     <img src="data:image/png;base64,${r.depth_map}" alt="Depth map — ${lbl}" loading="lazy"/>`;
   el.compareResults.appendChild(card);
 }
@@ -1558,12 +1561,14 @@ function renderBenchmark(data) {
   el.benchTorchLatency.textContent = fmtBenchLatency(torch);
   el.benchOnnxLatency.textContent = fmtBenchLatency(onnx);
   el.benchSpeedup.textContent = data?.comparison?.speedup ? `${data.comparison.speedup}×` : "—";
-  el.benchThroughput.textContent = Number.isFinite(Number(onnx?.throughput_fps)) ? `${Number(onnx.throughput_fps).toFixed(2)} fps` : "—";
+  const onnxThroughput = onnx?.throughput_fps ?? data?.onnx?.throughput_fps;
+  el.benchThroughput.textContent = Number.isFinite(Number(onnxThroughput)) ? `${Number(onnxThroughput).toFixed(2)} fps` : "Unavailable";
   el.benchMemory.textContent = data?.memory_snapshot?.process_rss_mb ? `${data.memory_snapshot.process_rss_mb} MB` : "—";
   const provider = onnx?.provider || onnx?.diagnostics?.runtime?.selected_provider || data?.onnx_diagnostics?.runtime?.selected_provider;
   const cpuFallback = onnx?.uses_cpu_fallback || onnx?.diagnostics?.runtime?.uses_cpu_fallback || data?.onnx_diagnostics?.runtime?.uses_cpu_fallback;
-  el.benchProvider.textContent = onnx?.status === "ok" ? `ONNX Ready${provider ? ` · ${provider}` : ""}${cpuFallback ? " · CPU fallback" : ""}` : `ONNX ${onnx?.state || "Unavailable"}`;
-  el.benchStatus.textContent = onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path}` : (onnx?.reason || "Benchmark completed with warnings");
+  const onnxStatus = data?.onnx?.status || onnx?.state || "unavailable";
+  el.benchProvider.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `ONNX Ready${provider ? ` · ${provider}` : ""}${cpuFallback ? " · CPU fallback" : ""}` : `ONNX ${onnxStatus}`;
+  el.benchStatus.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path || data?.onnx?.onnx_path}` : (data?.onnx?.message || onnx?.reason || "PyTorch benchmark completed; ONNX unavailable");
   renderBenchmarkChart(data);
 }
 
@@ -1617,11 +1622,13 @@ function experimentRows() {
     model: r.model,
     device: r.device_used,
     latency_ms: r.latency_ms,
+    engine: r.engine_used || "pytorch",
+    fallback: Boolean(r.fallback_used),
     abs_rel: scalarMetric(r, "abs_rel"),
     rmse: scalarMetric(r, "gt_rmse") ?? scalarMetric(r, "rmse"),
     delta_1: scalarMetric(r, "delta_1"),
     gt: Boolean(r.gt_metadata?.provided),
-    warnings: [...(r.metrics?.warnings || []), ...(r.gt_metadata?.warnings || [])].join(" | "),
+    warnings: [...(r.warnings || []), ...(r.metrics?.warnings || []), ...(r.gt_metadata?.warnings || [])].join(" | "),
   }));
 }
 function renderExperiment() {
@@ -1635,7 +1642,7 @@ function renderExperiment() {
   el.experimentExportJsonBtn.disabled = !rows.length;
   el.experimentExportCsvBtn.disabled = !rows.length;
   el.experimentTableBody.innerHTML = rows.length ? rows.map(r => `
-    <tr><td>${esc(r.filename)}</td><td>${esc(r.model)}</td><td>${esc(r.device)}</td><td>${r.latency_ms} ms</td><td>${r.abs_rel ?? "—"}</td><td>${r.rmse ?? "—"}</td><td>${r.delta_1 ?? "—"}</td><td>${r.gt ? "GT" : "Image-only"}${r.warnings ? ` · ${esc(r.warnings)}` : ""}</td></tr>
+    <tr><td>${esc(r.filename)}</td><td>${esc(r.model)}</td><td>${esc(r.engine)} · ${esc(r.device)}</td><td>${r.latency_ms} ms</td><td>${r.abs_rel ?? "Requires GT"}</td><td>${r.rmse ?? "Requires GT"}</td><td>${r.delta_1 ?? "Requires GT"}</td><td>${r.gt ? "GT" : "Image-only"}${r.warnings ? ` · ${esc(r.warnings)}` : ""}</td></tr>
   `).join("") : '<tr><td colspan="8">No experiment results yet.</td></tr>';
   el.experimentPreviews.innerHTML = state.experiment.results.map(r => `
     <article class="experiment-card">
@@ -1688,7 +1695,7 @@ function exportExperimentJson() {
 }
 function exportExperimentCsv() {
   const rows = experimentRows();
-  const header = ["filename","model","device","latency_ms","abs_rel","rmse","delta_1","gt","warnings"];
+  const header = ["filename","model","engine","device","latency_ms","abs_rel","rmse","delta_1","gt","fallback","warnings"];
   const csv = [header.join(","), ...rows.map(r => header.map(k => `"${String(r[k] ?? "").replace(/"/g,'""')}"`).join(","))].join("\n");
   exportBlob(`${(state.experiment.name||"experiment").replace(/[^a-z0-9_-]+/gi,"_")}.csv`, "text/csv", csv);
 }

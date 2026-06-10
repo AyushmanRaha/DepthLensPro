@@ -1,14 +1,19 @@
-"""ONNX Runtime and static weight diagnostics."""
+"""ONNX Runtime, static weight, and guarded session diagnostics."""
 
 from __future__ import annotations
 
 import importlib
 import os
+import platform
+import sys
 from typing import Any
 
-from backend.depth_models import onnx_model_path
-from backend.model_metadata import SUPPORTED_MODELS
-from backend.utils.hardware import _onnx_provider_candidates, _onnx_providers_for_device
+from backend.model_registry import MODEL_REGISTRY, get_model_spec, resolve_onnx_path
+from backend.utils.hardware import (
+    _default_device_key,
+    _onnx_provider_candidates,
+    _onnx_providers_for_device,
+)
 
 
 def export_command(model: str) -> str:
@@ -48,32 +53,214 @@ def onnx_runtime_info(device: str = "auto") -> dict[str, Any]:
     return info
 
 
+def create_onnx_session(
+    model: str,
+    device: str = "auto",
+    *,
+    model_path: str | os.PathLike[str] | None = None,
+    session_options: Any | None = None,
+) -> dict[str, Any]:
+    """Safely create an ONNX Runtime session only after validating path/providers."""
+
+    resolved = (
+        resolve_onnx_path(model)
+        if model_path is None
+        else {
+            **resolve_onnx_path(model),
+            "onnx_path": os.fspath(model_path),
+            "exists": bool(os.fspath(model_path)) and os.path.isfile(model_path),
+            "size_bytes": (
+                os.path.getsize(model_path)
+                if bool(os.fspath(model_path)) and os.path.isfile(model_path)
+                else None
+            ),
+            "source": "explicit",
+        }
+    )
+    try:
+        spec = get_model_spec(model)
+    except Exception:
+        return {
+            "ok": False,
+            "error_code": "UNKNOWN_MODEL",
+            "message": f"Unknown model id: {model}",
+            "valid_models": list(MODEL_REGISTRY),
+            "fallback_allowed": False,
+            "path": resolved,
+        }
+
+    path = resolved.get("onnx_path")
+    if not path or not isinstance(path, str):
+        return {
+            "ok": False,
+            "error_code": "ONNX_MODEL_PATH_EMPTY",
+            "message": f"ONNX path is empty for {spec.display_name}",
+            "expected_path": path,
+            "fallback_allowed": True,
+            "path": resolved,
+        }
+    if not resolved.get("exists") or not os.path.isfile(path):
+        return {
+            "ok": False,
+            "error_code": "ONNX_MODEL_MISSING",
+            "message": f"ONNX file missing for {spec.display_name}; PyTorch fallback is available.",
+            "expected_path": path,
+            "fallback_allowed": True,
+            "path": resolved,
+        }
+    if int(resolved.get("size_bytes") or 0) <= 0:
+        return {
+            "ok": False,
+            "error_code": "ONNX_MODEL_EMPTY",
+            "message": f"ONNX file is empty for {spec.display_name}; PyTorch fallback is available.",
+            "expected_path": path,
+            "fallback_allowed": True,
+            "path": resolved,
+        }
+
+    try:
+        ort = importlib.import_module("onnxruntime")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_code": "ONNXRUNTIME_MISSING",
+            "message": "onnxruntime is not installed or cannot be imported; PyTorch fallback is available.",
+            "technical_detail": f"{type(exc).__name__}: {exc}",
+            "fallback_allowed": True,
+            "path": resolved,
+        }
+
+    available = list(ort.get_available_providers())
+    providers = _onnx_providers_for_device(device, available)
+    if not providers:
+        return {
+            "ok": False,
+            "error_code": "ONNX_PROVIDER_UNAVAILABLE",
+            "message": "No compatible ONNX Runtime provider is available; PyTorch fallback is available.",
+            "available_providers": available,
+            "requested_device": device,
+            "fallback_allowed": True,
+            "path": resolved,
+        }
+
+    try:
+        session = ort.InferenceSession(path, sess_options=session_options, providers=providers)
+        return {
+            "ok": True,
+            "session": session,
+            "providers_used": providers,
+            "available_providers": available,
+            "path": resolved,
+            "model_id": spec.model_id,
+            "display_name": spec.display_name,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_code": "ONNX_SESSION_INIT_FAILED",
+            "message": f"ONNX Runtime could not load {spec.display_name}; PyTorch fallback is available.",
+            "technical_detail": f"{type(exc).__name__}: {exc}",
+            "providers_used": providers,
+            "available_providers": available,
+            "fallback_allowed": True,
+            "path": resolved,
+        }
+
+
 def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
-    path = onnx_model_path(model)
+    resolved = resolve_onnx_path(model)
     runtime = onnx_runtime_info(device)
-    exists = path.exists()
     state = "available"
-    if not runtime.get("importable"):
+    if resolved.get("error") == "unknown_model":
+        state = "unknown_model"
+    elif not runtime.get("importable"):
         state = "onnxruntime_missing"
-    elif not exists:
-        state = "missing_weights"
+    elif not resolved.get("exists"):
+        state = "missing_model_file"
+    elif int(resolved.get("size_bytes") or 0) <= 0:
+        state = "empty_model_file"
     elif runtime.get("provider_state") == "provider_unavailable":
         state = "provider_unavailable"
     return {
-        "model": model,
-        "expected_path": os.fspath(path),
-        "exists": exists,
-        "size_bytes": path.stat().st_size if exists else 0,
+        "model": resolved.get("model_id") or model,
+        "display_name": resolved.get("display_name"),
+        "expected_path": resolved.get("onnx_path"),
+        "exists": bool(resolved.get("exists")),
+        "size_bytes": resolved.get("size_bytes") or 0,
         "state": state,
-        "recommended_export_command": None if exists else export_command(model),
+        "path": resolved,
+        "recommended_export_command": (
+            None
+            if resolved.get("exists")
+            else export_command(str(resolved.get("model_id") or model))
+        ),
         "runtime": runtime,
     }
 
 
 def onnx_status_payload(device: str = "auto") -> dict[str, Any]:
+    runtime = onnx_runtime_info(device)
+    models = {model: onnx_model_status(model, device) for model in MODEL_REGISTRY}
+    onnx_ready = any(m.get("state") == "available" for m in models.values())
     return {
-        "supported_model_ids": list(SUPPORTED_MODELS),
+        "supported_model_ids": list(MODEL_REGISTRY),
         "requested_device": device,
-        "runtime": onnx_runtime_info(device),
-        "models": {model: onnx_model_status(model, device) for model in SUPPORTED_MODELS},
+        "runtime": runtime,
+        "models": models,
+        "overall_status": "onnx_ready" if onnx_ready else "onnx_unavailable",
+    }
+
+
+def readiness_payload(device: str = "auto") -> dict[str, Any]:
+    """Detailed backend/model/device readiness for health endpoints."""
+
+    try:
+        import torch
+
+        torch_version = getattr(torch, "__version__", None)
+        cuda = bool(torch.cuda.is_available())
+        mps_backend = getattr(torch.backends, "mps", None)
+        mps = bool(
+            mps_backend is not None and mps_backend.is_built() and mps_backend.is_available()
+        )
+    except Exception:
+        torch_version = None
+        cuda = False
+        mps = False
+
+    selected = _default_device_key()
+    onnx = onnx_status_payload(device if device != "auto" else selected)
+    models = {}
+    onnx_any = False
+    for model_id, spec in MODEL_REGISTRY.items():
+        status = onnx["models"][model_id]
+        ready = status.get("state") == "available"
+        onnx_any = onnx_any or ready
+        models[model_id] = {
+            "display_name": spec.display_name,
+            "pytorch_ready": spec.pytorch_supported,
+            "onnx_ready": ready,
+            "onnx_path": status.get("expected_path"),
+            "onnx_error": None if ready else status.get("state"),
+        }
+    warnings = [] if onnx_any else ["ONNX models are unavailable. PyTorch fallback will be used."]
+    return {
+        "backend_live": True,
+        "platform": {
+            "os": sys.platform,
+            "machine": platform.machine(),
+            "python": platform.python_version(),
+            "torch": torch_version,
+            "onnxruntime": onnx["runtime"].get("version"),
+        },
+        "devices": {
+            "pytorch": {"cpu": True, "cuda": cuda, "mps": mps, "selected": selected},
+            "onnxruntime": {
+                "available_providers": onnx["runtime"].get("available_providers", []),
+                "selected_providers": onnx["runtime"].get("selected_providers", []),
+            },
+        },
+        "models": models,
+        "overall_status": "onnx_ready" if onnx_any else "pytorch_ready_onnx_unavailable",
+        "warnings": warnings,
     }

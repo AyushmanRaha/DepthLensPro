@@ -10,6 +10,12 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+from backend.model_registry import (
+    get_model_spec,
+    normalize_model_id,
+    onnx_output_path,
+    resolve_onnx_path,
+)
 from backend.utils.hardware import _default_device_key, _onnx_providers_for_device
 
 MIDAS_REPO = "intel-isl/MiDaS"
@@ -18,11 +24,9 @@ DEFAULT_ONNX_DIR = Path(__file__).resolve().parent / "onnx_weights"
 
 
 def onnx_model_path(model_name: str, output_dir: str | os.PathLike[str] | None = None) -> Path:
-    """Return the expected static ONNX weight path for a MiDaS model."""
+    """Return the absolute expected static ONNX weight path for a supported model."""
 
-    configured_dir = output_dir or os.getenv("DEPTHLENS_ONNX_DIR")
-    base_dir = Path(configured_dir) if configured_dir is not None else DEFAULT_ONNX_DIR
-    return base_dir / f"{model_name}.onnx"
+    return onnx_output_path(model_name, output_dir=output_dir)
 
 
 class ONNXExecutionEngine:
@@ -34,21 +38,44 @@ class ONNXExecutionEngine:
         model_path: str | os.PathLike[str] | None = None,
         device: str = "auto",
     ) -> None:
-        self.model_name = model_name
-        self.model_path = Path(model_path) if model_path else onnx_model_path(model_name)
-        if not self.model_path.exists():
+        self.model_id = normalize_model_id(model_name)
+        self.spec = get_model_spec(self.model_id)
+        self.model_name = self.spec.pytorch_model_name
+        if model_path:
+            self.model_path = Path(model_path).expanduser().resolve()
+            resolved = {
+                "onnx_path": os.fspath(self.model_path),
+                "exists": self.model_path.is_file(),
+                "size_bytes": self.model_path.stat().st_size if self.model_path.is_file() else None,
+                "error": None if self.model_path.is_file() else "missing_file",
+            }
+        else:
+            resolved = resolve_onnx_path(self.model_id)
+            self.model_path = Path(str(resolved.get("onnx_path") or "")).expanduser().resolve()
+        if (
+            not str(self.model_path)
+            or not self.model_path.is_file()
+            or self.model_path.stat().st_size <= 0
+        ):
             raise FileNotFoundError(
-                f"ONNX weights not found for {model_name!r}: {self.model_path}. "
-                "Run backend/scripts/export_onnx.py first."
+                f"ONNX weights are unavailable for {self.spec.display_name}: "
+                f"{resolved.get('onnx_path') or '<unresolved>'} ({resolved.get('error') or 'missing_file'})."
             )
 
         ort = importlib.import_module("onnxruntime")
-        self.available_providers = list(ort.get_available_providers())
-        self.providers = _onnx_providers_for_device(device, self.available_providers)
         self.session_options = self._session_options(ort)
-        self.session = ort.InferenceSession(
-            str(self.model_path), sess_options=self.session_options, providers=self.providers
+        from backend.services.onnx_diagnostics import create_onnx_session
+
+        session_result = create_onnx_session(
+            self.model_id, device, model_path=self.model_path, session_options=self.session_options
         )
+        if not session_result.get("ok"):
+            raise RuntimeError(
+                session_result.get("technical_detail") or session_result.get("message")
+            )
+        self.available_providers = list(session_result.get("available_providers", []))
+        self.providers = list(session_result.get("providers_used", []))
+        self.session = session_result["session"]
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
         self.transform = self._load_transform(model_name)
@@ -58,7 +85,8 @@ class ONNXExecutionEngine:
         transforms = torch.hub.load(  # type: ignore[no-untyped-call]
             MIDAS_REPO, "transforms", trust_repo=True
         )
-        if model_name == "MiDaS_small":
+        model_id = normalize_model_id(model_name)
+        if model_id == "midas_small":
             return transforms.small_transform
         return transforms.dpt_transform
 
@@ -122,8 +150,9 @@ class DepthEstimator:
     def load_model(self, model_name: str) -> tuple[torch.nn.Module, Any]:
         if model_name not in self.models:
             print(f"Loading {model_name} onto {self.device}...")
+            spec = get_model_spec(model_name)
             self.models[model_name] = torch.hub.load(  # type: ignore[no-untyped-call]
-                self.repo, model_name, trust_repo=True
+                self.repo, spec.pytorch_model_name, trust_repo=True
             )
             self.models[model_name].to(self.device)
             self.models[model_name].eval()
@@ -131,7 +160,7 @@ class DepthEstimator:
             midas_transforms = torch.hub.load(  # type: ignore[no-untyped-call]
                 self.repo, "transforms", trust_repo=True
             )
-            if model_name == "MiDaS_small":
+            if spec.model_id == "midas_small":
                 self.transforms[model_name] = midas_transforms.small_transform
             else:
                 self.transforms[model_name] = midas_transforms.dpt_transform
@@ -144,8 +173,12 @@ class DepthEstimator:
         return self.onnx_engines[model_name]
 
     def predict(self, img_rgb: np.ndarray, model_name: str) -> np.ndarray:
-        if self.prefer_onnx and onnx_model_path(model_name).exists():
-            return self.load_onnx_engine(model_name).predict(img_rgb)
+        if self.prefer_onnx and onnx_model_path(model_name).is_file():
+            try:
+                return self.load_onnx_engine(model_name).predict(img_rgb)
+            except Exception:
+                # Optional ONNX acceleration must never break the PyTorch path.
+                pass
 
         model, transform = self.load_model(model_name)
         input_batch = transform(img_rgb).to(self.device)
