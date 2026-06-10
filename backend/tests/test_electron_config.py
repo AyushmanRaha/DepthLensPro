@@ -50,3 +50,32 @@ def test_duplicate_app_scan_flags_stale_dist_mac(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "STALE_UNSUPPORTED_DIST_MAC" in result.stdout
     assert "Duplicate Spotlight risk" in result.stderr
+
+
+def test_electron_navigation_policy_rejects_other_localhost_ports() -> None:
+    policy = (ROOT / "electron-app" / "src" / "security-policy.js").read_text()
+    test_policy = (ROOT / "electron-app" / "test-security-policy.js").read_text()
+    assert "parsedUrl.hostname === backendHost" in policy
+    assert 'String(parsedUrl.port || "80") === String(backendPort)' in policy
+    assert '"http://127.0.0.1:8766/live"' in test_policy
+    assert '"http://localhost:8765/live"' in test_policy
+
+
+def test_backend_lifecycle_ignores_empty_candidate_paths() -> None:
+    policy = (ROOT / "electron-app" / "src" / "backend-process-policy.js").read_text()
+    test_policy = (ROOT / "electron-app" / "test-security-policy.js").read_text()
+    assert "if (!trimmed) return null" in policy
+    assert 'buildOwnershipCandidatePaths({ cwd: "", backendDir: "" })' in test_policy
+
+
+def test_backend_lifecycle_rejects_unrelated_uvicorn_processes() -> None:
+    test_policy = (ROOT / "electron-app" / "test-security-policy.js").read_text()
+    assert "python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765" in test_policy
+    assert "false" in test_policy
+
+
+def test_backend_spawn_keeps_shell_disabled_and_args_array() -> None:
+    main = (ROOT / "electron-app" / "main.js").read_text()
+    assert "spawn(pythonPath, args" in main
+    assert "shell: false" in main
+    assert "argument array" in main
