@@ -1038,3 +1038,71 @@ GitHub: [https://github.com/AyushmanRaha](https://github.com/AyushmanRaha)
 
 - MiDaS depth estimation models by Intel ISL
 - PyTorch, ONNX Runtime, OpenCV, FastAPI, Redis, Chart.js, Electron, and electron-builder communities
+
+## Depth engine readiness, ONNX assets, and PyTorch fallback
+
+DepthLensPro treats ONNX Runtime acceleration as optional. The backend now separates these states in `/health` and `/onnx/status`: the API process can be live while PyTorch, ONNX model files, ONNX Runtime providers, or individual model sessions have different readiness states. Workspace, Compare, Experiments, and Performance should prefer a working PyTorch path over a broken optional ONNX path.
+
+### Model asset setup
+
+Supported canonical model IDs are:
+
+| Canonical ID | Display name | Torch Hub model | Default ONNX filename |
+| --- | --- | --- | --- |
+| `midas_small` | MiDaS Small | `MiDaS_small` | `midas_small.onnx` |
+| `dpt_hybrid` | DPT Hybrid | `DPT_Hybrid` | `dpt_hybrid.onnx` |
+| `dpt_large` | DPT Large | `DPT_Large` | `dpt_large.onnx` |
+
+The backend accepts common aliases such as `MiDaS Small`, `MiDaS_small`, `DPT Hybrid`, and `DPT_Large`, then normalizes them to canonical IDs internally. ONNX files are resolved as absolute paths and are searched in this order:
+
+1. `DEPTHLENSPRO_MODEL_DIR/onnx` and `DEPTHLENSPRO_MODEL_DIR` when `DEPTHLENSPRO_MODEL_DIR` is set.
+2. `DEPTHLENS_ONNX_DIR` when set for legacy installs.
+3. Repository default `models/onnx`.
+4. Legacy backend directory `backend/onnx_weights`.
+5. User cache directory such as `~/.cache/DepthLensPro/onnx` on Linux.
+
+Generate or validate ONNX assets with:
+
+```bash
+python backend/scripts/export_onnx.py --model midas_small
+python backend/scripts/export_onnx.py --all
+curl http://127.0.0.1:8765/onnx/status?device=auto
+curl http://127.0.0.1:8765/health
+```
+
+If an ONNX file is missing, empty, invalid, or cannot be loaded by ONNX Runtime, inference responses include metadata such as `engine_used: "pytorch"`, `fallback_used: true`, `warnings`, `model_id`, `model_display_name`, and `device_used` instead of failing solely because ONNX is unavailable.
+
+### Apple Silicon and provider notes
+
+On macOS Apple Silicon, PyTorch may use MPS/Metal for the PyTorch path. ONNX Runtime does not automatically use PyTorch MPS or Metal; it uses only providers reported by `onnxruntime.get_available_providers()`, commonly `CPUExecutionProvider` unless a supported CoreML-enabled runtime is installed. This is expected. The health payload reports PyTorch devices separately from ONNX Runtime providers.
+
+CUDA is used only when PyTorch and/or ONNX Runtime report CUDA support. CPU remains the portable fallback on macOS Intel, Windows, and Linux.
+
+### Troubleshooting: `ONNXRuntimeError: model_path must not be empty`
+
+This error means ONNX Runtime was asked to load a missing, empty, or unresolved model file. Check:
+
+```bash
+curl http://127.0.0.1:8765/onnx/status?device=auto
+curl http://127.0.0.1:8765/health
+printf '%s\n' "$DEPTHLENSPRO_MODEL_DIR" "$DEPTHLENS_ONNX_DIR"
+```
+
+The backend validates ONNX paths before creating sessions and falls back to PyTorch when possible. If you want ONNX acceleration, place the expected `.onnx` files in the configured model directory or run the export command above.
+
+### Troubleshooting: ONNX export failed with SymInt / `torch.export`
+
+Some MiDaS/DPT models can fail with newer dynamo/`torch.export` ONNX paths, including errors involving `SymInt` and reshape/unflatten operations. The export script first tries a static-shape legacy `torch.onnx.export` path with opset 17 and no dynamic axes, then tries the dynamo path when supported. Export success is reported only after the file exists, is non-empty, passes `onnx.checker` when available, and can be loaded by ONNX Runtime. If export still fails, PyTorch Workspace, Compare, Experiments, and the PyTorch side of Performance remain supported.
+
+### Verification commands
+
+```bash
+python -m pip install -r backend/requirements.txt
+python -m pytest backend/tests
+uvicorn backend.main:app --host 127.0.0.1 --port 8765
+python backend/scripts/export_onnx.py --model midas_small
+curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:8765/onnx/status?device=auto
+curl 'http://127.0.0.1:8765/api/benchmark?model=midas_small&device=auto&iterations=1'
+cd frontend && python -m http.server 5173
+```

@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.config import settings
 from backend.depth_models import ONNXExecutionEngine, onnx_model_path
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
+from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
@@ -78,35 +79,35 @@ def _load_model(
     model_name: str, device_str: str
 ) -> tuple[tuple[torch.nn.Module, torch.device], Callable[[np.ndarray], torch.Tensor]]:
     """Load or reuse a MiDaS model for a resolved device."""
-    key = f"{model_name}:{device_str}"
+    model_id = normalize_model_id(model_name)
+    spec = get_model_spec(model_id)
+    key = f"{model_id}:{device_str}"
     with _MODEL_LOCK:
         if key in MODELS:
-            return MODELS[key], TRANSFORMS[model_name]
-        if model_name not in SUPPORTED_MODELS:
-            raise ValueError(f"Unknown model: {model_name!r}")
+            return MODELS[key], TRANSFORMS[model_id]
 
         device = torch.device(device_str)
-        log.info("Loading '%s' → %s …", model_name, device)
-        model = torch.hub.load("intel-isl/MiDaS", model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+        log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
+        model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
         model.to(device).eval()
 
         if device.type == "mps":
             model = model.float()
 
-        if model_name not in TRANSFORMS:
+        if model_id not in TRANSFORMS:
             transforms = torch.hub.load(  # type: ignore[no-untyped-call]
                 "intel-isl/MiDaS", "transforms", trust_repo=True
             )
-            TRANSFORMS[model_name] = (
+            TRANSFORMS[model_id] = (
                 transforms.small_transform
-                if model_name == "MiDaS_small"
+                if model_id == "midas_small"
                 else transforms.dpt_transform
             )
 
         MODELS[key] = (model, device)
         _MODEL_FORWARD_LOCKS.setdefault(key, threading.Lock())
-        log.info("✅ '%s' ready on %s", model_name, device)
-        return (model, device), TRANSFORMS[model_name]
+        log.info("✅ '%s' ready on %s", spec.display_name, device)
+        return (model, device), TRANSFORMS[model_id]
 
 
 def _decode(raw: bytes, max_dim: int | None = None) -> np.ndarray:
@@ -134,8 +135,9 @@ def _normalize_depth(depth: np.ndarray) -> np.ndarray:
 def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
     """Run normalized PyTorch depth inference for benchmarking and fallback."""
 
-    (model, device), transform = _load_model(model_name, device_str)
-    key = f"{model_name}:{device_str}"
+    model_id = normalize_model_id(model_name)
+    (model, device), transform = _load_model(model_id, device_str)
+    key = f"{model_id}:{device_str}"
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     batch = transform(rgb).to(device, non_blocking=True)
     with _MODEL_FORWARD_LOCKS[key], torch.inference_mode():
@@ -154,10 +156,11 @@ def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.nd
 def _load_onnx_engine(model_name: str, device_str: str) -> ONNXExecutionEngine:
     """Load or reuse an ONNX Runtime execution engine for static MiDaS weights."""
 
-    key = f"{model_name}:{device_str}"
+    model_id = normalize_model_id(model_name)
+    key = f"{model_id}:{device_str}"
     with _ONNX_LOCK:
         if key not in ONNX_ENGINES:
-            ONNX_ENGINES[key] = ONNXExecutionEngine(model_name=model_name, device=device_str)
+            ONNX_ENGINES[key] = ONNXExecutionEngine(model_name=model_id, device=device_str)
             _ONNX_FORWARD_LOCKS.setdefault(key, threading.Lock())
         return ONNX_ENGINES[key]
 
@@ -165,25 +168,78 @@ def _load_onnx_engine(model_name: str, device_str: str) -> ONNXExecutionEngine:
 def _infer_onnx(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
     """Run normalized ONNX Runtime depth inference for a BGR image."""
 
-    key = f"{model_name}:{device_str}"
-    engine = _load_onnx_engine(model_name, device_str)
+    model_id = normalize_model_id(model_name)
+    key = f"{model_id}:{device_str}"
+    engine = _load_onnx_engine(model_id, device_str)
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     with _ONNX_FORWARD_LOCKS[key]:
         depth = engine.forward(rgb)
     return _normalize_depth(depth)
 
 
-def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
-    """Run normalized depth inference, preferring ONNX Runtime static weights."""
+def _infer_with_metadata(
+    img_bgr: np.ndarray, model_name: str, device_str: str, engine_requested: str = "auto"
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Run depth inference with guarded ONNX and PyTorch fallback metadata."""
 
-    if onnx_model_path(model_name).exists():
-        return _infer_onnx(img_bgr, model_name, device_str)
-    if model_name not in _ONNX_MISSING_WARNED:
-        log.warning(
-            "ONNX weights unavailable for %s; falling back to PyTorch execution", model_name
-        )
-        _ONNX_MISSING_WARNED.add(model_name)
-    return _infer_torch(img_bgr, model_name, device_str)
+    model_id = normalize_model_id(model_name)
+    spec = get_model_spec(model_id)
+    requested = (engine_requested or "auto").lower()
+    warnings: list[str] = []
+    onnx_detail: dict[str, Any] | None = None
+    if requested in {"auto", "onnx", "onnxruntime"}:
+        resolved = resolve_onnx_path(model_id)
+        onnx_detail = resolved
+        if resolved.get("exists") and int(resolved.get("size_bytes") or 0) > 0:
+            try:
+                depth = _infer_onnx(img_bgr, model_id, device_str)
+                return depth, {
+                    "model_id": model_id,
+                    "model_display_name": spec.display_name,
+                    "engine_requested": requested,
+                    "engine_used": "onnxruntime",
+                    "device_requested": device_str,
+                    "device_used": getattr(
+                        _load_onnx_engine(model_id, device_str), "provider", "onnxruntime"
+                    ),
+                    "fallback_used": False,
+                    "warnings": warnings,
+                    "onnx": resolved,
+                }
+            except Exception as exc:
+                warnings.append(f"ONNX unavailable ({type(exc).__name__}); used PyTorch fallback")
+                onnx_detail = {**resolved, "runtime_error": f"{type(exc).__name__}: {exc}"}
+                log.warning(
+                    "ONNX inference unavailable for %s; falling back to PyTorch: %s", model_id, exc
+                )
+        else:
+            warnings.append("ONNX model missing; used PyTorch fallback")
+            if model_id not in _ONNX_MISSING_WARNED:
+                log.warning(
+                    "ONNX weights unavailable for %s at %s; falling back to PyTorch execution",
+                    model_id,
+                    resolved.get("onnx_path"),
+                )
+                _ONNX_MISSING_WARNED.add(model_id)
+    depth = _infer_torch(img_bgr, model_id, device_str)
+    return depth, {
+        "model_id": model_id,
+        "model_display_name": spec.display_name,
+        "engine_requested": requested,
+        "engine_used": "pytorch",
+        "device_requested": device_str,
+        "device_used": device_str,
+        "fallback_used": requested in {"auto", "onnx", "onnxruntime"} and bool(warnings),
+        "warnings": warnings,
+        "onnx": onnx_detail,
+    }
+
+
+def _infer(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
+    """Compatibility helper returning only normalized depth."""
+
+    depth, _metadata = _infer_with_metadata(img_bgr, model_name, device_str)
+    return depth
 
 
 def _colorize(depth: np.ndarray, cmap: str) -> np.ndarray:
@@ -502,14 +558,16 @@ def process_image(
     gt_invalid_value: float | None = None,
 ) -> dict[str, Any]:
     """Decode, infer, colorize, and package one image response."""
+    model_id = normalize_model_id(model)
+    spec = get_model_spec(model_id)
     metrics_mode = normalize_metrics_mode(metrics)
     output_set = parse_outputs(outputs)
-    depth_key = _depth_cache_key(raw, model, device, max_dim)
+    depth_key = _depth_cache_key(raw, model_id, device, max_dim)
     cached_depth = _get_cached_depth(depth_key)
     img = _decode(raw, max_dim=max_dim)
     if cached_depth is None:
         t0 = time.perf_counter()
-        depth = _infer(img, model, device)
+        depth, engine_metadata = _infer_with_metadata(img, model_id, device)
         lat = round((time.perf_counter() - t0) * 1000, 1)
         resolution = {"width": img.shape[1], "height": img.shape[0]}
         _set_cached_depth(depth_key, depth, resolution)
@@ -518,6 +576,16 @@ def process_image(
         depth, resolution = cached_depth
         lat = 0.0
         depth_cached = True
+        engine_metadata = {
+            "model_id": model_id,
+            "model_display_name": spec.display_name,
+            "engine_requested": "auto",
+            "engine_used": "cache",
+            "device_requested": device,
+            "device_used": device,
+            "fallback_used": False,
+            "warnings": [],
+        }
 
     gt_result: dict[str, Any] | None = None
     gt_metadata: dict[str, Any] = {"provided": False}
@@ -548,7 +616,9 @@ def process_image(
     payload: dict[str, Any] = {
         "metrics": _metrics_for_mode(depth, img, metrics_mode, gt_result=gt_result),
         "latency_ms": lat,
-        "model": model,
+        "model": model_id,
+        "model_id": model_id,
+        "model_display_name": spec.display_name,
         "colormap": colormap,
         "device_used": device,
         "resolution": resolution,
@@ -558,6 +628,7 @@ def process_image(
         "metrics_mode": metrics_mode,
         "outputs": list(output_set),
         "gt_metadata": gt_metadata,
+        **engine_metadata,
     }
     payload.update(gt_visualizations)
     if "color" in output_set:

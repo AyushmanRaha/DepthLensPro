@@ -326,8 +326,8 @@ def test_onnx_status_route_reports_paths_and_providers() -> None:
     response = client.get("/onnx/status?device=cpu")
     assert response.status_code == 200
     payload = response.json()
-    assert "MiDaS_small" in payload["supported_model_ids"]
-    small = payload["models"]["MiDaS_small"]
-    assert small["expected_path"].endswith("MiDaS_small.onnx")
+    assert "midas_small" in payload["supported_model_ids"]
+    small = payload["models"]["midas_small"]
+    assert small["expected_path"].endswith("midas_small.onnx")
     assert "runtime" in small
     assert "available_providers" in payload["runtime"]

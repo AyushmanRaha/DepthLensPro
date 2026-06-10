@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
+from backend.model_registry import MODEL_REGISTRY
+
 SUPPORTED_MODELS: dict[str, dict[str, str]] = {
-    "MiDaS_small": {
-        "label": "Small",
-        "description": "~30 ms · EfficientNet-Lite · CPU-friendly",
-        "compute": "CPU or GPU",
-    },
-    "DPT_Hybrid": {
-        "label": "Hybrid",
-        "description": "~120 ms · ViT-Hybrid · GPU recommended",
-        "compute": "GPU recommended",
-    },
-    "DPT_Large": {
-        "label": "Large",
-        "description": "~400 ms · ViT-Large · GPU required for speed",
-        "compute": "GPU required",
-    },
+    model_id: {
+        "label": spec.display_name,
+        "display_name": spec.display_name,
+        "description": spec.notes or spec.architecture,
+        "compute": spec.recommended_device,
+        "pytorch_model_name": spec.pytorch_model_name,
+    }
+    for model_id, spec in MODEL_REGISTRY.items()
 }
 
 COLORMAP_NAMES: tuple[str, ...] = (

@@ -13,7 +13,8 @@ from typing import Any, Callable
 import numpy as np
 
 from backend.depth_models import onnx_model_path
-from backend.services.inference import SUPPORTED_MODELS, _infer_onnx, _infer_torch
+from backend.model_registry import get_model_spec, normalize_model_id
+from backend.services.inference import _infer_onnx, _infer_torch
 from backend.services.onnx_diagnostics import onnx_model_status
 from backend.utils.hardware import _resolve
 
@@ -41,7 +42,7 @@ def _auto_export_lock(model: str) -> threading.Lock:
 def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any]:
     """Export missing ONNX weights on demand for benchmark comparisons."""
 
-    if onnx_diag.get("state") != "missing_weights":
+    if onnx_diag.get("state") not in {"missing_weights", "missing_model_file"}:
         return onnx_diag
     if not _env_flag("DEPTHLENS_AUTO_EXPORT_ONNX", True):
         return onnx_diag
@@ -49,7 +50,7 @@ def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any
     requested_device = str(onnx_diag.get("runtime", {}).get("requested_device", "auto"))
     with _auto_export_lock(model):
         refreshed = onnx_model_status(model, requested_device)
-        if refreshed.get("state") != "missing_weights":
+        if refreshed.get("state") not in {"missing_weights", "missing_model_file"}:
             return refreshed
 
         try:
@@ -160,8 +161,8 @@ def run_benchmark(
 ) -> dict[str, Any]:
     """Return PyTorch-vs-ONNX latency, throughput, and memory benchmark matrices."""
 
-    if model not in SUPPORTED_MODELS:
-        raise ValueError(f"Unknown model: {model!r}")
+    model = normalize_model_id(model)
+    spec = get_model_spec(model)
     iterations = max(1, min(iterations, 20))
     resolved = str(_resolve(device))
     frame = _synthetic_frame()
@@ -190,12 +191,12 @@ def run_benchmark(
             onnx_result = _unavailable(
                 "onnxruntime", str(exc), "runtime_error", {"diagnostics": onnx_diag}
             )
-    elif onnx_diag["state"] == "missing_weights":
+    elif onnx_diag["state"] in {"missing_weights", "missing_model_file"}:
         command = onnx_diag["recommended_export_command"]
         onnx_result = _unavailable(
             "onnxruntime",
             f"ONNX weights missing. Expected {weights_path}. Run {command}.",
-            "missing_weights",
+            "missing_model_file",
             {"diagnostics": onnx_diag},
         )
     elif onnx_diag["state"] == "onnxruntime_missing":
@@ -236,6 +237,9 @@ def run_benchmark(
 
     return {
         "model": model,
+        "model_id": model,
+        "display_name": spec.display_name,
+        "input_shape": [1, 3, *spec.input_size],
         "device_requested": device,
         "device_resolved": resolved,
         "iterations": iterations,
@@ -244,5 +248,46 @@ def run_benchmark(
         "onnx_diagnostics": onnx_diag,
         "results": [pytorch_result, onnx_result],
         "comparison": comparison,
+        "speedup": comparison.get("speedup"),
+        "pytorch": {
+            "status": pytorch_result.get("status"),
+            "latency_ms": (
+                (pytorch_result.get("latency_ms") or {}).get("avg")
+                if isinstance(pytorch_result.get("latency_ms"), dict)
+                else None
+            ),
+            "throughput_fps": pytorch_result.get("throughput_fps"),
+            "device_used": resolved,
+            "memory_mb": _memory_snapshot().get("process_rss_mb"),
+            "error": pytorch_result.get("reason"),
+        },
+        "onnx": {
+            "status": (
+                "ok"
+                if onnx_result.get("status") == "ok"
+                else onnx_result.get("state", "unavailable")
+            ),
+            "latency_ms": (
+                (onnx_result.get("latency_ms") or {}).get("avg")
+                if isinstance(onnx_result.get("latency_ms"), dict)
+                else None
+            ),
+            "throughput_fps": onnx_result.get("throughput_fps"),
+            "providers_used": onnx_result.get("providers", []),
+            "onnx_path": os.fspath(weights_path),
+            "error_code": (
+                None
+                if onnx_result.get("status") == "ok"
+                else str(onnx_result.get("state", "unavailable")).upper()
+            ),
+            "message": onnx_result.get("reason"),
+            "technical_detail": onnx_result.get("diagnostics", {}).get("export_error")
+            or onnx_result.get("reason"),
+        },
+        "warnings": (
+            []
+            if onnx_result.get("status") == "ok"
+            else [onnx_result.get("reason", "ONNX unavailable; PyTorch benchmark completed")]
+        ),
         "memory_snapshot": _memory_snapshot(),
     }

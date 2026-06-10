@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.api.live import SERVICE_VERSION
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
+from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
 
 
 def _available_devices() -> dict[str, Any]:
@@ -378,6 +379,9 @@ async def health() -> dict[str, Any]:
     if device_meta.get("error") or accel_meta.get("error") or cache_error or onnx_error:
         status = "degraded"
 
+    from backend.services.onnx_diagnostics import readiness_payload as detailed_readiness_payload
+
+    readiness = detailed_readiness_payload(best)
     return {
         "status": status,
         "diagnostics_status": status,
@@ -394,6 +398,10 @@ async def health() -> dict[str, Any]:
         "acceleration_ok": accel_ok,
         "acceleration_checks": checks,
         "onnx": onnx,
+        "readiness": readiness,
+        "backend_live": True,
+        "overall_status": readiness.get("overall_status"),
+        "model_readiness": readiness.get("models", {}),
         "warmup": {
             "enabled": settings.DEPTHLENS_PRELOAD_MODEL,
             "model": settings.DEPTHLENS_WARMUP_MODEL,
@@ -442,8 +450,8 @@ async def onnx_status(device: str = "auto") -> dict[str, Any]:
 
 
 @router.get("/models")
-async def list_models() -> dict[str, list[dict[str, str]]]:
-    return {"models": [{"id": k, **v} for k, v in SUPPORTED_MODELS.items()]}
+async def list_models() -> dict[str, Any]:
+    return {"models": supported_models_payload()}
 
 
 @router.get("/colormaps")
@@ -483,8 +491,13 @@ async def estimate(
     gt_scale: float | None = Form(None),
     gt_invalid_value: float | None = Form(None),
 ) -> JSONResponse:
-    if model not in SUPPORTED_MODELS:
-        raise HTTPException(422, f"Unknown model '{model}'")
+    try:
+        model = normalize_model_id(model)
+    except UnknownModelError as exc:
+        raise HTTPException(
+            422,
+            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
+        ) from exc
     if colormap not in COLORMAP_NAMES:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
@@ -575,8 +588,13 @@ async def batch(
 ) -> JSONResponse:
     if len(files) > 10:
         raise HTTPException(422, "Batch limit: 10 images")
-    if model not in SUPPORTED_MODELS:
-        raise HTTPException(422, f"Unknown model '{model}'")
+    try:
+        model = normalize_model_id(model)
+    except UnknownModelError as exc:
+        raise HTTPException(
+            422,
+            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
+        ) from exc
     if colormap not in COLORMAP_NAMES:
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
