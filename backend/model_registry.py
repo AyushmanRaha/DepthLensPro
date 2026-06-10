@@ -123,6 +123,21 @@ def supported_models_payload() -> list[dict[str, Any]]:
     return [spec.as_dict() for spec in MODEL_REGISTRY.values()]
 
 
+def supported_models_legacy_payload() -> dict[str, dict[str, str]]:
+    """Return the legacy lightweight metadata shape used by older callers."""
+
+    return {
+        model_id: {
+            "label": spec.display_name,
+            "display_name": spec.display_name,
+            "description": spec.notes or spec.architecture,
+            "compute": spec.recommended_device,
+            "pytorch_model_name": spec.pytorch_model_name,
+        }
+        for model_id, spec in MODEL_REGISTRY.items()
+    }
+
+
 def _candidate_dirs(output_dir: str | os.PathLike[str] | None = None) -> list[tuple[str, Path]]:
     """Return deterministic ONNX search/write directories in priority order."""
 

@@ -144,8 +144,12 @@ def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.nd
     key = f"{model_id}:{device_str}"
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     batch = transform(rgb).to(device, non_blocking=True)
-    with _MODEL_FORWARD_LOCKS[key], torch.inference_mode():
-        pred = model(batch)
+    # Some backends are not safe under concurrent forwards on the same model/device
+    # instance.  Keep the per-model/device lock around the model call only; resize
+    # and CPU transfer happen after the protected forward section.
+    with torch.inference_mode():
+        with _MODEL_FORWARD_LOCKS[key]:
+            pred = model(batch)
         pred = torch.nn.functional.interpolate(
             pred.unsqueeze(1),
             size=img_bgr.shape[:2],
@@ -186,6 +190,9 @@ def _infer_onnx(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.nda
     model_id = normalize_model_id(model_name)
     engine, forward_lock = _load_onnx_engine_with_lock(model_id, device_str)
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    # ONNX Runtime sessions are cached per model/device.  The lock protects the
+    # session forward for providers that are not re-entrant; color conversion and
+    # normalization stay outside the critical section.
     with forward_lock:
         depth = engine.forward(rgb)
     return _normalize_depth(depth)
@@ -497,9 +504,11 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict[str, Any]:
     nz = flat[flat > 1e-6]
     dyn = float(np.log2(nz.max() / nz.min())) if len(nz) > 0 else 0.0
 
-    hist, _ = np.histogram(flat, bins=256, range=(0.0, 1.0))
-    hp = hist / hist.sum()
-    entropy = float(-np.sum(hp[hp > 0] * np.log2(hp[hp > 0])))
+    hist256, edges256 = np.histogram(flat, bins=256, range=(0.0, 1.0))
+    hist_total = max(float(hist256.sum()), 1.0)
+    hp = hist256 / hist_total
+    nonzero_hp = hp[hp > 0]
+    entropy = float(-np.sum(nonzero_hp * np.log2(nonzero_hp)))
     coverage = float((hp >= hp.max() * 0.01).mean())
 
     depth32 = depth64.astype(np.float32)
@@ -528,7 +537,10 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict[str, Any]:
     mse_v = float(np.mean((depth64 - d_mean) ** 2))
     psnr = float(10 * math.log10(1.0 / (mse_v + 1e-10))) if mse_v > 1e-10 else 99.0
 
-    h32, edges = np.histogram(flat, bins=32, range=(0.0, 1.0))
+    # Reuse the 256-bin histogram for the public 32-bin payload instead of
+    # scanning the depth plane a second time.  The ranges align exactly.
+    h32 = hist256.reshape(32, 8).sum(axis=1)
+    edges = edges256[::8]
 
     return {
         "min": round(d_min, 4),
