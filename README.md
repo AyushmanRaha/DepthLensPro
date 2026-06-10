@@ -2,15 +2,15 @@
 
 [![CI/CD Status](https://img.shields.io/badge/CI%2FCD-passing-placeholder.svg)](#validation--ci)
 [![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](electron-app/package.json)
-[![API](https://img.shields.io/badge/API-3.1.0-6f42c1.svg)](backend/main.py)
+[![API](https://img.shields.io/badge/API-3.1.0-6f42c1.svg)](backend/api/live.py)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-ARM%20desktop%20only-lightgrey.svg)](#supported-platforms)
 
-Last Updated: 10th June 2026
+Last Updated: 11th June 2026
 
-DepthLensPro is a native cross-platform desktop application for hardware-accelerated monocular depth estimation from 2D images. It pairs an Electron desktop client with a FastAPI inference service that runs MiDaS-family models through PyTorch and ONNX Runtime, with Redis-backed caching for repeatable low-latency workflows.
+DepthLensPro is a local-first desktop application for hardware-aware monocular depth estimation from 2D images. It combines an Electron `4.0.0` shell with a FastAPI `3.1.0` backend that runs MiDaS-family models through PyTorch and ONNX Runtime, then presents depth maps, diagnostics, experiments, and performance analysis in one secure desktop workspace.
 
-The application is optimized for local-first image processing, secure desktop packaging, production-oriented diagnostics, and explicit hardware routing across Apple Silicon, CUDA-capable GPUs, Intel XPU, and CPU fallback paths.
+The project favors explicit runtime checks, small reviewable changes, ARM desktop packaging, repeatable dependency installation, and safe fallback behavior when optional accelerators or Redis are unavailable.
 
 ---
 
@@ -38,167 +38,190 @@ The application is optimized for local-first image processing, secure desktop pa
 
 ### Core Engine & AI
 
-- Monocular depth estimation using MiDaS-family models: `MiDaS_small`, `DPT_Hybrid`, and `DPT_Large`.
-- ONNX Runtime execution when exported static graphs are available, with automatic first-benchmark ONNX graph export, explicit diagnostics for missing weights, missing runtime imports, provider fallback, and CPU-only execution.
+- Monocular depth estimation with canonical model IDs `midas_small`, `dpt_hybrid`, and `dpt_large`; display names are `MiDaS Small`, `DPT Hybrid`, and `DPT Large`.
+- Alias-aware model input: the backend accepts common display-name, PyTorch-name, space, hyphen, and underscore variants, then normalizes them to lowercase canonical IDs internally.
+- PyTorch inference with ONNX Runtime acceleration when exported static `.onnx` graphs and compatible providers are available.
 - Single-image and batch inference, with batch requests capped at **10 images**.
-- Supported source uploads: `PNG`, `JPG/JPEG`, `WEBP`, and `BMP`.
-- Optional Ground Truth mode for one source image plus one GT depth file (`PNG`, `TIFF`, or `NPY`, **20 MB** max) to compute benchmark metrics without changing the standard image-only workflow.
-- Selective output generation for colorized and/or grayscale depth maps so interactive workspace requests avoid unnecessary encoding.
+- Supported source uploads: any FastAPI `image/*` upload that OpenCV can decode, with a **20 MB** route limit.
+- Optional Ground Truth mode for one source image plus one GT depth file, with `.png`, `.tif`/`.tiff`, and `.npy` support.
+- Selective output generation for colorized and/or grayscale depth maps.
 - Colormap options: `inferno`, `plasma`, `viridis`, `magma`, `jet`, `hot`, `bone`, and `turbo`.
-- Runtime model comparison across supported architectures with side-by-side outputs and metric charts.
-- Experiment Workspace for named local validation runs, side-by-side RGB/prediction/GT/error previews, and JSON/CSV exports.
-- Prediction statistics, proxy/self-consistency diagnostics, and true GT benchmark metrics are separated so proxy values are not presented as standard accuracy metrics.
+- Runtime model comparison, Performance Analysis, session analytics, and Experiment Workspace exports.
+- Structured metrics that separate prediction statistics, proxy/self-consistency diagnostics, GT metrics, and unavailable metrics.
 
 ### System Architecture & Observability
 
-- FastAPI ASGI backend with explicit route, inference, cache, benchmark, configuration, and hardware modules.
-- Redis-backed response cache plus normalized-depth reuse keyed by image, model, resolved device, and max dimension, with TTL control and in-memory fallback.
-- Structured runtime configuration through environment variables and optional `.env` values.
-- JSON structured logging for collector-friendly backend logs.
-- Lightweight liveness, inference readiness, ONNX status, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration signals exposed through API endpoints.
+- FastAPI ASGI backend with separate route, live, inference, cache, benchmark, diagnostics, configuration, hardware, and model-registry modules.
+- Redis-backed response cache with in-memory fallback, plus a normalized-depth in-process cache keyed by image, model, device, and max dimension.
+- Versioned JSON cache serialization with schema version `2` and magic prefix `DLP2\0`; legacy pickle payloads using `DLP1\0` or raw pickle bytes return cache misses and are not deserialized.
+- Environment-backed configuration through process variables and optional `.env` values.
+- JSON structured logging for backend runtime logs.
+- Lightweight liveness, inference readiness, ONNX status, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration telemetry endpoints.
 - Docker and Docker Compose support for backend-plus-Redis execution.
 
 ### Desktop Client
 
 - Electron desktop shell with automatic FastAPI child-process lifecycle management.
-- Sandboxed renderer, `contextIsolation` enabled, `nodeIntegration` disabled, and navigation constrained to loopback origins.
-- Splash screen while Electron waits for lightweight `/live`, followed by progressive renderer startup: `/live` shows the backend is reachable, `/ready` gates inference controls, and `/health`, `/devices`, plus cache metrics load afterward with developer timing logs.
-- Drag-and-drop upload workflow with progress, adaptive ETA, cancellation, optional GT pairing, result cards, lightbox metrics, and download actions.
-- Persistent user preferences for model, colormap, theme, and compute device.
-- Responsive workspace panels for generation, model comparison, session analytics, and application details.
-- Animated landing experience with theme-aware vector background and liquid-metal logo transition.
+- Sandboxed renderer with `contextIsolation` enabled, `nodeIntegration` disabled, and strict navigation policy.
+- Startup sequence: Electron waits on `/live`, the renderer calls `/ready` before enabling inference controls, then `/health`, `/devices`, and `/cache/metrics` load background diagnostics.
+- Drag-and-drop upload workflow with progress, ETA, cancellation, optional GT pairing, result cards, lightbox metrics, and download actions.
+- Persistent preferences for model, colormap, theme, and compute device.
+- Workspace panels for generation, model comparison, performance analysis, experiments, session analytics, and application details.
+- Animated landing experience with theme-aware visuals.
 
 ---
 
 ## Hardware Acceleration
 
-DepthLensPro treats accelerator selection as an explicit runtime concern. Users can select `Auto`, `CPU`, `CUDA`, `MPS`, or `XPU`, while the backend validates availability and falls back safely when a provider is unavailable.
+DepthLensPro treats accelerator selection as a runtime setting. Users can choose `auto`, `cpu`, `cuda`, `mps`, or `xpu`; the backend validates availability and falls back safely when a requested provider cannot run.
 
 | Target | Runtime Path | Notes |
 |---|---|---|
-| **Apple Silicon** | PyTorch MPS via Metal | Native `arm64` packaging for macOS with zero-translation execution on Apple Silicon. |
-| **NVIDIA GPU** | PyTorch CUDA and ONNX Runtime provider support where installed | Best suited for larger DPT models and high-throughput workloads. |
-| **Intel XPU** | PyTorch XPU where available | Exposed as a first-class selectable compute target when detected. |
-| **CPU** | PyTorch CPU and ONNX Runtime CPU provider | Stable fallback path for all supported systems. |
-| **ONNX Runtime** | Static `.onnx` graphs with provider fallback | Use `backend/scripts/export_onnx.py` to export model weights for accelerated inference paths. |
+| **Apple Silicon** | PyTorch MPS via Metal | Native `darwin arm64` packaging avoids Rosetta for the desktop app and PyTorch path. |
+| **NVIDIA GPU** | PyTorch CUDA and matching ONNX Runtime providers where installed | Best for larger DPT models and repeated workloads. |
+| **Intel XPU** | PyTorch XPU where available | Exposed as a selectable device when detected by the hardware utility. |
+| **CPU** | PyTorch CPU and ONNX Runtime CPU provider | Portable fallback for all supported systems. |
+| **ONNX Runtime** | Static `.onnx` graphs with provider filtering | Uses exported graphs from the configured ONNX search path and reports provider fallback in diagnostics. |
 
-Desktop packaging targets ARM platforms only. Apple Silicon macOS runs PyTorch MPS inference through Metal without Rosetta translation overhead; Windows ARM and Linux ARM keep CPU plus any available CUDA/XPU runtime paths provided by the installed Python environment. ONNX Runtime remains available as an alternative execution path when static model graphs and compatible providers are present.
+Desktop packaging targets ARM platforms only. The backend can still expose CPU, CUDA, MPS, XPU, and ONNX provider data according to the Python runtime installed on that machine.
 
 ---
 
 ## Architecture
 
-DepthLensPro separates user interface, privilege boundaries, and inference workloads into independently reasoned components:
+DepthLensPro uses a desktop-first architecture: Electron owns the window, process lifecycle, and secure bridge; FastAPI owns inference and diagnostics; the frontend owns user workflow and visualization.
 
 ```text
-Electron Main Process
-  ├─ owns native window lifecycle
-  ├─ starts/stops the FastAPI backend as a child process
-  └─ enforces navigation and packaging behavior
+DepthLensPro/
+├── electron-app/          # Electron shell, lifecycle, packaging, security policy
+├── frontend/              # Static renderer workspace
+├── backend/               # FastAPI API, inference, diagnostics, cache, models
+├── models/onnx/           # Repository-default ONNX graph directory
+├── Dockerfile             # Backend container image
+├── docker-compose.yml     # Backend + Redis development stack
+└── README.md              # Operator and developer runbook
+```
 
-Electron Sandboxed Renderer
-  ├─ renders upload, comparison, metrics, and analytics workflows
-  ├─ communicates only through approved browser APIs and preload bridge
-  └─ persists non-sensitive preferences in localStorage
+```text
+Electron main process
+  ├─ checks supported ARM desktop architecture
+  ├─ starts uvicorn backend on 127.0.0.1:8765 unless a live owned backend exists
+  ├─ waits for GET /live
+  ├─ loads frontend/index.html through file://
+  └─ exposes a narrow preload bridge
 
-Preload Bridge
-  ├─ exposes a minimal contextBridge API
-  └─ provides platform/architecture metadata under context isolation
+Renderer
+  ├─ resolves backend URL from preload
+  ├─ calls GET /live
+  ├─ calls GET /ready before enabling inference controls
+  ├─ loads GET /health, GET /devices, and GET /cache/metrics in the background
+  └─ calls inference, batch, benchmark, cache, and ONNX endpoints as needed
 
-FastAPI ASGI Backend
-  ├─ serves inference, health, devices, models, benchmarks, and cache endpoints
-  ├─ loads MiDaS models through PyTorch or exported ONNX graphs
-  ├─ routes requests to CPU, MPS, CUDA, or XPU devices
-  └─ integrates Redis cache, structured logging, and telemetry
+FastAPI backend
+  ├─ validates uploads, model IDs, colormaps, metrics mode, outputs, and device requests
+  ├─ normalizes model aliases to canonical lowercase IDs
+  ├─ executes PyTorch or ONNX Runtime paths with PyTorch fallback
+  ├─ computes metrics and optional GT alignment
+  └─ returns structured diagnostics for UI and operators
 ```
 
 ### Separation of Concerns
 
-- **Electron renderer** owns presentation, user interaction, progress state, charts, and local preferences.
-- **Preload script** preserves context isolation by exposing only the minimal desktop metadata required by the UI.
-- **Electron main process** owns privileged desktop capabilities, backend process management, packaged-resource resolution, and navigation policy.
-- **FastAPI backend** owns model lifecycle, inference execution, metrics generation, diagnostics, and cache coordination.
+| Layer | Responsibility | Key Files |
+|---|---|---|
+| Electron main | App lifecycle, backend child process, supported-architecture guard, navigation policy, IPC handlers | `electron-app/main.js`, `electron-app/src/security-policy.js`, `electron-app/src/backend-process-policy.js` |
+| Preload bridge | Minimal renderer API surface | `electron-app/preload.js` |
+| Renderer | Workspace UI, preferences, polling, uploads, comparisons, experiments, exports | `frontend/index.html`, `frontend/script.js` |
+| API routes | HTTP request validation, endpoint payloads, route-level cache use | `backend/api/live.py`, `backend/api/routes.py` |
+| Services | Inference, benchmarks, cache, diagnostics, GT metrics, ONNX diagnostics | `backend/services/` |
+| Models | Registry, alias normalization, ONNX path resolution, PyTorch/ONNX wrappers | `backend/model_registry.py`, `backend/depth_models.py` |
 
 ---
 
 ## Technology Stack
 
-| Layer | Technology | Responsibility |
-|---|---|---|
-| Desktop shell | Electron `42.x`, electron-builder `26.x` | Native packaging, window lifecycle, backend child process orchestration |
-| Renderer | HTML5, CSS3, JavaScript ES2022, Chart.js | Workspace UI, comparison views, analytics, result rendering |
-| API service | Python `3.10`–`3.12`, FastAPI, Uvicorn | ASGI API, request validation, lifecycle hooks, diagnostics |
-| AI runtime | PyTorch, Torch Hub, ONNX, ONNX Runtime | MiDaS model loading and accelerated inference |
-| Image processing | OpenCV Headless, NumPy, Pillow | Input normalization, depth-map post-processing, PNG encoding without desktop GUI library requirements |
-| Cache | Redis with in-memory fallback | TTL-based reuse of repeated inference results |
-| Configuration | `pydantic-settings` with fallback shim | Environment and `.env` driven backend configuration |
-| Observability | JSON logging, `/live`, `/ready`, `/health`, `/devices`, `/onnx/status`, `/benchmark`, `/cache/metrics` | Liveness, inference readiness, ONNX provider/weight diagnostics, runtime state, resource telemetry, benchmark reporting |
-| Delivery | Docker, Docker Compose, GitHub Actions | Containerized backend, Redis stack, quality gates |
+Version values come from `backend/requirements.txt` and `electron-app/package.json`.
+
+| Component | Version | Role |
+|---|---:|---|
+| DepthLens Pro app | `4.0.0` | Electron application version. |
+| DepthLens Pro API | `3.1.0` | FastAPI service version. |
+| Electron | `^42.3.0` | Native desktop shell. |
+| electron-builder | `^26.8.1` | ARM desktop packaging. |
+| FastAPI | `0.135.3` | ASGI API framework. |
+| Uvicorn | `0.44.0` | ASGI server launched by Electron and Docker. |
+| PyTorch | `2.11.0` | Primary model runtime and ONNX export source. |
+| torchvision | `0.26.0` | PyTorch vision dependency. |
+| ONNX | `1.20.1` | Exported graph format and validation library. |
+| ONNX Runtime | `1.24.3` | Optional static-graph inference runtime. |
+| onnxscript | `0.7.0` | PyTorch ONNX export support. |
+| timm | `1.0.26` | Model dependency used by MiDaS-family loading. |
+| OpenCV Headless | `4.13.0.92` | Image decoding, resizing, colorization, and metrics operations. |
+| NumPy | `2.4.4` | Array and metric computation. |
+| Pillow | `12.2.0` | GT image decoding. |
+| Redis Python client | `6.4.0` | Optional Redis cache backend. |
+| pydantic-settings | `2.12.0` | Environment-backed configuration. |
+| python-multipart | `0.0.24` | FastAPI multipart upload parsing. |
+| Docker Compose services | `api`, `redis` | Backend and optional cache service for containerized development. |
 
 ---
 
 ## Observability & Telemetry
 
-DepthLensPro exposes operational signals suitable for local diagnostics, release validation, and production-style monitoring.
+The backend exposes cheap liveness separately from heavier diagnostics so the app can start quickly while detailed checks load in the background.
 
-| Signal | Surface | Description |
+| Signal | Endpoint or Surface | Description |
 |---|---|---|
-| Structured logs | Backend stdout | JSON records with timestamp, level, logger, module, function, line, process, thread, and exception details. |
-| Liveness | `GET /live` | Immediate backend availability check used by Electron and the renderer; does not load models, probe accelerators, query Redis, or gather telemetry. |
-| Inference readiness | `GET /ready` | Fast dependency and packaging check used by the renderer before enabling inference; imports required runtime modules, reports optional Redis/ONNX availability, lists ONNX weight paths, and does not load MiDaS weights. |
-| Health diagnostics | `GET /health` | Full diagnostics including primary device, loaded models, PyTorch version, cached acceleration checks, device inventory, cache summary, timing fields, warmup state, and system metadata. Degraded diagnostics do not make inference unavailable. |
-| Device inventory | `GET /devices` | Lightweight device list used after `/live`; always includes CPU and uses cached discovery where possible. |
-| Memory telemetry | `GET /health` | Memory status, pressure percentage, limit threshold, total bytes, available bytes, and used bytes. |
-| Disk telemetry | `GET /health` | Disk status, monitored path, usage percentage, limit threshold, total bytes, free bytes, and used bytes. |
-| Cache metrics | `GET /cache/metrics` and `GET /health` | Redis availability, backend type, hit/miss counts, fallback failures, keyspace size, and TTL. |
-| Runtime benchmarks | `GET /benchmark` and `GET /api/benchmark` | PyTorch versus ONNX Runtime latency, throughput, memory, speedup comparison, automatic missing-graph export when enabled, and explicit ONNX states (`available`, `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `export_failed`, `runtime_error`, `unavailable`). |
-| ONNX diagnostics | `GET /onnx/status`, `/ready`, and `/health` | Supported model IDs, expected weight paths, file sizes, ONNX Runtime import status, available providers, selected provider/fallback, and export commands. |
-| Session analytics | Desktop workspace | Processed image count, latency history, average/min/max latency, throughput, total inference time, cache hits, and error count. |
-| Experiment validation | Desktop Experiments panel | Named local runs, image/GT metadata, latency, metrics, warnings, side-by-side previews, error heatmaps when GT is valid, and JSON/CSV exports. |
+| Liveness | `GET /live` | Lightweight process heartbeat with service name, API version, PID, timestamp, and uptime. |
+| Inference readiness | `GET /ready` | Required Python module checks, optional module checks, torch runtime details, ONNX status, models, colormaps, and effective settings. |
+| Health diagnostics | `GET /health` | Device inventory, loaded models, cache metrics, PyTorch version, acceleration probes, ONNX readiness, memory, disk, warmup, timings, and system metadata. |
+| Device inventory | `GET /devices` | Cached device list and primary device; always falls back to CPU if discovery fails. |
+| ONNX diagnostics | `GET /onnx/status` | Supported model IDs, expected and selected paths, file sizes, runtime import status, available providers, selected providers, and export commands. |
+| Cache metrics | `GET /cache/metrics`, `GET /health` | Cache backend, Redis availability, hits, misses, keyspace size, failures, TTL, and memory limit. |
+| Runtime benchmarks | `GET /benchmark`, `GET /api/benchmark` | PyTorch versus ONNX Runtime latency, throughput, memory, provider, speedup, and diagnostic state. |
+| Session analytics | Desktop workspace | Processed image count, latency history, min/max/average latency, throughput, total inference time, cache hits, and errors. |
+| Experiment validation | Desktop Experiments panel | Named local runs, image/GT metadata, latency, metrics, warnings, previews, error heatmaps, and JSON/CSV export. |
 
 ---
 
 ## Supported Platforms
 
-DepthLens Pro now supports **ARM desktop targets only**. Normal users should open the native app; they should not manually start FastAPI or Uvicorn. Electron owns backend startup, liveness checks through `/live`, renderer readiness checks through `/ready`, and backend shutdown.
+DepthLens Pro supports ARM desktop targets for native app packaging. Normal users should open the native app; Electron starts and stops FastAPI for them.
 
 | Status | Platform | Architecture | Notes |
 |---|---|---|---|
-| Supported | macOS Apple Silicon only | `darwin arm64` | Build/open `electron-app/dist/mac-arm64/DepthLens Pro.app` or install one `/Applications/DepthLens Pro.app` from the Apple Silicon DMG. |
-| Supported | Windows ARM only | `win32 arm64` | Build with `npm run build:win:arm64`; Windows x64 installers are intentionally not produced. |
-| Supported | Linux ARM only | `linux arm64` / `aarch64` | Build with `npm run build:linux:arm64`; Linux x64 artifacts are intentionally not produced. |
+| Supported | macOS Apple Silicon | `darwin arm64` | Build/open `electron-app/dist/mac-arm64/DepthLens Pro.app` or install the Apple Silicon DMG. |
+| Supported | Windows ARM | `win32 arm64` | Build with `npm run build:win:arm64`; x64 installers are not produced. |
+| Supported | Linux ARM | `linux arm64` / `aarch64` | Build with `npm run build:linux:arm64`; x64 AppImages are not produced. |
 | Unsupported | Intel Mac / macOS x64 | `darwin x64` | Blocked at Electron startup before backend launch. |
-| Unsupported | macOS universal builds | universal | Unsupported because they can create duplicate/stale bundles and Intel launch paths. |
+| Unsupported | macOS universal builds | `universal` | Unsupported because they can create duplicate or stale bundles. |
 | Unsupported | Windows x64 | `win32 x64` | Unsupported build scripts fail with a clear architecture message. |
 | Unsupported | Linux x64 | `linux x64` | Unsupported build scripts fail with a clear architecture message. |
 
-The bundle identifier remains stable as `com.ayushmanraha.depthlens-pro`, and the product name remains exactly `DepthLens Pro` without architecture suffixes.
+The bundle identifier is `com.ayushmanraha.depthlens-pro`, and the product name is `DepthLens Pro`.
 
-The runtime guard shows: “DepthLens Pro currently supports Apple Silicon macOS, Windows ARM, and Linux ARM only.” It also includes the detected platform and architecture and exits before starting the backend.
+---
 
 ## Quick Start / Runbook
 
-DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. The Electron app starts that backend automatically in development and packaged desktop modes, waits for `GET /live`, then exposes the resolved URL to the renderer through the secure preload bridge. The renderer calls `GET /ready` before enabling inference controls so missing OpenCV/PyTorch/packaging dependencies are surfaced clearly. `GET /health` is intentionally reserved for fuller diagnostics and may be degraded without making inference unavailable.
+DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. Electron starts that backend automatically, waits for `/live`, and passes the resolved backend URL to the renderer through the preload bridge.
 
-> **First run:** model weights may be downloaded through `torch.hub` the first time a model is lazily loaded. Subsequent runs use the local model cache. Optional background warmup is available with `DEPTHLENS_PRELOAD_MODEL=true`, `DEPTHLENS_WARMUP_MODEL=MiDaS_small`, and `DEPTHLENS_WARMUP_DEVICE=auto`; warmup failure does not break `/live` or lazy inference.
->
-> **Cache note:** Redis is optional. If Redis is unavailable or not installed, the backend logs the condition and falls back to an in-memory cache automatically.
->
-> **Repeatable dependency note:** Always run the backend dependency install/verify step before launching, testing, or building. This is safe to repeat and ensures new or updated backend requirements are installed after a fresh clone, `git pull`, branch switch, or code update. Continue only after `python -m pip check` finishes without errors. Performance Analysis also requires ONNX export/runtime packages (`onnx`, `onnxruntime`, and `onnxscript`), which are installed from `backend/requirements.txt`; missing `.onnx` graph files are exported automatically the first time a benchmark is run unless `DEPTHLENS_AUTO_EXPORT_ONNX=false`.
+The first renderer pass calls `/ready` before enabling inference controls, then loads `/health`, `/devices`, and `/cache/metrics` as background diagnostics. Redis is optional; when Redis is unavailable, the cache service uses its in-memory backend.
 
 ### Prerequisites
 
-- Python `3.10`–`3.12` recommended for PyTorch, OpenCV, and ONNX Runtime compatibility
+- Python `3.10` through `3.12`
 - `pip`
 - Node.js and npm
 - Git
-- Optional: Redis for distributed cache validation
 
 ### A. Get the Repository in Downloads
 
-Keep the working copy under the user Downloads folder on every supported platform. The repository URL is shown as a placeholder because this checkout does not declare a Git remote.
+Keep the working copy under the user Downloads folder on every supported platform. The repository URL is a placeholder because this checkout does not declare a public remote.
 
 #### macOS / Linux
+
+This command clones the repository into `~/Downloads/DepthLensPro` and changes into the project root.
 
 ```bash
 cd ~/Downloads
@@ -208,6 +231,8 @@ cd DepthLensPro
 
 #### Windows PowerShell
 
+This command clones the repository into `%USERPROFILE%\Downloads\DepthLensPro` and changes into the project root.
+
 ```powershell
 cd "$env:USERPROFILE\Downloads"
 git clone https://github.com/<your-org-or-user>/DepthLensPro.git
@@ -215,6 +240,8 @@ cd DepthLensPro
 ```
 
 #### Windows Command Prompt
+
+This command clones the repository into `%USERPROFILE%\Downloads\DepthLensPro` and changes into the project root.
 
 ```bat
 cd %USERPROFILE%\Downloads
@@ -224,452 +251,429 @@ cd DepthLensPro
 
 ### B. Install and Verify Backend Dependencies
 
-DepthLensPro stores Python backend requirements in `backend/requirements.txt`. The virtual environment is created at the repository root as `venv/` because packaged Electron builds copy `../venv` into the native app resources. Run these commands from inside `backend/` every time before a terminal launch, backend-only launch, native build, native test, rebuild, or run after pulling changes.
+Run this section after a fresh clone, branch switch, or dependency update. The commands create the repo-root Python virtual environment, install backend Python packages, verify dependency consistency, install Electron packages, and verify packaged resource paths.
 
-#### macOS / Linux
+#### macOS
+
+This command prepares Python and Node dependencies on macOS, and the expected outcome is a valid virtual environment plus verified Electron resources.
 
 ```bash
-cd ~/Downloads/DepthLensPro
-
-cd backend
-python3 -m venv ../venv
-source ../venv/bin/activate
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
+cd electron-app
+npm install
+npm run verify:resources
+cd ..
+```
+
+#### Linux ARM
+
+This command prepares Python and Node dependencies on Linux ARM, and the expected outcome is a valid virtual environment plus verified Electron resources.
+
+```bash
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r backend/requirements.txt
+python -m pip check
+cd electron-app
+npm install
+npm run verify:resources
 cd ..
 ```
 
 #### Windows PowerShell
 
-```powershell
-cd "$env:USERPROFILE\Downloads\DepthLensPro"
+This command prepares Python and Node dependencies, and the expected outcome is a valid virtual environment plus verified Electron resources.
 
-cd backend
-py -3 -m venv ..\venv
-..\venv\Scripts\Activate.ps1
+```powershell
+if (!(Test-Path venv)) { py -m venv venv }
+.\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
+cd electron-app
+npm install
+npm run verify:resources
 cd ..
-```
-
-If PowerShell blocks virtual environment activation, run this once in the same PowerShell profile and then activate again:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
 #### Windows Command Prompt
 
-```bat
-cd %USERPROFILE%\Downloads\DepthLensPro
+This command prepares Python and Node dependencies, and the expected outcome is a valid virtual environment plus verified Electron resources.
 
-cd backend
-py -3 -m venv ..\venv
-..\venv\Scripts\activate.bat
+```bat
+if not exist venv py -m venv venv
+venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend\requirements.txt
 python -m pip check
+cd electron-app
+npm install
+npm run verify:resources
 cd ..
 ```
 
 ### C. Native App Build / Install by Platform
 
-Run the backend dependency install/verify commands in section B first, then install Electron dependencies from `electron-app/` and build the supported ARM package. Native build and test commands do **not** replace the backend dependency step; repeat section B after `git pull`, branch switching, dependency file changes, or before rebuilding a newer app version.
+Native builds package the backend, frontend, and repo-root virtual environment into an ARM desktop artifact. Each flow exports all ONNX graphs after resource verification so Performance Analysis works in the packaged app without a benchmark-triggered export.
 
 #### macOS Native App Build
 
-Builds unsigned macOS artifacts for **Apple Silicon (`arm64`) only**. `npm run build:mac` cleans old packaged outputs first, builds the Apple Silicon target, and scans for duplicate app bundles. The intended local Apple Silicon build output is:
-
-```text
-electron-app/dist/mac-arm64/DepthLens Pro.app
-```
+This command installs dependencies, exports all ONNX graphs, and builds the Apple Silicon DMG and app bundle.
 
 ```bash
-cd ~/Downloads/DepthLensPro
-
-cd backend
-python3 -m venv ../venv
-source ../venv/bin/activate
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
-cd ..
-
 cd electron-app
 npm install
 npm run verify:resources
-npm run build:mac
-```
-
-Open either the local app bundle at `electron-app/dist/mac-arm64/DepthLens Pro.app` for testing or the generated Apple Silicon DMG from `electron-app/dist/`, drag **one** **DepthLens Pro** app to `/Applications`, and launch it. The `dist/` app is build output; `/Applications/DepthLens Pro.app` is the installed copy. Keeping both can make Spotlight show two icons until one is removed and indexing catches up. If macOS Gatekeeper blocks an unsigned local build, clear quarantine metadata:
-
-```bash
-xattr -cr "/Applications/DepthLens Pro.app"
+cd ..
+python backend/scripts/export_onnx.py --all
+cd electron-app
+npm run build:mac:arm64
 ```
 
 #### Windows Native App Build
 
-Builds a **Windows ARM64 only** NSIS installer. Run these commands from PowerShell so the Windows virtual environment layout is used (`venv\Scripts\python.exe`). Windows x64 builds are unsupported and intentionally fail.
+This PowerShell command installs dependencies, exports all ONNX graphs, and builds the Windows ARM NSIS installer.
 
 ```powershell
-cd "$env:USERPROFILE\Downloads\DepthLensPro"
-
-cd backend
-py -3 -m venv ..\venv
-..\venv\Scripts\Activate.ps1
+if (!(Test-Path venv)) { py -m venv venv }
+.\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
-cd ..
-
 cd electron-app
 npm install
 npm run verify:resources
+cd ..
+python backend/scripts/export_onnx.py --all
+cd electron-app
 npm run build:win:arm64
 ```
 
-Run the generated installer from `electron-app\dist\`, then launch **DepthLens Pro** from the Start menu or desktop shortcut. Packaged builds expect the prepared `venv/`, `backend/`, and `frontend/` resources to be present in the installer resources.
+This Command Prompt command installs dependencies, exports all ONNX graphs, and builds the Windows ARM NSIS installer.
 
-#### Linux ARM Native App Build
-
-Builds a **Linux ARM64/aarch64 only** AppImage. Prepare and verify the repo-root virtual environment first so electron-builder can copy `backend/`, `frontend/`, and `venv/` into packaged resources.
-
-```bash
-cd ~/Downloads/DepthLensPro
-
-cd backend
-python3 -m venv ../venv
-source ../venv/bin/activate
+```bat
+if not exist venv py -m venv venv
+venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend\requirements.txt
 python -m pip check
-cd ..
-
 cd electron-app
 npm install
 npm run verify:resources
+cd ..
+python backend\scripts\export_onnx.py --all
+cd electron-app
+npm run build:win:arm64
+```
+
+#### Linux ARM Native App Build
+
+This command installs dependencies, exports all ONNX graphs, and builds the Linux ARM AppImage.
+
+```bash
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r backend/requirements.txt
+python -m pip check
+cd electron-app
+npm install
+npm run verify:resources
+cd ..
+python backend/scripts/export_onnx.py --all
+cd electron-app
 npm run build:linux:arm64
 ```
 
-Run the generated ARM64 AppImage from `electron-app/dist/`. Linux x64 builds are intentionally unsupported.
-
 #### Native App Development Test
 
-Use this when you want to test the native shell without creating an installer. Run section B first, then:
+This command starts the Electron development app after installing and verifying dependencies.
 
 ```bash
-cd ~/Downloads/DepthLensPro/electron-app
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r backend/requirements.txt
+python -m pip check
+cd electron-app
 npm install
 npm run verify:resources
 npm start
 ```
 
-On Windows PowerShell, use the same commands after entering `cd "$env:USERPROFILE\Downloads\DepthLensPro\electron-app"`.
-
 #### End-User Installation from Release Artifacts
 
-- **macOS:** Download the latest `DMG`, mount it, drag **DepthLens Pro** into `/Applications`, and launch the app.
-- **Windows ARM:** Download the latest Windows ARM installer (`.exe`), run it, and launch **DepthLens Pro** from the Start menu or desktop shortcut. Windows x64 is unsupported.
-- **Linux ARM:** Build or download the ARM64/aarch64 AppImage and run one copy of **DepthLens Pro**. Linux x64 is unsupported.
+Install the ARM artifact for your platform and launch `DepthLens Pro`. The app starts FastAPI on loopback, waits for `/live`, then enables renderer controls only after `/ready` reports required inference dependencies.
 
 ### D. Terminal-Only Local Test / Development
 
-Use this path when you want to run the full app from terminals without creating a native installer. Repeat the backend dependency install/verify step before every launch, especially after pulling changes or switching branches.
+Terminal-only mode starts the Electron app from source. Each platform block installs Python and Node dependencies, verifies the Python environment, exports ONNX graphs, installs Electron dependencies, and starts the app.
 
-The Electron development command is the simplest full-app terminal workflow: one terminal runs Electron, and Electron starts FastAPI on `127.0.0.1:8765` automatically.
+#### macOS
 
-#### macOS / Linux
+This command prepares all dependencies on macOS, exports ONNX graphs, and starts Electron from source.
 
 ```bash
-cd ~/Downloads/DepthLensPro
-
-cd backend
-python3 -m venv ../venv
-source ../venv/bin/activate
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
-cd ..
-
+python backend/scripts/export_onnx.py --all
 cd electron-app
 npm install
+npm run verify:resources
+npm start
+```
+
+#### Linux ARM
+
+This command prepares all dependencies on Linux ARM, exports ONNX graphs, and starts Electron from source.
+
+```bash
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r backend/requirements.txt
+python -m pip check
+python backend/scripts/export_onnx.py --all
+cd electron-app
+npm install
+npm run verify:resources
 npm start
 ```
 
 #### Windows PowerShell
 
+This command prepares all dependencies, exports ONNX graphs, and starts Electron from source.
+
 ```powershell
-cd "$env:USERPROFILE\Downloads\DepthLensPro"
-
-cd backend
-py -3 -m venv ..\venv
-..\venv\Scripts\Activate.ps1
+if (!(Test-Path venv)) { py -m venv venv }
+.\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
-cd ..
-
+python backend/scripts/export_onnx.py --all
 cd electron-app
 npm install
+npm run verify:resources
 npm start
 ```
 
 #### Windows Command Prompt
 
+This command prepares all dependencies, exports ONNX graphs, and starts Electron from source.
+
 ```bat
-cd %USERPROFILE%\Downloads\DepthLensPro
-
-cd backend
-py -3 -m venv ..\venv
-..\venv\Scripts\activate.bat
+if not exist venv py -m venv venv
+venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend\requirements.txt
 python -m pip check
-cd ..
-
+python backend\scripts\export_onnx.py --all
 cd electron-app
 npm install
+npm run verify:resources
 npm start
 ```
 
 #### Backend and Static Frontend in Separate Windows
 
-Use two terminals when validating API routes separately from the renderer. Terminal 1 starts the backend from the repository root after section B has passed:
+Use this mode only when debugging backend or renderer code without Electron lifecycle management. The backend serves API traffic on loopback, and the static frontend can be opened from disk or hosted separately for renderer-only inspection.
+
+This command starts the backend directly with Uvicorn and expects `/live` to answer on port `8765`.
 
 ```bash
-cd ~/Downloads/DepthLensPro
 source venv/bin/activate
-python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+uvicorn backend.app:app --host 127.0.0.1 --port 8765 --workers 1
 ```
 
-For Windows PowerShell, use `cd "$env:USERPROFILE\Downloads\DepthLensPro"` and `.\venv\Scripts\Activate.ps1` before the same `python -m uvicorn ...` command. For Windows Command Prompt, use `cd %USERPROFILE%\Downloads\DepthLensPro` and `venv\Scripts\activate.bat`.
-
-Terminal 2 can open `frontend/index.html` directly in a browser or use the Electron development command from `electron-app/` if you want the native shell. If opening the static frontend directly, start the backend first and optionally set `localStorage.depthlens_api_url` to `http://127.0.0.1:8765`.
+This command starts a simple static frontend server and expects the UI files to be available on port `5173`.
 
 ```bash
-cd ~/Downloads/DepthLensPro/frontend
-open index.html      # macOS
-xdg-open index.html  # Linux
-```
-
-```powershell
-cd "$env:USERPROFILE\Downloads\DepthLensPro\frontend"
-start index.html
-```
-
-```bat
-cd %USERPROFILE%\Downloads\DepthLensPro\frontend
-start index.html
-```
-
-Liveness, diagnostics, and route checks:
-
-```bash
-curl http://127.0.0.1:8765/
-curl http://127.0.0.1:8765/live
-curl http://127.0.0.1:8765/ready
-curl http://127.0.0.1:8765/devices
-curl http://127.0.0.1:8765/health
-```
-
-From `electron-app/`, you can also run the npm smoke helper while the backend is running:
-
-```bash
-npm run backend:live
-npm run backend:ready
-npm run backend:devices
-npm run backend:health
-npm run backend:smoke
-npm run verify:resources
+cd frontend
+python -m http.server 5173
 ```
 
 ### E. Update, Rebuild, and Run the Latest Code
 
-After every `git pull`, branch switch, or dependency file change, install and verify backend dependencies again from `backend/` before launching, testing, or building. Then install/update Electron dependencies from `electron-app/`.
+Use these flows when you already have a checkout and want a clean rebuild. They preserve the same dependency order as the first-run blocks.
 
 #### macOS / Linux
 
+This command updates the branch, refreshes Python and Node dependencies, verifies resources, exports ONNX graphs, and starts Electron.
+
 ```bash
-cd ~/Downloads/DepthLensPro
 git pull
-
-cd backend
-if [ ! -d ../venv ]; then python3 -m venv ../venv; fi
-source ../venv/bin/activate
+if [ ! -d venv ]; then python3 -m venv venv; fi
+source venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
-cd ..
-
 cd electron-app
 npm install
 npm run verify:resources
-
-# Run the updated code from terminal:
+cd ..
+python backend/scripts/export_onnx.py --all
+cd electron-app
 npm start
-
-# Or rebuild a new native app version instead:
-npm run build:mac        # macOS Apple Silicon
-npm run build:linux:arm64 # Linux ARM64/aarch64
 ```
 
 #### Windows PowerShell
 
+This command updates the branch, refreshes Python and Node dependencies, verifies resources, exports ONNX graphs, and starts Electron.
+
 ```powershell
-cd "$env:USERPROFILE\Downloads\DepthLensPro"
 git pull
-
-cd backend
-if (!(Test-Path "..\venv")) { py -3 -m venv ..\venv }
-..\venv\Scripts\Activate.ps1
+if (!(Test-Path venv)) { py -m venv venv }
+.\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 python -m pip check
-cd ..
-
 cd electron-app
 npm install
 npm run verify:resources
-
-# Run the updated code from terminal:
+cd ..
+python backend/scripts/export_onnx.py --all
+cd electron-app
 npm start
-
-# Or rebuild a new native app version instead:
-npm run build:win:arm64
 ```
 
 #### Windows Command Prompt
 
+This command updates the branch, refreshes Python and Node dependencies, verifies resources, exports ONNX graphs, and starts Electron.
+
 ```bat
-cd %USERPROFILE%\Downloads\DepthLensPro
 git pull
-
-cd backend
-if not exist ..\venv py -3 -m venv ..\venv
-..\venv\Scripts\activate.bat
+if not exist venv py -m venv venv
+venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r backend\requirements.txt
 python -m pip check
-cd ..
-
 cd electron-app
 npm install
 npm run verify:resources
-
-REM Run the updated code from terminal:
+cd ..
+python backend\scripts\export_onnx.py --all
+cd electron-app
 npm start
-
-REM Or rebuild a new native app version instead:
-npm run build:win:arm64
 ```
 
 ### F. Remove Old Native App Builds and Cached Data
 
-Use this before a fresh native install when old build output, stale app bundles, caches, logs, or backend pid files may conflict with a new build. These commands remove app settings, logs, caches, and local DepthLens Pro runtime data. Back up any user-created exports or files stored in those app data folders before running cleanup.
+Use this section to remove duplicate desktop bundles, stale build outputs, and local app data. These cleanup commands do not install dependencies.
 
 #### macOS
 
+This command removes old macOS build output and scans common app locations for duplicate DepthLens Pro bundles.
+
 ```bash
-cd ~/Downloads/DepthLensPro
-
-rm -rf electron-app/dist electron-app/build electron-app/out electron-app/release electron-app/.tauri electron-app/.electron
-rm -rf frontend/dist frontend/build
-rm -rf backend/__pycache__ backend/.pytest_cache
-
-rm -rf "/Applications/DepthLens Pro.app"
-rm -rf "$HOME/Applications/DepthLens Pro.app"
-rm -rf "$HOME/Library/Application Support/DepthLens Pro"
-rm -rf "$HOME/Library/Caches/DepthLens Pro"
-rm -rf "$HOME/Library/Logs/DepthLens Pro"
-rm -f "$HOME/Library/Preferences/com.ayushmanraha.depthlens-pro.plist"
+cd electron-app
+npm run clean:dist
+npm run scan:apps
 ```
 
-You can also run `npm run clean:dist`, `npm run clean:install`, and `npm run scan:apps` from `electron-app/` for the macOS build-output and duplicate-app cleanup helpers that are already included in this repository.
+This command removes the user app cache and expects preferences, logs, and caches to reset on next launch.
+
+```bash
+rm -rf "$HOME/Library/Application Support/DepthLens Pro"
+rm -rf "$HOME/Library/Caches/DepthLens Pro"
+```
 
 #### Linux
 
+This command removes Linux build output and expects the next build to recreate `electron-app/dist`.
+
 ```bash
-cd ~/Downloads/DepthLensPro
+cd electron-app
+npm run clean:dist
+```
 
-rm -rf electron-app/dist electron-app/build electron-app/out electron-app/release electron-app/.tauri electron-app/.electron
-rm -rf frontend/dist frontend/build
-rm -rf backend/__pycache__ backend/.pytest_cache
+This command removes Linux user cache and config directories for DepthLens Pro.
 
+```bash
 rm -rf "$HOME/.config/DepthLens Pro"
-rm -rf "$HOME/.cache/DepthLens Pro"
-rm -rf "$HOME/.local/share/DepthLens Pro"
-rm -rf "$HOME/.local/state/DepthLens Pro"
+rm -rf "$HOME/.cache/DepthLensPro"
 ```
 
 #### Windows PowerShell
 
+This command removes Windows build output and expects the next build to recreate `electron-app\dist`.
+
 ```powershell
-cd "$env:USERPROFILE\Downloads\DepthLensPro"
+cd electron-app
+npm run clean:dist
+```
 
-Remove-Item -Recurse -Force .\electron-app\dist, .\electron-app\build, .\electron-app\out, .\electron-app\release, .\electron-app\.tauri, .\electron-app\.electron -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .\frontend\dist, .\frontend\build -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .\backend\__pycache__, .\backend\.pytest_cache -ErrorAction SilentlyContinue
+This command removes Windows user app data for DepthLens Pro.
 
-Remove-Item -Recurse -Force "$env:APPDATA\DepthLens Pro" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\DepthLens Pro" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Temp\DepthLens Pro" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:USERPROFILE\AppData\Local\Programs\DepthLens Pro" -ErrorAction SilentlyContinue
+```powershell
+Remove-Item "$env:APPDATA\DepthLens Pro" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\DepthLens Pro" -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 #### Windows Command Prompt
 
+This command removes Windows build output and expects the next build to recreate `electron-app\dist`.
+
 ```bat
-cd %USERPROFILE%\Downloads\DepthLensPro
+cd electron-app
+npm run clean:dist
+```
 
-rmdir /s /q electron-app\dist 2>nul
-rmdir /s /q electron-app\build 2>nul
-rmdir /s /q electron-app\out 2>nul
-rmdir /s /q electron-app\release 2>nul
-rmdir /s /q electron-app\.tauri 2>nul
-rmdir /s /q electron-app\.electron 2>nul
-rmdir /s /q frontend\dist 2>nul
-rmdir /s /q frontend\build 2>nul
-rmdir /s /q backend\__pycache__ 2>nul
-rmdir /s /q backend\.pytest_cache 2>nul
+This command removes Windows user app data for DepthLens Pro.
 
-rmdir /s /q "%APPDATA%\DepthLens Pro" 2>nul
-rmdir /s /q "%LOCALAPPDATA%\DepthLens Pro" 2>nul
-rmdir /s /q "%LOCALAPPDATA%\Temp\DepthLens Pro" 2>nul
-rmdir /s /q "%USERPROFILE%\AppData\Local\Programs\DepthLens Pro" 2>nul
+```bat
+rmdir /s /q "%APPDATA%\DepthLens Pro"
+rmdir /s /q "%LOCALAPPDATA%\DepthLens Pro"
 ```
 
 ### G. Docker Compose
 
-Docker Compose is available for backend-plus-Redis validation. It does not replace the native desktop packaging flow.
+Docker Compose runs the backend and Redis for API-focused development. It does not package or launch the Electron desktop app.
+
+This command builds and starts the API plus Redis services, and the expected outcome is `/live` on `http://127.0.0.1:8765/live`.
 
 ```bash
-cd ~/Downloads/DepthLensPro
 docker compose up --build
 ```
+
+The Compose file passes `HOST` (`str`, default `0.0.0.0`), `PORT` (`int`, default `8765`), `LOG_LEVEL` (`str`, default `INFO`), `REDIS_HOST` (`str`, default `redis` in Compose and `127.0.0.1` in local config), `REDIS_PORT` (`int`, default `6379`), `REDIS_DB` (`int`, default `0`), `REDIS_PASSWORD` (`str | None`, default empty/`None`), `REDIS_SOCKET_TIMEOUT_SECONDS` (`float`, default `1.5`), `REDIS_MAX_CONNECTIONS` (`int`, default `20`), and `CACHE_TTL_SECONDS` (`int`, default `3600`) into the backend container.
 
 ---
 
 ## API Surface
 
-Base URL: `http://127.0.0.1:8765`
+All endpoints are served by the FastAPI app mounted from `backend.api.live` and `backend.api.routes`.
 
-| Method | Endpoint | Description |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/` | API metadata and service version. |
-| `GET` | `/live` | Lightweight liveness signal used by Electron/frontend startup; returns immediately without model loading, accelerator probing, Redis, or telemetry. |
-| `GET` | `/ready` | Inference readiness check: required Python runtime modules, optional Redis/ONNX modules, Python/torch platform details, static model metadata, and ONNX weight paths without loading MiDaS weights. |
-| `GET` | `/health` | Full diagnostics: devices, cached acceleration checks, telemetry, cache metrics, warmup status, timing fields, and runtime metadata. Degraded diagnostics do not imply backend offline. |
-| `GET` | `/devices` | Lightweight discovered compute targets with type, compute class, hardware details, primary device, and CPU fallback. |
-| `GET` | `/models` | Supported model registry with runtime notes. |
-| `GET` | `/colormaps` | Supported colormap keys. |
-| `POST` | `/estimate` | Single-image depth estimation. Form fields: `file`, `model`, `colormap`, `device`, optional `metrics` (`none`, `fast`, `full`), optional `outputs` (`color`, `gray`, `color,gray`), and optional `max_dim`. |
-| `POST` | `/batch` | Multi-image depth estimation for up to 10 files. Uses the same form fields as `/estimate`. |
-| `GET` | `/benchmark` | PyTorch versus ONNX Runtime benchmark summary. |
-| `GET` | `/api/benchmark` | Compatibility alias for benchmark summary. |
-| `GET` | `/cache/metrics` | Live Redis and fallback cache metrics. |
-| `DELETE` | `/cache` | Clear Redis-backed and in-memory inference cache entries. |
+| `GET` | `/` | Returns service name and API version. |
+| `GET` | `/live` | Returns lightweight liveness payload with `status`, `service`, `version`, `pid`, `timestamp`, and `uptime_seconds`. |
+| `GET` | `/ready` | Reports whether required inference dependencies are importable without loading models, plus optional modules, torch runtime, ONNX weights, models, colormaps, settings, and duration. |
+| `GET` | `/health` | Returns full diagnostics: status, version, primary device, devices, loaded models, cache entries and metrics, torch version, acceleration flags and checks, ONNX diagnostics, readiness, warmup, timings, telemetry, and system metadata. |
+| `GET` | `/devices` | Returns cached device inventory, primary device, and whether the payload came from the device cache. |
+| `GET` | `/models` | Returns registry model specs with canonical IDs, display names, architecture, input size, PyTorch names, preprocessing, ONNX filenames, support flags, recommended device, and notes. |
+| `GET` | `/colormaps` | Returns the supported colormap names. |
+| `POST` | `/estimate` | Accepts one image upload and form fields for `model`, `colormap`, `device`, `metrics`, `outputs`, `max_dim`, and optional GT fields; returns depth outputs, metrics, model/device metadata, cache flags, and GT visualizations when supplied. |
+| `POST` | `/batch` | Accepts up to 10 image uploads with common form options and returns `results`, `errors`, `total`, `succeeded`, and `failed`. |
+| `GET` | `/benchmark` | Runs PyTorch versus ONNX Runtime benchmark matrices for `model`, `device`, and `iterations`. |
+| `GET` | `/api/benchmark` | Alias for `/benchmark`, used by the frontend Performance panel. |
+| `GET` | `/cache/metrics` | Returns live cache backend, Redis availability, hits, misses, keyspace, Redis failures, TTL, and memory limits. |
+| `DELETE` | `/cache` | Clears Redis keys and in-memory cache entries, then returns the number of cleared entries. |
+| `GET` | `/onnx/status` | Returns ONNX runtime import/provider diagnostics and per-model path/session status for the requested device. |
+
+The `/estimate` form accepts `model` (`str`, default `MiDaS_small`, normalized to canonical IDs), `colormap` (`str`, default `inferno`), `device` (`str`, default `auto`), `metrics` (`str`, default from `DEPTHLENS_DEFAULT_METRICS`; `DEPTHLENS_DEFAULT_METRICS` is `str`, default `fast`), `outputs` (`str`, default from `DEPTHLENS_DEFAULT_OUTPUTS`; `DEPTHLENS_DEFAULT_OUTPUTS` is `str`, default `color`), `max_dim` (`int | None`, default `None`; when omitted, `DEPTHLENS_MAX_DIM` is `int`, default `1536`), `gt_required` (`bool`, default `False`), `gt_scale` (`float | None`, default `None`), and `gt_invalid_value` (`float | None`, default `None`).
 
 <details>
 <summary><strong>Example <code>/health</code> response</strong></summary>
@@ -679,54 +683,79 @@ Base URL: `http://127.0.0.1:8765`
   "status": "ok",
   "diagnostics_status": "ok",
   "version": "3.1.0",
-  "primary_device": "mps",
-  "devices": { "mps": { "available": true, "type": "GPU" } },
-  "loaded_models": ["MiDaS_small:mps"],
-  "timings_ms": { "device_discovery": 1.2, "accelerator_probe": 2.4, "cache_metrics": 0.8, "health_generation": 5.6 },
-  "warmup": { "enabled": false, "model": "MiDaS_small", "device": "auto" },
-  "cache_entries": 3,
+  "primary_device": "cpu",
+  "devices": {
+    "cpu": {
+      "name": "CPU",
+      "type": "cpu",
+      "available": true
+    }
+  },
+  "loaded_models": [],
+  "cache_entries": 0,
   "cache_metrics": {
-    "backend": "redis",
-    "redis_available": true,
-    "total_hits": 12,
-    "cache_misses": 4,
-    "keyspace_size": 3,
-    "ttl_seconds": 3600
+    "backend": "memory",
+    "redis_available": false,
+    "total_hits": 0,
+    "cache_misses": 0,
+    "keyspace_size": 0,
+    "memory_hits": 0,
+    "memory_misses": 0,
+    "memory_keyspace_size": 0,
+    "redis_failures": 0,
+    "ttl_seconds": 3600,
+    "memory_max_entries": 256
   },
   "torch_version": "2.11.0",
   "cuda_available": false,
-  "mps_available": true,
+  "mps_available": false,
   "xpu_available": false,
   "acceleration_ok": true,
-  "acceleration_checks": {
-    "cuda": { "available": false, "operational": false },
-    "mps": { "available": true, "operational": true },
-    "xpu": { "available": false, "operational": false }
+  "acceleration_checks": {},
+  "onnx": {
+    "supported_model_ids": ["midas_small", "dpt_hybrid", "dpt_large"],
+    "requested_device": "cpu",
+    "overall_status": "onnx_ready"
+  },
+  "readiness": {
+    "backend_live": true,
+    "overall_status": "onnx_ready",
+    "warnings": []
+  },
+  "backend_live": true,
+  "overall_status": "onnx_ready",
+  "model_readiness": {},
+  "warmup": {
+    "enabled": false,
+    "model": "MiDaS_small",
+    "device": "auto",
+    "loaded_models": []
+  },
+  "timings_ms": {
+    "device_discovery": 0.5,
+    "accelerator_probe": 0.2,
+    "cache_metrics": 0.1,
+    "readiness": 0.4,
+    "health_generation": 1.5
   },
   "telemetry": {
     "memory": {
       "status": "ok",
-      "pressure_percent": 42.1,
-      "limit_percent": 90.0,
-      "total_bytes": 17179869184,
-      "available_bytes": 9932800000,
-      "used_bytes": 7247069184
+      "pressure_percent": 42.0,
+      "limit_percent": 90.0
     },
     "disk": {
       "status": "ok",
       "path": "/",
-      "usage_percent": 61.3,
-      "limit_percent": 90.0,
-      "total_bytes": 499963174912,
-      "free_bytes": 193481154560,
-      "used_bytes": 306482020352
+      "usage_percent": 55.0,
+      "limit_percent": 90.0
     }
   },
   "system": {
-    "os": "macOS-15.x-arm64",
-    "machine": "arm64",
-    "cpu": "Apple M3 Pro",
-    "accelerators": ["GPU · Apple M3 Pro (Metal)"]
+    "os": "Linux-6.x-aarch64-with-glibc2.x",
+    "machine": "aarch64",
+    "cpu": "System CPU",
+    "accelerators": []
   }
 }
 ```
@@ -738,34 +767,53 @@ Base URL: `http://127.0.0.1:8765`
 
 ```json
 {
-  "model": "MiDaS_small",
+  "model": "midas_small",
+  "model_id": "midas_small",
+  "display_name": "MiDaS Small",
+  "input_shape": [1, 3, 384, 384],
   "device_requested": "auto",
-  "device_resolved": "mps",
+  "device_resolved": "cpu",
   "iterations": 3,
   "frame_shape": [384, 384, 3],
   "weights": {
-    "onnx_path": "backend/onnx_weights/MiDaS_small.onnx",
+    "onnx_path": "/workspace/DepthLensPro/models/onnx/midas_small.onnx",
     "onnx_available": true
+  },
+  "onnx_diagnostics": {
+    "model": "midas_small",
+    "display_name": "MiDaS Small",
+    "state": "available"
   },
   "results": [
     {
       "engine": "pytorch",
       "status": "ok",
-      "latency_ms": { "avg": 31.4, "min": 30.8, "max": 32.2 },
-      "throughput_fps": 31.85
+      "state": "available",
+      "iterations": 3,
+      "latency_ms": { "avg": 120.0, "min": 110.0, "max": 130.0, "samples": [110.0, 120.0, 130.0] },
+      "throughput_fps": 8.33,
+      "throughput_frames_per_min": 500.0,
+      "memory": { "before": { "process_rss_mb": 500.0 }, "after": { "process_rss_mb": 505.0 }, "process_rss_delta_mb": 5.0 }
     },
     {
       "engine": "onnxruntime",
       "status": "ok",
-      "latency_ms": { "avg": 18.6, "min": 18.1, "max": 19.0 },
-      "throughput_fps": 53.76
+      "state": "available",
+      "iterations": 3,
+      "latency_ms": { "avg": 80.0, "min": 75.0, "max": 85.0, "samples": [75.0, 80.0, 85.0] },
+      "throughput_fps": 12.5,
+      "throughput_frames_per_min": 750.0,
+      "memory": { "before": { "process_rss_mb": 505.0 }, "after": { "process_rss_mb": 506.0 }, "process_rss_delta_mb": 1.0 },
+      "provider": "CPUExecutionProvider",
+      "providers": ["CPUExecutionProvider"],
+      "uses_cpu_fallback": false
     }
   ],
-  "comparison": {
-    "latency_delta_ms": 12.8,
-    "speedup": 1.69,
-    "faster_engine": "onnxruntime"
-  }
+  "comparison": { "latency_delta_ms": 40.0, "speedup": 1.5, "faster_engine": "onnxruntime" },
+  "speedup": 1.5,
+  "pytorch": { "status": "ok", "latency_ms": 120.0, "throughput_fps": 8.33, "device_used": "cpu", "memory_mb": 506.0, "error": null },
+  "onnx": { "status": "ok", "latency_ms": 80.0, "throughput_fps": 12.5, "providers_used": ["CPUExecutionProvider"], "onnx_path": "/workspace/DepthLensPro/models/onnx/midas_small.onnx", "error_code": null, "message": null, "technical_detail": null },
+  "warnings": []
 }
 ```
 
@@ -776,34 +824,51 @@ Base URL: `http://127.0.0.1:8765`
 
 ```json
 {
-  "depth_map": "<base64 PNG>",
-  "grayscale": "<base64 PNG>",
+  "depth_map": "iVBORw0KGgo...",
   "metrics": {
-    "entropy": 6.82,
-    "dynamic_range": 8.14,
-    "prediction_stats": { "mean": 0.51, "std": 0.18, "entropy": 6.82 },
-    "proxy_metrics": { "ssim": 0.812, "silog": 7.43, "psnr": 28.5 },
-    "gt_metrics": { "abs_rel": 0.124, "gt_rmse": 0.42, "delta_1": 0.84 },
-    "unavailable": { "lpips": "not_implemented" },
-    "warnings": ["Resized GT to prediction resolution using nearest-neighbor alignment."]
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.4821,
+    "std": 0.1822,
+    "entropy": 4.317,
+    "histogram": { "counts": [0, 4, 12], "bin_edges": [0.0, 0.031, 0.063] },
+    "prediction_stats": {
+      "min": 0.0,
+      "max": 1.0,
+      "mean": 0.4821,
+      "std": 0.1822,
+      "entropy": 4.317,
+      "histogram": { "counts": [0, 4, 12], "bin_edges": [0.0, 0.031, 0.063] }
+    },
+    "proxy_metrics": {},
+    "gt_metrics": {},
+    "unavailable": {
+      "abs_rel": "needs_gt_depth_upload",
+      "delta_1": "needs_gt_depth_upload",
+      "mae": "not_requested_fast_mode",
+      "rmse": "not_requested_fast_mode",
+      "ssim": "not_requested_fast_mode"
+    },
+    "warnings": []
   },
-  "gt_metadata": {
-    "provided": true,
-    "format": "png",
-    "original_shape": [768, 1024],
-    "aligned_shape": [768, 1024],
-    "valid_pixel_count": 786000,
-    "invalid_pixel_count": 432,
-    "alignment_policy": "gt_resize_to_prediction:none",
-    "scale_alignment": "median_scale"
-  },
-  "latency_ms": 31.4,
-  "model": "MiDaS_small",
+  "latency_ms": 95.4,
+  "model": "midas_small",
+  "model_id": "midas_small",
+  "model_display_name": "MiDaS Small",
   "colormap": "inferno",
-  "device_used": "mps",
+  "device_used": "cpu",
   "resolution": { "width": 1024, "height": 768 },
-  "filename": "photo.jpg",
-  "cached": false
+  "filename": "sample.png",
+  "cached": false,
+  "depth_cached": false,
+  "metrics_mode": "fast",
+  "outputs": ["color"],
+  "gt_metadata": { "provided": false },
+  "engine_requested": "auto",
+  "engine_used": "pytorch",
+  "device_requested": "cpu",
+  "fallback_used": false,
+  "warnings": []
 }
 ```
 
@@ -813,38 +878,44 @@ Base URL: `http://127.0.0.1:8765`
 
 ## Metrics & Models
 
+DepthLensPro reports depth statistics, proxy diagnostics, and GT metrics in one response while keeping their meanings distinct. Use GT metrics for benchmark comparisons when valid labels are uploaded.
+
 ### Metrics Reference
 
-| Metric | Category | Description |
-|---|---|---|
-| `min`, `max`, `mean`, `std`, `median`, `entropy`, `dynamic_range`, `coverage` | Prediction statistics | Distribution summaries of the normalized predicted depth map. These do not require GT and are not benchmark accuracy metrics. |
-| `ssim` | Proxy/self-consistency | **RGB–Depth Structural Proxy** comparing grayscale input structure to predicted depth. This is not reference SSIM. |
-| `silog` | Proxy/self-consistency | **Log-Depth Dispersion Proxy** computed from prediction-only log-depth variation. True SILog requires GT. |
-| `psnr` | Proxy/self-consistency | **Depth Variance PSNR Proxy** relative to the predicted depth mean. True PSNR requires a reference/GT map. |
-| `mae` / `rmse` / `log_rmse` | Proxy/self-consistency | **Mean Absolute Deviation from Predicted Mean**, **RMS Deviation from Predicted Mean**, and **Log-Depth Deviation**. These are not standard GT MAE/RMSE/Log RMSE. |
-| `gradient_mean` / `gradient_std` / `gradient_error` / `edge_density` | Prediction geometry/proxy | Sobel-gradient statistics over the predicted depth map. `gradient_error` is displayed as **Depth Edge Proxy** because it is not a GT error. |
-| `abs_rel`, `sq_rel`, `gt_mae`, `gt_rmse`, `gt_log_rmse`, `delta_1/2/3` | Ground truth benchmark metrics | Computed only when a valid optional GT file is uploaded. MiDaS relative depth is median-scale aligned to valid GT pixels before metric calculation. |
-| `lpips`, `ordinal_error`, `surface_normal_error`, `gt_ssim`, `gt_psnr` | Ground truth required / not implemented | Reported with explicit unavailable reasons until implemented safely. |
+The `/estimate` response returns `metrics` as a structured object with `prediction_stats`, `proxy_metrics`, `gt_metrics`, and `unavailable`. Flat metric keys remain present at the top of `metrics` for backward compatibility.
+
+| Key | Group | Label | Meaning |
+|---|---|---|---|
+| `min`, `max`, `mean`, `std`, `median`, `dynamic_range`, `entropy`, `coverage`, `histogram` | `prediction_stats` | Prediction distribution | Descriptive statistics for the normalized predicted depth plane. |
+| `ssim` | `proxy_metrics` | RGB–Depth Structural Proxy | Structural similarity between grayscale RGB and normalized depth; useful only as a self-consistency signal. |
+| `silog` | `proxy_metrics` | Log-Depth Dispersion Proxy | Scale-invariant log dispersion within the predicted depth map. |
+| `psnr` | `proxy_metrics` | Depth Variance PSNR Proxy | PSNR-like score derived from depth variance around the mean. |
+| `gradient_error` | `proxy_metrics` | Depth Edge Proxy | Mean depth-gradient magnitude used as an edge proxy. |
+| `mae`, `rmse`, `log_rmse`, `gradient_mean`, `gradient_std`, `edge_density` | `proxy_metrics` | Prediction proxy diagnostics | Self-consistency and depth-shape diagnostics without ground truth. |
+| `abs_rel`, `sq_rel`, `gt_mae`, `gt_rmse`, `gt_log_rmse`, `delta_1`, `delta_2`, `delta_3` | `gt_metrics` | Ground-truth benchmark metrics | Metrics computed after GT validation, nearest-neighbor alignment, and median-scale alignment. |
+| `gt_ssim`, `gt_psnr`, `ordinal_error`, `surface_normal_error`, `lpips` | `unavailable` | Not implemented | Explicitly marked unavailable rather than synthesized. |
+
+`metrics=fast` returns lightweight prediction statistics and marks full-only metrics as `not_requested_fast_mode`. `metrics=full` computes prediction statistics and proxy diagnostics. `metrics=none` returns grouped availability metadata without expensive metric computation.
 
 ### Ground Truth Mode and Metric Alignment
 
-Ground Truth upload is optional. Standard image-only generation and multi-image queues remain unchanged when the Workspace toggle is off. When **Upload ground truth data** is enabled, DepthLensPro processes exactly one source image plus one GT file at a time and blocks generation until both are selected.
+Ground truth uploads support `.png`, `.tif`/`.tiff`, and `.npy` files up to **20 MB**. Multi-channel PNG/TIFF files convert to grayscale with a warning; multi-channel NPY files are rejected unless they have shape H×W×1. EXR and PFM are not supported.
 
-Supported GT formats are `.png`, `.tif`/`.tiff`, and `.npy` with a **20 MB** limit. Single-channel depth is preferred. Multi-channel PNG/TIFF files are converted to grayscale with a warning; multi-channel NPY arrays are rejected unless shaped `H×W×1`. EXR, PFM, PDF reports, and 16-bit predicted-depth export are not implemented in this pass to avoid non-portable or heavy dependencies.
-
-For shape mismatches, the backend resizes GT to the prediction resolution with nearest-neighbor sampling. Because MiDaS predicts relative depth, GT metrics use median scale alignment between valid predicted pixels and valid GT pixels. Invalid, non-finite, zero, or negative GT pixels are masked. Responses include `gt_metadata`, metric warnings, optional `gt_depth_map`, and an `error_heatmap` PNG when GT is valid.
+GT depth is decoded as `float32`, filtered to finite positive pixels, optionally scaled by `gt_scale` (`float | None`, default `None`), optionally filtered by `gt_invalid_value` (`float | None`, default `None`), resized to prediction H×W with nearest-neighbor sampling, median-scale aligned to the relative prediction, and then evaluated. GT requests bypass response-cache reuse because uploaded labels change metric results.
 
 ### Experiment Workspace
 
-The Experiments panel provides a lightweight local validation workflow. Users name a run, execute the current Workspace queue, inspect a results table/leaderboard, view RGB/predicted/GT/error side-by-side previews where available, and export JSON or CSV reports. Exports are browser/Electron-safe local downloads and work across supported ARM desktop targets without cloud services or OS-specific paths. The panel uses the same theme tokens as the rest of DepthLensPro, so dark and light modes remain supported.
+The Experiments panel stores named local validation runs in the renderer. It shows RGB, prediction, GT, and error previews when GT is valid, summarizes metrics across runs, and exports JSON or CSV for offline analysis.
 
 ### Model Reference
 
-| Model | Architecture | Approximate GPU Latency | Quality Profile | Recommended Compute |
-|---|---|---:|---|---|
-| `MiDaS_small` | EfficientNet-Lite | ~30 ms | Good | CPU or GPU |
-| `DPT_Hybrid` | ViT-Hybrid | ~120 ms | Very good | GPU recommended |
-| `DPT_Large` | ViT-Large | ~400 ms | Highest | GPU required for practical interactivity |
+| Canonical ID | Display Name | PyTorch Model Name | ONNX Filename | Input Size | Recommended Device |
+|---|---|---|---|---:|---|
+| `midas_small` | MiDaS Small | `MiDaS_small` | `midas_small.onnx` | `384×384` | CPU or GPU |
+| `dpt_hybrid` | DPT Hybrid | `DPT_Hybrid` | `dpt_hybrid.onnx` | `384×384` | GPU preferred |
+| `dpt_large` | DPT Large | `DPT_Large` | `dpt_large.onnx` | `384×384` | GPU recommended for speed |
+
+The backend accepts aliases such as `MiDaS_small`, `MiDaS Small`, `midas-small`, `DPT_Hybrid`, `DPT Hybrid`, and `dpt-large`, then returns canonical lowercase IDs in API responses.
 
 ---
 
@@ -852,145 +923,125 @@ The Experiments panel provides a lightweight local validation workflow. Users na
 
 ```text
 DepthLensPro/
-├── backend/                         # FastAPI inference engine
-│   ├── app.py                       # Backward-compatible ASGI entrypoint
-│   ├── main.py                      # App factory, CORS, JSON logging, lifespan hooks
-│   ├── config.py                    # Environment-backed settings
-│   ├── depth_models.py              # Legacy estimator and ONNX Runtime engine
-│   ├── model_metadata.py            # Static model/colormap metadata safe for lightweight imports
-│   ├── api/routes.py                # HTTP route handlers
+├── AGENTS.md
+├── CONTRIBUTING.md
+├── Dockerfile
+├── README.md
+├── docker-compose.yml
+├── mypy.ini
+├── pyproject.toml
+├── backend/
+│   ├── api/
+│   │   ├── live.py
+│   │   └── routes.py
 │   ├── services/
-│   │   ├── benchmarks.py            # Runtime benchmark service
-│   │   ├── cache_service.py         # Redis cache and memory fallback
-│   │   ├── diagnostics.py           # Readiness and dependency diagnostics
-│   │   └── inference.py             # Model loading, image pipeline, metrics
-│   ├── utils/hardware.py            # Device discovery and acceleration checks
-│   ├── scripts/export_onnx.py       # MiDaS-to-ONNX export utility
-│   └── tests/                       # Backend test suite
-├── frontend/                        # Renderer UI assets
-│   ├── index.html                   # Workspace and panel structure
-│   ├── style.css                    # Theme and layout system
-│   ├── script.js                    # UI state, API calls, charts, metrics
-│   └── welcome-anim.js              # Landing animation canvas
-├── electron-app/                    # Electron desktop shell
-│   ├── main.js                      # Main process and backend lifecycle
-│   ├── preload.js                   # Context-isolated bridge
-│   ├── package.json                 # Scripts and build configuration
-│   └── src/splash.html              # Backend startup splash screen
-├── .github/workflows/ci.yml         # Quality gates
-├── Dockerfile                       # Backend container image
-├── docker-compose.yml               # Backend and Redis stack
-├── pyproject.toml                   # Black, Ruff, and pytest configuration
-├── mypy.ini                         # Static typing configuration
-├── CONTRIBUTING.md                  # Contribution process
-├── SECURITY.md                      # Vulnerability reporting
-└── README.md
+│   │   ├── benchmarks.py
+│   │   ├── cache_service.py
+│   │   ├── diagnostics.py
+│   │   ├── ground_truth.py
+│   │   ├── inference.py
+│   │   └── onnx_diagnostics.py
+│   ├── scripts/
+│   │   └── export_onnx.py
+│   ├── tests/
+│   ├── config.py
+│   ├── depth_models.py
+│   ├── main.py
+│   ├── model_metadata.py
+│   ├── model_registry.py
+│   └── requirements.txt
+├── electron-app/
+│   ├── main.js
+│   ├── preload.js
+│   ├── package.json
+│   ├── scripts/
+│   └── src/
+├── frontend/
+│   ├── index.html
+│   └── script.js
+└── models/
+    └── onnx/
 ```
 
 ---
 
 ## Validation & CI
 
-Run the backend dependency install/verify step from `backend/` before local validation, then run the quality gates from the repository root:
+CI and local checks focus on lightweight validation with mocks or stubs where model downloads, GPUs, browsers, Docker, and external services would make tests slow or environment-dependent.
+
+| Check | Source | Purpose |
+|---|---|---|
+| Python tests | `backend/tests/` | Cache serialization safety, route behavior, ONNX diagnostics, benchmarks, warmup guards, GT handling, and mocked inference flows. |
+| Python format/lint/type gates | `pyproject.toml`, `mypy.ini`, `.github/workflows/ci.yml` | Black, Ruff, mypy, and pytest configuration. |
+| Electron resource verification | `electron-app/scripts/verify-resources.js` | Confirms packaged resource paths for backend, frontend, and repo-root virtual environment. |
+| Electron security policy test | `electron-app/test-security-policy.js` | Validates navigation policy behavior. |
+| Packaging scripts | `electron-app/package.json` | Builds ARM-only macOS, Windows, and Linux artifacts; unsupported x64 scripts call `unsupported-arch.js`. |
+
+This command runs the normal Python validation gates in an already prepared environment.
 
 ```bash
-cd ~/Downloads/DepthLensPro
-cd backend
-source ../venv/bin/activate 2>/dev/null || { python3 -m venv ../venv && source ../venv/bin/activate; }
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m pip check
-cd ..
-
 black --check .
 ruff check .
 mypy backend/
 pytest
 ```
 
-On Windows, use the matching activation command from section B before the same `python -m pip ...`, `black`, `ruff`, `mypy`, and `pytest` checks. The GitHub Actions pipeline runs the same core checks for formatting, linting, typing, and tests. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution requirements.
+This command verifies Electron packaging resources from the Electron app directory.
+
+```bash
+cd electron-app
+npm run verify:resources
+```
 
 ---
 
 ## Troubleshooting
 
-| Issue | Recommended Action |
-|---|---|
-| Backend imports fail or `ModuleNotFoundError` appears | Reinstall and verify backend dependencies from `~/Downloads/DepthLensPro/backend` using section B. Do not install backend dependencies from `frontend/`, `electron-app/`, or another subfolder. Activate the repo-root `venv/` before backend commands, repeat this after `git pull`, branch switching, or dependency file changes, then launch from the repo/resources root with `python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765`. |
-| Frontend reports that the engine is offline | Confirm the backend answers `curl http://127.0.0.1:8765/live`; if `/live` fails, Electron did not start the backend or the selected port is wrong. |
-| Frontend reports that the engine is degraded | Confirm `curl http://127.0.0.1:8765/ready`; required modules such as `cv2`, `torch`, `numpy`, FastAPI, Uvicorn, and Pillow must import successfully before inference controls are enabled. |
-| Uvicorn is running but app still reports offline | Verify the port matches `DEPTHLENS_BACKEND_PORT` and that `/live` returns `service: "DepthLens Pro API"`; a different service on the port is treated as a conflict. |
-| Device selector stuck on Auto | Check `curl http://127.0.0.1:8765/devices`; the endpoint should return at least CPU after `/live` succeeds. |
-| Browser CORS or local file issue | The native app intentionally loads the renderer from `file://` and the backend allows loopback API calls. If opening `frontend/index.html` directly in a browser, start the backend manually and optionally set `localStorage.depthlens_api_url`. |
-| Slow inference | Use `MiDaS_small`, select an available accelerator, keep default workspace `metrics=fast`/`outputs=color`, reduce `DEPTHLENS_MAX_DIM`, or export ONNX weights for the target model. |
-| Port `8765` already in use | If the existing service is a live DepthLens backend, Electron reuses it. If the port is occupied by another process and `DEPTHLENS_BACKEND_PORT` is not pinned, Electron tries a nearby free loopback port and passes that resolved URL to the renderer. |
-| First run or first inference is slow | Allow lazy model loading and initial model-weight download to complete; later runs use the local Torch cache. Enable optional background warmup with `DEPTHLENS_PRELOAD_MODEL=true` if desired. |
-| macOS blocks launch | Run `xattr -cr "/Applications/DepthLens Pro.app"` for unsigned local builds. |
-| Packaged backend does not start | Check the desktop logs for backend URL, Python path, cwd, command, exit code/signal, backend output tail, and resource existence. Run `npm run verify:resources` from `electron-app/` before packaging or pass a packaged resources directory to `node scripts/verify-resources.js <resources-root>`. |
-| Python not found in packaged app | Verify the repo-root `venv/` folder exists before packaging and is included in electron-builder `extraResources`. |
-| Packaged resources missing | Run `npm run verify:resources`; it validates `backend/`, `backend/app.py`, `frontend/`, `frontend/index.html`, and platform Python paths (`venv/bin/python3`, `venv/bin/python`, or `venv/Scripts/python.exe`). |
-| Duplicate app icon on macOS | Run `npm run scan:apps`. Remove duplicate bundles with `npm run clean:install` and `npm run clean:dist`, then open only `dist/mac-arm64/DepthLens Pro.app` or one installed `/Applications/DepthLens Pro.app`. Spotlight can take time to update. |
-| `acceleration_ok: false` | A GPU backend failed the runtime probe; CPU inference remains available. |
-| `/health` reports degraded status | Inspect memory pressure and disk usage telemetry for threshold violations. |
-| Redis cache unavailable | Verify Redis host, port, credentials, and container health; the backend uses in-memory fallback automatically. |
-| Missing ONNX weights | Performance Analysis now exports the selected model automatically on the first benchmark run when `DEPTHLENS_AUTO_EXPORT_ONNX` is unset or true. To pre-generate graphs manually, run `python backend/scripts/export_onnx.py --all` after installing `backend/requirements.txt`, or set `DEPTHLENS_ONNX_DIR` to the directory containing `.onnx` files. ONNX weights are generated artifacts and are not committed. |
-| `/benchmark` reports ONNX unavailable | Check `curl http://127.0.0.1:8765/onnx/status?device=auto`. The response distinguishes `missing_weights`, `onnxruntime_missing`, `provider_unavailable`, `export_failed`, `runtime_error`, and CPU/provider fallback. If automatic export fails, verify that `onnx`, `onnxruntime`, `onnxscript`, `torch`, `torchvision`, and `timm` were installed by repeating section B. PyTorch benchmark/inference can still run. |
-| ONNX uses CPU fallback | The installed ONNX Runtime package does not expose the preferred provider for the selected device. This is valid and platform-neutral; install a provider-enabled runtime locally if acceleration is required. |
-| GT upload rejected | Ensure the file is PNG, TIFF, or NPY, under 20 MB, numeric/single-channel where required, and contains finite positive valid pixels. Standard image-only inference remains unaffected. |
-| GT metrics look scale-adjusted | MiDaS predicts relative depth. DepthLensPro resizes GT to prediction resolution and applies median scale alignment before Abs Rel, Sq Rel, MAE, RMSE, Log RMSE, and δ metrics. |
+Use the symptom, cause, and resolution entries below for common local issues. Keep `/live` separate from `/ready`: `/live` means the process answers, while `/ready` means required inference imports are available.
 
 ### Backend Readiness and Stale Backend Recovery
 
-- `/live` is the lightweight startup endpoint. It must answer quickly once Uvicorn accepts requests and does not load models, probe hardware, query Redis, or collect disk/memory telemetry.
-- `/devices` returns device inventory plus `primary_device`; the frontend uses that primary device for Auto while preserving CPU and available accelerators such as MPS, CUDA, or XPU.
-- `/health` is diagnostics only. It can be degraded or slower without making generation unavailable. Generation depends on the backend being online and queued files, not `/health` success.
-- Opening the native app twice is safe: Electron uses a single-instance lock, focuses the first window, and the second instance does not start another backend.
+**Symptom** → The app stays on “Starting engine” or reports no `/live` response. **Cause** → Port `8765` is occupied, the backend process exited before Uvicorn served `/live`, or the configured Python environment cannot import Uvicorn. **Resolution** → Run `cd electron-app && npm run backend:smoke`, then stop any non-DepthLens process that owns port `8765`.
 
-If a stale Python backend is stuck on port `8765`, `curl` may connect but receive 0 bytes until it times out. Diagnose and clean it with:
+**Symptom** → `/live` returns `ok`, but inference controls stay disabled. **Cause** → `/ready` found a missing required Python module such as `torch`, `cv2`, `PIL`, `fastapi`, `uvicorn`, or `numpy`. **Resolution** → Activate the repo-root virtual environment and run `python -m pip install -r backend/requirements.txt && python -m pip check`.
 
-```bash
-lsof -nP -iTCP:8765 -sTCP:LISTEN
-npm run kill:backend
-npm run smoke:backend
-```
+**Symptom** → Performance Analysis reports ONNX unavailable while PyTorch inference works. **Cause** → ONNX Runtime cannot import, cannot use the requested provider, or cannot load a valid graph from the configured path. **Resolution** → Run `python backend/scripts/export_onnx.py --all`, then inspect `curl http://127.0.0.1:8765/onnx/status?device=auto`.
 
-`npm run kill:backend` uses the pid file and/or port owner, prints the detected PID and command line, and kills only safe DepthLens backend matches. If manual termination is needed, use the actual PID number shown by diagnostics. For example, if the PID is `66208`, run:
+**Symptom** → Redis errors appear in logs, but inference still works. **Cause** → Redis is optional and the cache service falls back to the in-memory cache after connection failures. **Resolution** → Use the app normally or configure Redis with `REDIS_URL` (`str | None`, default `None`) when a shared cache is required.
 
-```bash
-kill -9 66208
-```
+**Symptom** → GT upload fails for EXR, PFM, or a multi-channel NPY file. **Cause** → Ground truth decoding supports only `.png`, `.tif`/`.tiff`, and `.npy`, and NPY must be H×W or H×W×1. **Resolution** → Convert the label to PNG/TIFF grayscale or a numeric H×W/H×W×1 NPY file.
 
-Do not type placeholders such as `kill -9 <PID>` or `kill -9 THE_NUMBER_SHOWN`; replace them with the real number. If a non-DepthLens process owns port `8765`, the app does not kill it automatically and shows the detected PID plus an exact command using that PID.
+**Symptom** → A cached Redis value disappears and the request recomputes inference. **Cause** → The cache rejects legacy pickle payloads with `DLP1\0` or raw pickle magic and treats them as cache misses. **Resolution** → Clear old cache entries with `curl -X DELETE http://127.0.0.1:8765/cache`.
 
 ### Acceptance Checks
 
-While the app is open:
+Run these commands while the app is open; `/live` should include `status`, `service`, `version`, `pid`, `timestamp`, and `uptime_seconds`, and `/devices` should include `devices`, `primary_device`, and `cached`.
 
 ```bash
 curl --max-time 3 -v http://127.0.0.1:8765/live
 curl --max-time 5 -v http://127.0.0.1:8765/devices
 ```
 
-After quitting the app:
+Run this command after quitting the app; the expected outcome is no process listening on port `8765`.
 
 ```bash
 lsof -nP -iTCP:8765 -sTCP:LISTEN
 ```
 
-The final `lsof` command should print nothing.
-
 ---
 
 ## Security
 
-DepthLensPro is designed as a local-first desktop application with a constrained trust boundary:
+DepthLensPro keeps the desktop trust boundary narrow. The renderer cannot access Node.js directly and can only use explicitly exposed preload APIs.
 
 - The renderer is sandboxed.
 - `contextIsolation` is enabled.
 - `nodeIntegration` is disabled.
-- Navigation is restricted to `127.0.0.1` and `localhost`.
-- The backend binds to loopback in desktop mode.
-- The preload bridge exposes only minimal platform and architecture metadata.
+- The preload bridge exposes only `getBackendUrl`, `getAppVersion`, `getPlatform`, `showSaveDialog`, `showOpenDialog`, `platform`, and `arch`.
+- Navigation is allowed only to `http://127.0.0.1:<backendPort>` and the exact frontend `file://` path loaded by Electron.
+- New windows are denied; `https:` and `mailto:` URLs open externally through Electron shell.
+- The backend binds to `127.0.0.1` in desktop mode.
+- Backend process cleanup only targets DepthLens-owned Uvicorn processes identified by metadata, command line, and project paths.
 
 To report a vulnerability, follow [`SECURITY.md`](SECURITY.md). Do not disclose security issues through public issue trackers.
 
@@ -1038,71 +1089,71 @@ GitHub: [https://github.com/AyushmanRaha](https://github.com/AyushmanRaha)
 
 - MiDaS depth estimation models by Intel ISL
 - PyTorch, ONNX Runtime, OpenCV, FastAPI, Redis, Chart.js, Electron, and electron-builder communities
+- PyTorch, ONNX Runtime, OpenCV, FastAPI, Redis, Chart.js, Electron, and electron-builder communities
 
 ## Depth engine readiness, ONNX assets, and PyTorch fallback
 
-DepthLensPro treats ONNX Runtime acceleration as optional. The backend now separates these states in `/health` and `/onnx/status`: the API process can be live while PyTorch, ONNX model files, ONNX Runtime providers, or individual model sessions have different readiness states. Workspace, Compare, Experiments, and Performance should prefer a working PyTorch path over a broken optional ONNX path.
+DepthLensPro can be live, inference-ready, and ONNX-ready as separate states. PyTorch remains the portable inference path, while ONNX Runtime acceleration depends on exported graph files and providers reported by the installed runtime.
 
 ### Model asset setup
 
-Supported canonical model IDs are:
+Supported model assets use canonical lowercase IDs.
 
 | Canonical ID | Display name | Torch Hub model | Default ONNX filename |
-| --- | --- | --- | --- |
+|---|---|---|---|
 | `midas_small` | MiDaS Small | `MiDaS_small` | `midas_small.onnx` |
 | `dpt_hybrid` | DPT Hybrid | `DPT_Hybrid` | `dpt_hybrid.onnx` |
 | `dpt_large` | DPT Large | `DPT_Large` | `dpt_large.onnx` |
 
-The backend accepts common aliases such as `MiDaS Small`, `MiDaS_small`, `DPT Hybrid`, and `DPT_Large`, then normalizes them to canonical IDs internally. ONNX files are resolved as absolute paths and are searched in this order:
+ONNX files resolve in this exact priority order:
 
-1. `DEPTHLENSPRO_MODEL_DIR/onnx` and `DEPTHLENSPRO_MODEL_DIR` when `DEPTHLENSPRO_MODEL_DIR` is set.
-2. `DEPTHLENS_ONNX_DIR` when set for legacy installs.
-3. Repository default `models/onnx`.
-4. Legacy backend directory `backend/onnx_weights`.
-5. User cache directory such as `~/.cache/DepthLensPro/onnx` on Linux.
+1. `DEPTHLENSPRO_MODEL_DIR/onnx`, where `DEPTHLENSPRO_MODEL_DIR` is `str | None` with default `None`.
+2. `DEPTHLENSPRO_MODEL_DIR`, using the same `str | None` value when set.
+3. `DEPTHLENS_ONNX_DIR`, a `str | None` legacy override with default `None`.
+4. `ONNX_WEIGHTS_DIR`, a `str | None` compatibility override with default `None`.
+5. `models/onnx`, the repository default.
+6. `backend/onnx_weights`, the legacy backend fallback.
+7. `~/.cache/DepthLensPro/onnx`, the user cache fallback.
 
-Generate or validate ONNX assets with:
+This command exports all supported ONNX graphs into the resolved default output directory and expects non-empty model files for `midas_small`, `dpt_hybrid`, and `dpt_large`.
 
 ```bash
-python backend/scripts/export_onnx.py --model midas_small
 python backend/scripts/export_onnx.py --all
-curl http://127.0.0.1:8765/onnx/status?device=auto
-curl http://127.0.0.1:8765/health
 ```
 
-If an ONNX file is missing, empty, invalid, or cannot be loaded by ONNX Runtime, inference responses include metadata such as `engine_used: "pytorch"`, `fallback_used: true`, `warnings`, `model_id`, `model_display_name`, and `device_used` instead of failing solely because ONNX is unavailable.
+This command checks ONNX runtime and path status for the automatic device selection.
+
+```bash
+curl http://127.0.0.1:8765/onnx/status?device=auto
+```
+
+If an ONNX file is missing, empty, invalid, or provider-incompatible, inference responses report metadata such as `engine_used`, `fallback_used`, `warnings`, `model_id`, `model_display_name`, and `device_used` instead of failing solely because ONNX is unavailable.
 
 ### Apple Silicon and provider notes
 
-On macOS Apple Silicon, PyTorch may use MPS/Metal for the PyTorch path. ONNX Runtime does not automatically use PyTorch MPS or Metal; it uses only providers reported by `onnxruntime.get_available_providers()`, commonly `CPUExecutionProvider` unless a supported CoreML-enabled runtime is installed. This is expected. The health payload reports PyTorch devices separately from ONNX Runtime providers.
+On macOS Apple Silicon, PyTorch can use MPS/Metal for the PyTorch path. ONNX Runtime uses only providers returned by `onnxruntime.get_available_providers()`, commonly `CPUExecutionProvider` unless the installed ONNX Runtime build includes another supported provider.
 
-CUDA is used only when PyTorch and/or ONNX Runtime report CUDA support. CPU remains the portable fallback on macOS Intel, Windows, and Linux.
+CUDA, XPU, CoreML, OpenVINO, ROCm, MIGraphX, DirectML, TensorRT, and CPU provider choices depend on the installed runtime packages and hardware. `/health` and `/onnx/status` report PyTorch devices separately from ONNX Runtime providers.
 
 ### Troubleshooting: `ONNXRuntimeError: model_path must not be empty`
 
-This error means ONNX Runtime was asked to load a missing, empty, or unresolved model file. Check:
-
-```bash
-curl http://127.0.0.1:8765/onnx/status?device=auto
-curl http://127.0.0.1:8765/health
-printf '%s\n' "$DEPTHLENSPRO_MODEL_DIR" "$DEPTHLENS_ONNX_DIR"
-```
-
-The backend validates ONNX paths before creating sessions and falls back to PyTorch when possible. If you want ONNX acceleration, place the expected `.onnx` files in the configured model directory or run the export command above.
+**Symptom** → ONNX Runtime raises `model_path must not be empty`. **Cause** → The selected model did not resolve to an existing non-empty `.onnx` file in the ONNX search path. **Resolution** → Run `python backend/scripts/export_onnx.py --all` and then `curl http://127.0.0.1:8765/onnx/status?device=auto`.
 
 ### Troubleshooting: ONNX export failed with SymInt / `torch.export`
 
-Some MiDaS/DPT models can fail with newer dynamo/`torch.export` ONNX paths, including errors involving `SymInt` and reshape/unflatten operations. The export script first tries a static-shape legacy `torch.onnx.export` path with opset 17 and no dynamic axes, then tries the dynamo path when supported. Export success is reported only after the file exists, is non-empty, passes `onnx.checker` when available, and can be loaded by ONNX Runtime. If export still fails, PyTorch Workspace, Compare, Experiments, and the PyTorch side of Performance remain supported.
+**Symptom** → ONNX export fails with `SymInt`, reshape, unflatten, or `torch.export` errors. **Cause** → Some MiDaS/DPT graphs do not export cleanly through every PyTorch ONNX path. **Resolution** → Keep PyTorch inference enabled, inspect the export error, and retry `python backend/scripts/export_onnx.py --all --force` after updating compatible ONNX tooling.
 
 ### Verification commands
 
+This command verifies the Python package environment without running tests or downloads beyond installed dependencies.
+
 ```bash
-python -m pip install -r backend/requirements.txt
-python -m pytest backend/tests
-uvicorn backend.main:app --host 127.0.0.1 --port 8765
-python backend/scripts/export_onnx.py --model midas_small
-curl http://127.0.0.1:8765/health
-curl http://127.0.0.1:8765/onnx/status?device=auto
-curl 'http://127.0.0.1:8765/api/benchmark?model=midas_small&device=auto&iterations=1'
-cd frontend && python -m http.server 5173
+python -m pip check
+```
+
+This command verifies Electron resource paths before packaging.
+
+```bash
+cd electron-app
+npm run verify:resources
 ```
