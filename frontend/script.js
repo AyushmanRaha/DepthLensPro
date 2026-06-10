@@ -38,6 +38,9 @@ const DEFAULT_API_BASE_URL = "http://127.0.0.1:8765";
 let API = null;
 let apiResolved = false;
 let backendOnline = false;
+let inferenceReady = false;
+let readinessDetails = null;
+let runningInElectron = false;
 
 function normalizeApiBaseUrl(url) {
   return String(url || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
@@ -47,7 +50,8 @@ async function resolveApiBaseUrl() {
   if (apiResolved && API) return API;
 
   let resolved = null;
-  if (window.electronAPI?.getBackendUrl) {
+  runningInElectron = Boolean(window.electronAPI?.getBackendUrl);
+  if (runningInElectron) {
     resolved = await window.electronAPI.getBackendUrl();
     const platform = await window.electronAPI.getPlatform?.() || window.electronAPI.platform;
     if (platform === "darwin") document.body.classList.add("macos");
@@ -59,6 +63,7 @@ async function resolveApiBaseUrl() {
   API = normalizeApiBaseUrl(resolved || DEFAULT_API_BASE_URL);
   apiResolved = true;
   console.log(`[DepthLens] Resolved backend URL: ${API}`);
+  if (!runningInElectron) console.warn("[DepthLens] Electron bridge unavailable; running in browser/file mode. Start the backend manually or set DEPTHLENS_API_URL/localStorage.");
   return API;
 }
 
@@ -628,6 +633,44 @@ function applyCacheMetrics(raw) {
   updateMetrics();
 }
 
+function engineReady() {
+  return backendOnline && inferenceReady;
+}
+
+function readinessSummary(payload) {
+  const failed = Object.entries(payload?.required || {})
+    .filter(([, item]) => !item?.available)
+    .map(([name, item]) => `${name}: ${item?.error || item?.status || "unavailable"}`);
+  return failed.length ? failed.join(" · ") : "Inference runtime is ready";
+}
+
+async function checkReadiness({ quiet = true } = {}) {
+  if (!backendOnline) { inferenceReady = false; return false; }
+  try {
+    const res = await apiFetch("/ready", { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    readinessDetails = data;
+    inferenceReady = Boolean(data.inference_ready);
+    if (inferenceReady) {
+      setStatus("online", "Depth Engine: Online", `Backend ready · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
+    } else {
+      const summary = readinessSummary(data);
+      setStatus("offline", "Depth Engine: Degraded", summary);
+      el.deviceInfoBanner.querySelector("span:last-child").textContent = `Inference runtime degraded: ${summary}`;
+      if (!quiet) toastOnce(`Inference runtime is not ready: ${summary}`, "error", 8000);
+    }
+    syncQueueControls();
+    return inferenceReady;
+  } catch (err) {
+    readinessDetails = null;
+    inferenceReady = false;
+    setStatus("offline", "Depth Engine: Degraded", `Readiness check failed · ${err.message}`);
+    if (!quiet) toastOnce(`Readiness check failed: ${err.message}`, "error", 6000);
+    syncQueueControls();
+    return false;
+  }
+}
+
 async function loadCacheMetrics() {
   if (!backendOnline || document.hidden) return false;
   try {
@@ -660,6 +703,7 @@ async function checkLive({ quiet = false } = {}) {
     return true;
   } catch (err) {
     backendOnline = false;
+    inferenceReady = false;
     setStatus("offline","Depth Engine: Offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
     el.deviceInfoBanner.querySelector("span:last-child").textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
     if (!quiet) toastOnce(`Backend liveness check failed: ${err.message}`, "error", 6000);
@@ -697,8 +741,11 @@ async function checkDiagnostics({ quiet = true } = {}) {
 
 async function checkHealth() {
   const live = await checkLive();
-  if (live) await checkDiagnostics({ quiet: true });
-  return live;
+  if (live) {
+    await checkReadiness({ quiet: true });
+    await checkDiagnostics({ quiet: true });
+  }
+  return live && inferenceReady;
 }
 
 function autoDeviceLabel(devs, primary) {
@@ -896,8 +943,9 @@ function removeFile(id) {
 function syncQueueControls() {
   const has = state.files.length>0;
   el.clearBtn.disabled = !has || Boolean(state.abort);
-  el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !backendOnline;
-  if (el.runBtn) el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : "");
+  const ready = engineReady();
+  el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !ready;
+  if (el.runBtn) el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready; open Diagnostics or check /ready" : ""));
 }
 
 function setFileSt(id,cls,txt) {
@@ -958,9 +1006,9 @@ function cancelBatch() {
 }
 
 async function runBatch() {
-  if (!backendOnline) {
-    const ok = await checkLive();
-    if (!ok) { toast(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`, "error", 6000); return; }
+  if (!engineReady()) {
+    const ok = await checkHealth();
+    if (!ok) { toast(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`, "error", 6000); return; }
   }
   const pending = state.files.filter(f=>f.status==="pending"||f.status==="error");
   if (!pending.length) return;
@@ -1035,7 +1083,7 @@ async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs
   fd.append("colormap",colormap); fd.append("device",device);
   fd.append("metrics", metrics);
   fd.append("outputs", outputs);
-  if (!backendOnline) throw new Error(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`);
+  if (!engineReady()) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
   const res=await apiFetch("/estimate",{
     method:"POST", body:fd,
     signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
@@ -1300,10 +1348,10 @@ async function runComparison() {
   el.compareRunBtn.disabled=true; el.compareCancelBtn.hidden=false;
   el.compareProgressBlock.hidden=false; el.compareResults.innerHTML="";
   el.compareChartCard.hidden=true; el.compareMetricGrid.innerHTML="";
-  if (!backendOnline) {
-    const ok = await checkLive();
+  if (!engineReady()) {
+    const ok = await checkHealth();
     if (!ok) {
-      toast(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`, "error", 6000);
+      toast(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`, "error", 6000);
       el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
       return;
     }
@@ -1438,9 +1486,9 @@ async function runBenchmark() {
   el.benchmarkRunBtn.textContent = "Running…";
   el.benchStatus.textContent = "Loading models and measuring latency…";
   try {
-    if (!backendOnline) {
-      const ok = await checkLive();
-      if (!ok) throw new Error(`Depth engine is offline at ${API || DEFAULT_API_BASE_URL}`);
+    if (!engineReady()) {
+      const ok = await checkHealth();
+      if (!ok) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
     }
     const res = await apiFetch(`/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
       signal: AbortSignal.any([state.benchmarkAbort.signal, AbortSignal.timeout(240_000)]),
@@ -1529,10 +1577,12 @@ async function init() {
   syncQueueControls();
   try {
     await resolveApiBaseUrl();
+    if (!runningInElectron) toastOnce("Browser/file mode detected — start the backend manually for inference.", "warning", 7000);
     initLatencyChart();
     initCompareControls();
     switchPanel("main");
     await checkLive();
+    await checkReadiness({ quiet: false });
     await checkDiagnostics({ quiet: true });
     await loadCacheMetrics();
     startPollingLoops();
@@ -1550,5 +1600,6 @@ init().catch(err => {
   console.error("[DepthLens] Fatal init error", err);
   state.initializingBackend = false;
   backendOnline = false;
+  inferenceReady = false;
   syncQueueControls();
 });

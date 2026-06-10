@@ -112,11 +112,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             warmup_task.cancel()
         try:
             from backend.services.inference import clear_models
+
             clear_models()
         except Exception as exc:
             log.warning("Model cleanup degraded: %s", exc)
         try:
             from backend.services import cache_service
+
             cache_service.clear()
         except Exception as exc:
             log.warning("Cache cleanup degraded: %s", exc)

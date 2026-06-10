@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-ARM%20desktop%20only-lightgrey.svg)](#supported-platforms)
 
-Last Updated: 9th June 2026
+Last Updated: 10th June 2026
 
 DepthLensPro is a native cross-platform desktop application for hardware-accelerated monocular depth estimation from 2D images. It pairs an Electron desktop client with a FastAPI inference service that runs MiDaS-family models through PyTorch and ONNX Runtime, with Redis-backed caching for repeatable low-latency workflows.
 
@@ -53,14 +53,14 @@ The application is optimized for local-first image processing, secure desktop pa
 - Redis-backed response cache plus normalized-depth reuse keyed by image, model, resolved device, and max dimension, with TTL control and in-memory fallback.
 - Structured runtime configuration through environment variables and optional `.env` values.
 - JSON structured logging for collector-friendly backend logs.
-- Lightweight liveness, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration signals exposed through API endpoints.
+- Lightweight liveness, inference readiness, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration signals exposed through API endpoints.
 - Docker and Docker Compose support for backend-plus-Redis execution.
 
 ### Desktop Client
 
 - Electron desktop shell with automatic FastAPI child-process lifecycle management.
 - Sandboxed renderer, `contextIsolation` enabled, `nodeIntegration` disabled, and navigation constrained to loopback origins.
-- Splash screen while Electron waits for lightweight `/live`, followed by a workspace as soon as the backend is available; full diagnostics can finish later.
+- Splash screen while Electron waits for lightweight `/live`, followed by renderer `/ready` checks that verify inference dependencies before enabling generation; full diagnostics can finish later.
 - Drag-and-drop upload workflow with progress, adaptive ETA, cancellation, result cards, lightbox metrics, and download actions.
 - Persistent user preferences for model, colormap, theme, and compute device.
 - Responsive workspace panels for generation, model comparison, session analytics, and application details.
@@ -127,10 +127,10 @@ FastAPI ASGI Backend
 | Renderer | HTML5, CSS3, JavaScript ES2022, Chart.js | Workspace UI, comparison views, analytics, result rendering |
 | API service | Python `3.10`–`3.12`, FastAPI, Uvicorn | ASGI API, request validation, lifecycle hooks, diagnostics |
 | AI runtime | PyTorch, Torch Hub, ONNX, ONNX Runtime | MiDaS model loading and accelerated inference |
-| Image processing | OpenCV, NumPy, Pillow | Input normalization, depth-map post-processing, PNG encoding |
+| Image processing | OpenCV Headless, NumPy, Pillow | Input normalization, depth-map post-processing, PNG encoding without desktop GUI library requirements |
 | Cache | Redis with in-memory fallback | TTL-based reuse of repeated inference results |
 | Configuration | `pydantic-settings` with fallback shim | Environment and `.env` driven backend configuration |
-| Observability | JSON logging, `/live`, `/health`, `/devices`, `/benchmark`, `/cache/metrics` | Liveness, runtime state, resource telemetry, benchmark reporting |
+| Observability | JSON logging, `/live`, `/ready`, `/health`, `/devices`, `/benchmark`, `/cache/metrics` | Liveness, inference readiness, runtime state, resource telemetry, benchmark reporting |
 | Delivery | Docker, Docker Compose, GitHub Actions | Containerized backend, Redis stack, quality gates |
 
 ---
@@ -143,6 +143,7 @@ DepthLensPro exposes operational signals suitable for local diagnostics, release
 |---|---|---|
 | Structured logs | Backend stdout | JSON records with timestamp, level, logger, module, function, line, process, thread, and exception details. |
 | Liveness | `GET /live` | Immediate backend availability check used by Electron and the renderer; does not load models, probe accelerators, query Redis, or gather telemetry. |
+| Inference readiness | `GET /ready` | Fast dependency and packaging check used by the renderer before enabling inference; imports required runtime modules, reports optional Redis/ONNX availability, lists ONNX weight paths, and does not load MiDaS weights. |
 | Health diagnostics | `GET /health` | Full diagnostics including primary device, loaded models, PyTorch version, cached acceleration checks, device inventory, cache summary, timing fields, warmup state, and system metadata. Degraded diagnostics do not make inference unavailable. |
 | Device inventory | `GET /devices` | Lightweight device list used after `/live`; always includes CPU and uses cached discovery where possible. |
 | Memory telemetry | `GET /health` | Memory status, pressure percentage, limit threshold, total bytes, available bytes, and used bytes. |
@@ -155,7 +156,7 @@ DepthLensPro exposes operational signals suitable for local diagnostics, release
 
 ## Supported Platforms
 
-DepthLens Pro now supports **ARM desktop targets only**. Normal users should open the native app; they should not manually start FastAPI or Uvicorn. Electron owns backend startup, readiness checks through `/live`, and backend shutdown.
+DepthLens Pro now supports **ARM desktop targets only**. Normal users should open the native app; they should not manually start FastAPI or Uvicorn. Electron owns backend startup, liveness checks through `/live`, renderer readiness checks through `/ready`, and backend shutdown.
 
 | Status | Platform | Architecture | Notes |
 |---|---|---|---|
@@ -173,7 +174,7 @@ The runtime guard shows: “DepthLens Pro currently supports Apple Silicon macOS
 
 ## Quick Start / Runbook
 
-DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. The Electron app starts that backend automatically in development and packaged desktop modes, waits for `GET /live`, then exposes the resolved URL to the renderer through the secure preload bridge. `GET /health` is intentionally reserved for fuller diagnostics and may be degraded without making inference unavailable.
+DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. The Electron app starts that backend automatically in development and packaged desktop modes, waits for `GET /live`, then exposes the resolved URL to the renderer through the secure preload bridge. The renderer calls `GET /ready` before enabling inference controls so missing OpenCV/PyTorch/packaging dependencies are surfaced clearly. `GET /health` is intentionally reserved for fuller diagnostics and may be degraded without making inference unavailable.
 
 > **First run:** model weights may be downloaded through `torch.hub` the first time a model is lazily loaded. Subsequent runs use the local model cache. Optional background warmup is available with `DEPTHLENS_PRELOAD_MODEL=true`, `DEPTHLENS_WARMUP_MODEL=MiDaS_small`, and `DEPTHLENS_WARMUP_DEVICE=auto`; warmup failure does not break `/live` or lazy inference.
 >
@@ -200,6 +201,7 @@ electron-app/dist/mac-arm64/DepthLens Pro.app
 ```
 
 ```bash
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
 cd DepthLensPro
 
 python3 -m venv venv
@@ -224,6 +226,7 @@ xattr -cr "/Applications/DepthLens Pro.app"
 Builds a **Windows ARM64 only** NSIS installer. Run these commands from PowerShell so the Windows virtual environment layout is used (`venv\Scripts\python.exe`). Windows x64 builds are unsupported and intentionally fail.
 
 ```powershell
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
 cd DepthLensPro
 
 py -3 -m venv venv
@@ -238,6 +241,28 @@ npm run build:win:arm64
 ```
 
 Run the generated installer from `electron-app\dist\`, then launch **DepthLens Pro** from the Start menu or desktop shortcut. Packaged builds expect the prepared `venv/`, `backend/`, and `frontend/` resources to be present in the installer resources.
+
+
+#### Linux ARM Native App Build
+
+Builds a **Linux ARM64/aarch64 only** AppImage. Prepare the repo-root virtual environment first so electron-builder can copy `backend/`, `frontend/`, and `venv/` into packaged resources.
+
+```bash
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+cd DepthLensPro
+
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r backend/requirements.txt
+
+cd electron-app
+npm install
+npm run verify:resources
+npm run build:linux:arm64
+```
+
+Run the generated ARM64 AppImage from `electron-app/dist/`. Linux x64 builds are intentionally unsupported.
 
 #### End-User Installation from Release Artifacts
 
@@ -292,6 +317,7 @@ Use this path when you want to test the app locally without creating a native in
 #### macOS / Linux Terminal-Only Development Test
 
 ```bash
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
 cd DepthLensPro
 
 python3 -m venv venv
@@ -307,6 +333,7 @@ npm start
 #### Windows PowerShell Terminal-Only Development Test
 
 ```powershell
+git clone https://github.com/<your-org-or-user>/DepthLensPro.git
 cd DepthLensPro
 
 py -3 -m venv venv
@@ -344,6 +371,7 @@ Liveness, diagnostics, and route checks:
 ```bash
 curl http://127.0.0.1:8765/
 curl http://127.0.0.1:8765/live
+curl http://127.0.0.1:8765/ready
 curl http://127.0.0.1:8765/devices
 curl http://127.0.0.1:8765/health
 ```
@@ -352,6 +380,7 @@ From `electron-app/`, you can also run the npm smoke helper while the backend is
 
 ```bash
 npm run backend:live
+npm run backend:ready
 npm run backend:devices
 npm run backend:health
 npm run backend:smoke
@@ -374,6 +403,7 @@ Base URL: `http://127.0.0.1:8765`
 |---|---|---|
 | `GET` | `/` | API metadata and service version. |
 | `GET` | `/live` | Lightweight liveness signal used by Electron/frontend startup; returns immediately without model loading, accelerator probing, Redis, or telemetry. |
+| `GET` | `/ready` | Inference readiness check: required Python runtime modules, optional Redis/ONNX modules, Python/torch platform details, static model metadata, and ONNX weight paths without loading MiDaS weights. |
 | `GET` | `/health` | Full diagnostics: devices, cached acceleration checks, telemetry, cache metrics, warmup status, timing fields, and runtime metadata. Degraded diagnostics do not imply backend offline. |
 | `GET` | `/devices` | Lightweight discovered compute targets with type, compute class, hardware details, primary device, and CPU fallback. |
 | `GET` | `/models` | Supported model registry with runtime notes. |
@@ -549,10 +579,12 @@ DepthLensPro/
 │   ├── main.py                      # App factory, CORS, JSON logging, lifespan hooks
 │   ├── config.py                    # Environment-backed settings
 │   ├── depth_models.py              # Legacy estimator and ONNX Runtime engine
+│   ├── model_metadata.py            # Static model/colormap metadata safe for lightweight imports
 │   ├── api/routes.py                # HTTP route handlers
 │   ├── services/
 │   │   ├── benchmarks.py            # Runtime benchmark service
 │   │   ├── cache_service.py         # Redis cache and memory fallback
+│   │   ├── diagnostics.py           # Readiness and dependency diagnostics
 │   │   └── inference.py             # Model loading, image pipeline, metrics
 │   ├── utils/hardware.py            # Device discovery and acceleration checks
 │   ├── scripts/export_onnx.py       # MiDaS-to-ONNX export utility
@@ -599,15 +631,16 @@ The GitHub Actions pipeline runs the same core checks for formatting, linting, t
 | Issue | Recommended Action |
 |---|---|
 | `ModuleNotFoundError: No module named 'backend'` | Launch from the repo/resources root with `python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765`. Electron sets `cwd` and `PYTHONPATH` automatically; for packaging, create the repo-root `venv/` and run `npm run verify:resources`. |
-| Frontend reports that the engine is offline | Confirm the backend answers `curl http://127.0.0.1:8765/live`; `/health` can be slow or degraded without disabling inference. |
+| Frontend reports that the engine is offline | Confirm the backend answers `curl http://127.0.0.1:8765/live`; if `/live` fails, Electron did not start the backend or the selected port is wrong. |
+| Frontend reports that the engine is degraded | Confirm `curl http://127.0.0.1:8765/ready`; required modules such as `cv2`, `torch`, `numpy`, FastAPI, Uvicorn, and Pillow must import successfully before inference controls are enabled. |
 | Uvicorn is running but app still reports offline | Verify the port matches `DEPTHLENS_BACKEND_PORT` and that `/live` returns `service: "DepthLens Pro API"`; a different service on the port is treated as a conflict. |
 | Device selector stuck on Auto | Check `curl http://127.0.0.1:8765/devices`; the endpoint should return at least CPU after `/live` succeeds. |
-| Browser CORS or local file issue | Serve the frontend through a local HTTP server instead of opening files directly through `file://`. |
+| Browser CORS or local file issue | The native app intentionally loads the renderer from `file://` and the backend allows loopback API calls. If opening `frontend/index.html` directly in a browser, start the backend manually and optionally set `localStorage.depthlens_api_url`. |
 | Slow inference | Use `MiDaS_small`, select an available accelerator, keep default workspace `metrics=fast`/`outputs=color`, reduce `DEPTHLENS_MAX_DIM`, or export ONNX weights for the target model. |
-| Port `8765` already in use | Free the port or set `DEPTHLENS_BACKEND_PORT` before launching Electron and backend checks. If the existing service is a live DepthLens backend, Electron reuses it. |
+| Port `8765` already in use | If the existing service is a live DepthLens backend, Electron reuses it. If the port is occupied by another process and `DEPTHLENS_BACKEND_PORT` is not pinned, Electron tries a nearby free loopback port and passes that resolved URL to the renderer. |
 | First run or first inference is slow | Allow lazy model loading and initial model-weight download to complete; later runs use the local Torch cache. Enable optional background warmup with `DEPTHLENS_PRELOAD_MODEL=true` if desired. |
 | macOS blocks launch | Run `xattr -cr "/Applications/DepthLens Pro.app"` for unsigned local builds. |
-| Packaged backend does not start | Check the desktop logs for backend URL, Python path, cwd, command, exit code/signal, and resource existence. Run `npm run verify:resources` from `electron-app/` before packaging or pass a packaged resources directory to `node scripts/verify-resources.js <resources-root>`. |
+| Packaged backend does not start | Check the desktop logs for backend URL, Python path, cwd, command, exit code/signal, backend output tail, and resource existence. Run `npm run verify:resources` from `electron-app/` before packaging or pass a packaged resources directory to `node scripts/verify-resources.js <resources-root>`. |
 | Python not found in packaged app | Verify the repo-root `venv/` folder exists before packaging and is included in electron-builder `extraResources`. |
 | Packaged resources missing | Run `npm run verify:resources`; it validates `backend/`, `backend/app.py`, `frontend/`, `frontend/index.html`, and platform Python paths (`venv/bin/python3`, `venv/bin/python`, or `venv/Scripts/python.exe`). |
 | Duplicate app icon on macOS | Run `npm run scan:apps`. Remove duplicate bundles with `npm run clean:install` and `npm run clean:dist`, then open only `dist/mac-arm64/DepthLens Pro.app` or one installed `/Applications/DepthLens Pro.app`. Spotlight can take time to update. |

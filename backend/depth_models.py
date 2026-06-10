@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
-import cv2  # noqa: F401 - retained for compatibility with legacy imports.
 import numpy as np
 import torch
 
@@ -93,6 +92,8 @@ class ONNXExecutionEngine:
         pred = np.asarray(outputs[0], dtype=np.float32)
         pred = np.squeeze(pred)
         if pred.shape != img_rgb.shape[:2]:
+            import cv2
+
             pred = cast(
                 np.ndarray,
                 cv2.resize(

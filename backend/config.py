@@ -50,7 +50,7 @@ _ENV_KEYS = (
 )
 
 
-class Settings(BaseSettings):  # type: ignore[misc]
+class Settings(BaseSettings):
     """Environment-backed application settings.
 
     Values are loaded from process environment variables first and then from a
@@ -142,7 +142,7 @@ def _settings_values() -> dict[str, str]:
 def get_settings() -> Settings:
     """Return cached application settings for deterministic runtime behavior."""
 
-    return Settings(**_settings_values())
+    return Settings(**cast(Any, _settings_values()))
 
 
 settings = get_settings()

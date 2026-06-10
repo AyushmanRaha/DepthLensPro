@@ -28,7 +28,8 @@
     "scan:apps": "node scripts/scan-apps.js",
     "clean:install": "node scripts/clean-install.js",
     "clean:spotlight": "node scripts/clean-spotlight.js",
-    "reinstall:mac": "node scripts/reinstall-mac.js"
+    "reinstall:mac": "node scripts/reinstall-mac.js",
+    "backend:ready": "node -e \"fetch('http://127.0.0.1:8765/ready').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "build": {
     "forceCodeSigning": false,
