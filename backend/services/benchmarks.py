@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import resource
+import threading
 import time
 from statistics import mean
 from typing import Any, Callable
@@ -17,6 +18,56 @@ from backend.services.onnx_diagnostics import onnx_model_status
 from backend.utils.hardware import _resolve
 
 DEFAULT_BENCHMARK_ITERATIONS = 3
+_AUTO_EXPORT_LOCKS: dict[str, threading.Lock] = {}
+_AUTO_EXPORT_LOCKS_GUARD = threading.Lock()
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    """Return a permissive boolean environment flag value."""
+
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _auto_export_lock(model: str) -> threading.Lock:
+    """Return a per-model lock so concurrent benchmarks do not export the same graph."""
+
+    with _AUTO_EXPORT_LOCKS_GUARD:
+        return _AUTO_EXPORT_LOCKS.setdefault(model, threading.Lock())
+
+
+def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any]:
+    """Export missing ONNX weights on demand for benchmark comparisons."""
+
+    if onnx_diag.get("state") != "missing_weights":
+        return onnx_diag
+    if not _env_flag("DEPTHLENS_AUTO_EXPORT_ONNX", True):
+        return onnx_diag
+
+    requested_device = str(onnx_diag.get("runtime", {}).get("requested_device", "auto"))
+    with _auto_export_lock(model):
+        refreshed = onnx_model_status(model, requested_device)
+        if refreshed.get("state") != "missing_weights":
+            return refreshed
+
+        try:
+            from backend.scripts.export_onnx import export_model
+
+            output_dir = onnx_model_path(model).parent
+            export_model(model, output_dir)
+            return onnx_model_status(model, requested_device)
+        except Exception as exc:
+            failed = dict(refreshed)
+            failed.update(
+                {
+                    "state": "export_failed",
+                    "export_error": f"{type(exc).__name__}: {exc}",
+                    "auto_export_enabled": True,
+                }
+            )
+            return failed
 
 
 def _memory_rss_mb() -> float:
@@ -126,7 +177,7 @@ def run_benchmark(
         pytorch_result = _unavailable("pytorch", str(exc))
 
     weights_path = onnx_model_path(model)
-    onnx_diag = onnx_model_status(model, resolved)
+    onnx_diag = _ensure_onnx_weights(model, onnx_model_status(model, resolved))
     if onnx_diag["state"] == "available":
         try:
             onnx_result = _measure(
@@ -159,6 +210,13 @@ def run_benchmark(
             "onnxruntime",
             "No compatible ONNX Runtime execution provider is available",
             "provider_unavailable",
+            {"diagnostics": onnx_diag},
+        )
+    elif onnx_diag["state"] == "export_failed":
+        onnx_result = _unavailable(
+            "onnxruntime",
+            f"Automatic ONNX export failed: {onnx_diag.get('export_error', 'unknown error')}",
+            "export_failed",
             {"diagnostics": onnx_diag},
         )
     else:
