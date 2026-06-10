@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from backend.api.routes import process_image_async
 from backend.main import app
 from backend.services import cache_service
 
@@ -233,7 +234,7 @@ def test_estimate_metrics_and_outputs_modes(monkeypatch: Any) -> None:
     cache_service.clear()
     monkeypatch.setattr(
         "backend.api.routes._cached_devices",
-        lambda: (
+        lambda force=False: (
             {
                 "cpu": {
                     "name": "CPU · test",
@@ -301,7 +302,7 @@ def test_estimate_metrics_and_outputs_modes(monkeypatch: Any) -> None:
 def test_estimate_gt_required_without_file_returns_clear_error(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         "backend.api.routes._cached_devices",
-        lambda: (
+        lambda force=False: (
             {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
             "cpu",
             {},
@@ -331,3 +332,124 @@ def test_onnx_status_route_reports_paths_and_providers() -> None:
     assert small["expected_path"].endswith("midas_small.onnx")
     assert "runtime" in small
     assert "available_providers" in payload["runtime"]
+
+
+def test_upload_size_limit_accepts_exact_limit_and_rejects_one_byte_over(monkeypatch: Any) -> None:
+    cache_service.clear()
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+    monkeypatch.setattr("backend.api.routes.MAX_UPLOAD_SIZE_MB", 1)
+    monkeypatch.setattr(
+        "backend.api.routes.process_image",
+        lambda *args, **kwargs: {
+            "metrics": {},
+            "latency_ms": 0.1,
+            "model": args[1],
+            "colormap": args[2],
+            "device_used": args[3],
+            "resolution": {"width": 1, "height": 1},
+            "filename": args[4],
+            "cached": False,
+        },
+    )
+
+    exact = client.post(
+        "/estimate",
+        files={"file": ("exact.png", io.BytesIO(b"a" * (1024 * 1024)), "image/png")},
+        data={"device": "auto"},
+    )
+    over = client.post(
+        "/estimate",
+        files={"file": ("over.png", io.BytesIO(b"a" * (1024 * 1024 + 1)), "image/png")},
+        data={"device": "auto"},
+    )
+
+    assert exact.status_code == 200
+    assert over.status_code == 413
+
+
+def test_unavailable_requested_device_returns_422_not_500(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+
+    response = client.post(
+        "/estimate",
+        files={"file": ("sample.png", io.BytesIO(_png_bytes()), "image/png")},
+        data={"device": "cuda:0"},
+    )
+
+    assert response.status_code == 422
+    assert "unavailable" in str(response.json()["detail"])
+
+
+def test_stale_cached_device_resolve_failure_returns_422(monkeypatch: Any) -> None:
+    calls: list[bool] = []
+
+    def fake_cached_devices(force: bool = False) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        calls.append(force)
+        devices = {
+            "cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}
+        }
+        if not force:
+            devices["cuda:0"] = {"name": "GPU", "type": "cuda", "available": True}
+        return devices, "cpu", {}
+
+    monkeypatch.setattr("backend.api.routes._cached_devices", fake_cached_devices)
+    monkeypatch.setattr(
+        "backend.api.routes._resolve",
+        lambda requested: (_ for _ in ()).throw(ValueError("Device 'cuda:0' unavailable")),
+    )
+
+    response = client.post(
+        "/estimate",
+        files={"file": ("sample.png", io.BytesIO(_png_bytes()), "image/png")},
+        data={"device": "cuda:0"},
+    )
+
+    assert response.status_code == 422
+    assert calls == [False, True]
+
+
+def test_route_async_offload_allows_two_concurrent_requests(monkeypatch: Any) -> None:
+    import asyncio
+    import threading
+    import time
+
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    def slow_process(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return {"latency_ms": 0.1}
+
+    monkeypatch.setattr("backend.api.routes.process_image", slow_process)
+
+    async def run_two() -> None:
+        await asyncio.gather(
+            process_image_async(b"a", "midas_small", "inferno", "cpu", "a.png"),
+            process_image_async(b"b", "midas_small", "inferno", "cpu", "b.png"),
+        )
+
+    asyncio.run(run_two())
+
+    assert max_active == 2

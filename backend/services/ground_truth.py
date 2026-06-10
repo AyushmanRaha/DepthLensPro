@@ -14,6 +14,9 @@ from PIL import Image
 GT_MAX_SIZE_MB = 20
 GT_SUPPORTED_EXTENSIONS = {".png", ".tif", ".tiff", ".npy"}
 GT_EPS = 1e-6
+GT_MEDIAN_EPS = 1e-4
+GT_MAX_MEDIAN_SCALE = 1_000.0
+GT_MIN_MEDIAN_SCALE = 1e-3
 
 
 class GroundTruthError(ValueError):
@@ -97,7 +100,7 @@ def decode_ground_truth(
 ) -> GroundTruthPayload:
     """Decode PNG/TIFF/NPY ground truth into a finite 2D float32 depth plane."""
 
-    if len(raw) / 1024**2 > GT_MAX_SIZE_MB:
+    if len(raw) > GT_MAX_SIZE_MB * 1024 * 1024:
         raise GroundTruthError(f"Ground-truth file exceeds {GT_MAX_SIZE_MB} MB limit")
     ext = Path(filename or "").suffix.lower()
     if ext not in GT_SUPPORTED_EXTENSIONS:
@@ -109,9 +112,28 @@ def decode_ground_truth(
     warnings: list[str] = []
     depth = _decode_npy_depth(raw) if ext == ".npy" else _decode_image_depth(raw, ext, warnings)
     original_shape = [int(depth.shape[0]), int(depth.shape[1])]
-    if scale and scale > 0:
-        depth = depth * float(scale)
-        warnings.append(f"Applied GT scale factor {scale:g}.")
+    scale_factor = float(scale) if scale is not None else 1.0
+    if scale_factor <= 0:
+        raise GroundTruthError("gt_scale must be greater than 0 when provided")
+    if scale_factor != 1.0:
+        depth = depth * scale_factor
+        warnings.append(f"Applied GT scale factor {scale_factor:g}.")
+        if scale_factor == 0.001:
+            warnings.append("GT scale suggests millimeters were converted to meters.")
+
+    finite_for_units = np.isfinite(depth)
+    if invalid_value is not None:
+        finite_for_units &= depth != float(invalid_value)
+    positive_for_units = depth[finite_for_units & (depth > GT_EPS)]
+    if positive_for_units.size:
+        median_depth = float(np.median(positive_for_units))
+        if median_depth > 1_000.0:
+            warnings.append(
+                "GT median depth is very large after scaling; pass gt_scale=0.001 "
+                "when uploading millimeter depth maps."
+            )
+        elif median_depth < 0.01:
+            warnings.append("GT median depth is very small after scaling; verify gt_scale units.")
 
     finite = np.isfinite(depth)
     if invalid_value is not None:
@@ -128,6 +150,8 @@ def decode_ground_truth(
         "original_shape": original_shape,
         "decoded_shape": original_shape,
         "dtype": str(depth.dtype),
+        "scale_factor_input": scale_factor,
+        "unit_hint": "meters_after_gt_scale",
         "valid_pixel_count": int(valid.sum()),
         "invalid_pixel_count": invalid_count,
         "warnings": warnings,
@@ -144,15 +168,16 @@ def _valid_mask(gt: np.ndarray, invalid_value: float | None = None) -> np.ndarra
 
 def _align_gt_to_prediction(
     gt: np.ndarray, pred_shape: tuple[int, int], warnings: list[str]
-) -> tuple[np.ndarray, str]:
+) -> tuple[np.ndarray, str, str]:
     """Resize GT to prediction H×W with nearest-neighbor sampling.
 
-    This keeps the model output grid stable for image responses and avoids inventing
-    interpolated benchmark labels. The policy is documented in README.
+    Nearest-neighbor is intentional for depth labels because GT can be sparse or
+    contain sentinel invalid values; linear interpolation would create synthetic
+    depths and smear invalid regions into valid pixels.
     """
 
     if gt.shape == pred_shape:
-        return gt.astype(np.float32, copy=False), "gt_resize_to_prediction:none"
+        return gt.astype(np.float32, copy=False), "gt_resize_to_prediction:none", "none"
     resized = cv2.resize(
         gt.astype(np.float32, copy=False),
         (pred_shape[1], pred_shape[0]),
@@ -163,7 +188,7 @@ def _align_gt_to_prediction(
         f"{gt.shape[1]}×{gt.shape[0]} to {pred_shape[1]}×{pred_shape[0]} "
         "using nearest-neighbor alignment."
     )
-    return resized.astype(np.float32, copy=False), "gt_resize_to_prediction:nearest"
+    return resized.astype(np.float32, copy=False), "gt_resize_to_prediction:nearest", "nearest"
 
 
 def compute_ground_truth_metrics(
@@ -176,7 +201,7 @@ def compute_ground_truth_metrics(
     """Align relative prediction to GT with median scale and compute benchmark metrics."""
 
     warnings = list(metadata.get("warnings") or [])
-    gt_aligned, align_policy = _align_gt_to_prediction(gt, pred.shape[:2], warnings)
+    gt_aligned, align_policy, resize_method = _align_gt_to_prediction(gt, pred.shape[:2], warnings)
     valid = _valid_mask(gt_aligned, invalid_value)
     pred32 = pred.astype(np.float32, copy=False)
     valid &= np.isfinite(pred32) & (pred32 > GT_EPS)
@@ -185,11 +210,24 @@ def compute_ground_truth_metrics(
 
     pred_valid = pred32[valid].astype(np.float64)
     gt_valid = gt_aligned[valid].astype(np.float64)
-    pred_median = float(np.median(pred_valid[pred_valid > GT_EPS]))
-    gt_median = float(np.median(gt_valid[gt_valid > GT_EPS]))
-    if pred_median <= GT_EPS or gt_median <= GT_EPS:
-        raise GroundTruthError("Could not compute median scale alignment for GT metrics")
+    pred_positive = pred_valid[pred_valid > GT_MEDIAN_EPS]
+    gt_positive = gt_valid[gt_valid > GT_EPS]
+    if pred_positive.size == 0 or gt_positive.size == 0:
+        raise GroundTruthError(
+            "Could not compute median scale alignment: positive prediction/GT pixels are too small"
+        )
+    pred_median = float(np.median(pred_positive))
+    gt_median = float(np.median(gt_positive))
+    if pred_median <= GT_MEDIAN_EPS or gt_median <= GT_EPS:
+        raise GroundTruthError(
+            "Could not compute median scale alignment: prediction or GT median is near zero"
+        )
     scale = gt_median / pred_median
+    if not np.isfinite(scale) or scale < GT_MIN_MEDIAN_SCALE or scale > GT_MAX_MEDIAN_SCALE:
+        raise GroundTruthError(
+            "Median scale alignment produced an implausible scale factor; verify GT units "
+            "or provide gt_scale (for millimeters, use 0.001)"
+        )
     pred_scaled = pred32.astype(np.float64) * scale
     pv = pred_scaled[valid]
     gv = gt_valid
@@ -222,6 +260,9 @@ def compute_ground_truth_metrics(
         "valid_pixel_count": int(valid.sum()),
         "invalid_pixel_count": int(valid.size - int(valid.sum())),
         "alignment_policy": align_policy,
+        "resize_method": resize_method,
+        "invalid_pixel_count_before_resize": int(metadata.get("invalid_pixel_count", 0)),
+        "invalid_pixel_count_after_resize": int(valid.size - int(valid.sum())),
         "scale_alignment": "median_scale",
         "scale_factor": round(float(scale), 6),
         "warnings": warnings,
