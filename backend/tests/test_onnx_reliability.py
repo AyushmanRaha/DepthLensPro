@@ -209,3 +209,39 @@ def test_onnx_depth_resize_clamps_bicubic_overshoot(
     assert resized.dtype == np.float32
     assert float(resized.min()) >= 0.0
     assert float(resized.max()) <= 1.0
+
+
+def test_onnx_engine_load_is_singleton_and_forward_lock_is_created(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inference.clear_models()
+    created: list[str] = []
+    create_lock = threading.Lock()
+
+    class FakeEngine:
+        provider = "CPUExecutionProvider"
+
+        def __init__(self, model_name: str, device: str) -> None:
+            with create_lock:
+                created.append(f"{model_name}:{device}")
+            self.model_name = model_name
+            self.device = device
+
+    monkeypatch.setattr(inference, "ONNXExecutionEngine", FakeEngine)
+    engines: list[Any] = []
+    threads = [
+        threading.Thread(
+            target=lambda: engines.append(inference._load_onnx_engine("MiDaS_small", "cpu"))
+        )
+        for _ in range(4)
+    ]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert created == ["midas_small:cpu"]
+    assert len({id(engine) for engine in engines}) == 1
+    assert "midas_small:cpu" in inference._ONNX_FORWARD_LOCKS
+    inference.clear_models()

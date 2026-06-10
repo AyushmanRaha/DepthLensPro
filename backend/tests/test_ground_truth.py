@@ -51,3 +51,48 @@ def test_shape_mismatch_resizes_gt_with_warning(monkeypatch: pytest.MonkeyPatch)
     result = gt.compute_ground_truth_metrics(pred, labels, metadata={"warnings": []})
     assert result["metadata"]["aligned_shape"] == [4, 4]
     assert "Resized GT" in result["metadata"]["warnings"][0]
+
+
+def test_gt_scale_converts_millimeters_to_meters() -> None:
+    buf = io.BytesIO()
+    np.save(buf, np.array([[1000.0, 2000.0], [0.0, 4000.0]], dtype=np.float32))
+
+    payload = gt.decode_ground_truth(buf.getvalue(), "depth.npy", scale=0.001)
+
+    assert np.isclose(payload.depth[0, 0], 1.0)
+    assert payload.metadata["scale_factor_input"] == 0.001
+    assert "millimeters were converted to meters" in " ".join(payload.metadata["warnings"])
+
+
+def test_median_alignment_rejects_near_zero_predictions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gt, "_colorize", lambda values, colormap=0: "png-b64")
+    pred = np.full((2, 2), 1e-7, dtype=np.float32)
+    labels = np.ones((2, 2), dtype=np.float32)
+
+    with pytest.raises(gt.GroundTruthError, match="No overlapping|too small|near zero"):
+        gt.compute_ground_truth_metrics(pred, labels, metadata={"warnings": []})
+
+
+def test_resize_metadata_reports_method_and_invalid_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gt, "_colorize", lambda values, colormap=0: "png-b64")
+
+    def fake_resize(
+        values: np.ndarray, size: tuple[int, int], interpolation: Any = None
+    ) -> np.ndarray:
+        del interpolation
+        return np.resize(values, (size[1], size[0])).astype(np.float32)
+
+    monkeypatch.setattr(gt.cv2, "resize", fake_resize)
+    pred = np.ones((4, 4), dtype=np.float32)
+    labels = np.array([[1.0, 0.0], [2.0, 3.0]], dtype=np.float32)
+
+    result = gt.compute_ground_truth_metrics(
+        pred,
+        labels,
+        metadata={"warnings": [], "invalid_pixel_count": 1},
+    )
+
+    meta = result["metadata"]
+    assert meta["resize_method"] == "nearest"
+    assert meta["invalid_pixel_count_before_resize"] == 1
+    assert "invalid_pixel_count_after_resize" in meta

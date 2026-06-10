@@ -86,14 +86,10 @@ def _load_model(
         if key in MODELS:
             return MODELS[key], TRANSFORMS[model_id]
 
-        device = torch.device(device_str)
-        log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
-        model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
-        model.to(device).eval()
-
-        if device.type == "mps":
-            model = model.float()
-
+        # MiDaS preprocessing transforms are selected by model family only and do
+        # not hold device state.  Keep the cache model-scoped intentionally; if a
+        # future transform depends on CUDA/MPS/XPU state, change this key to
+        # include ``device_str`` alongside the model cache key below.
         if model_id not in TRANSFORMS:
             transforms = torch.hub.load(  # type: ignore[no-untyped-call]
                 "intel-isl/MiDaS", "transforms", trust_repo=True
@@ -103,6 +99,14 @@ def _load_model(
                 if model_id == "midas_small"
                 else transforms.dpt_transform
             )
+
+        device = torch.device(device_str)
+        log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
+        model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+        model.to(device).eval()
+
+        if device.type == "mps":
+            model = model.float()
 
         MODELS[key] = (model, device)
         _MODEL_FORWARD_LOCKS.setdefault(key, threading.Lock())
@@ -153,26 +157,36 @@ def _infer_torch(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.nd
     return _normalize_depth(depth)
 
 
-def _load_onnx_engine(model_name: str, device_str: str) -> ONNXExecutionEngine:
-    """Load or reuse an ONNX Runtime execution engine for static MiDaS weights."""
+def _load_onnx_engine_with_lock(
+    model_name: str, device_str: str
+) -> tuple[ONNXExecutionEngine, threading.Lock]:
+    """Load/reuse an ONNX engine and its matching forward lock atomically."""
 
     model_id = normalize_model_id(model_name)
     key = f"{model_id}:{device_str}"
     with _ONNX_LOCK:
-        if key not in ONNX_ENGINES:
-            ONNX_ENGINES[key] = ONNXExecutionEngine(model_name=model_id, device=device_str)
-            _ONNX_FORWARD_LOCKS.setdefault(key, threading.Lock())
-        return ONNX_ENGINES[key]
+        forward_lock = _ONNX_FORWARD_LOCKS.setdefault(key, threading.Lock())
+        engine = ONNX_ENGINES.get(key)
+        if engine is None:
+            engine = ONNXExecutionEngine(model_name=model_id, device=device_str)
+            ONNX_ENGINES[key] = engine
+        return engine, forward_lock
+
+
+def _load_onnx_engine(model_name: str, device_str: str) -> ONNXExecutionEngine:
+    """Load or reuse an ONNX Runtime execution engine for static MiDaS weights."""
+
+    engine, _forward_lock = _load_onnx_engine_with_lock(model_name, device_str)
+    return engine
 
 
 def _infer_onnx(img_bgr: np.ndarray, model_name: str, device_str: str) -> np.ndarray:
     """Run normalized ONNX Runtime depth inference for a BGR image."""
 
     model_id = normalize_model_id(model_name)
-    key = f"{model_id}:{device_str}"
-    engine = _load_onnx_engine(model_id, device_str)
+    engine, forward_lock = _load_onnx_engine_with_lock(model_id, device_str)
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    with _ONNX_FORWARD_LOCKS[key]:
+    with forward_lock:
         depth = engine.forward(rgb)
     return _normalize_depth(depth)
 

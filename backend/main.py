@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import traceback
 from collections.abc import AsyncIterator
@@ -70,13 +71,20 @@ log = logging.getLogger("depthlens")
 
 async def _warm_default_model() -> None:
     """Optionally warm one model after the ASGI app is already serving /live."""
-    model = settings.DEPTHLENS_WARMUP_MODEL
+    if os.getenv("DEPTHLENS_SKIP_WARMUP") == "1" or os.getenv("TESTING") == "1":
+        log.info("Model warmup skipped by DEPTHLENS_SKIP_WARMUP/TESTING")
+        return
+
+    requested_model = settings.DEPTHLENS_WARMUP_MODEL
     requested_device = settings.DEPTHLENS_WARMUP_DEVICE
-    from backend.services.inference import SUPPORTED_MODELS, _load_model
+    from backend.model_registry import UnknownModelError, normalize_model_id
+    from backend.services.inference import _load_model
     from backend.utils.hardware import _resolve
 
-    if model not in SUPPORTED_MODELS:
-        log.warning("⚠️  Warmup skipped: unknown model %s", model)
+    try:
+        model = normalize_model_id(requested_model)
+    except UnknownModelError:
+        log.warning("⚠️  Warmup skipped: unknown model %s", requested_model)
         return
     try:
         device = str(_resolve(requested_device))
@@ -87,6 +95,8 @@ async def _warm_default_model() -> None:
         device = "cpu"
     try:
         log.info("🔥 Background warmup starting: %s on %s", model, device)
+        # Reuse the normal loading path and locks so background warmup cannot race
+        # a first request into duplicate torch.hub.load calls for the same key.
         await asyncio.to_thread(_load_model, model, device)
         log.info("✅ Background warmup complete: %s on %s", model, device)
     except Exception as exc:

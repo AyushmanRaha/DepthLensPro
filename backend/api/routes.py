@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import platform
@@ -124,9 +123,6 @@ _DEVICE_CACHE: dict[str, Any] = {
     "error": None,
 }
 _ACCEL_CACHE: dict[str, Any] = {"expires_at": 0.0, "checks": None, "error": None}
-_ROUTE_INFERENCE_SEMAPHORE = asyncio.Semaphore(
-    max(1, int(os.getenv("INFERENCE_MAX_CONCURRENCY", "2")))
-)
 
 
 async def process_image_async(
@@ -146,23 +142,25 @@ async def process_image_async(
 ) -> dict[str, Any]:
     """Offload blocking image inference while preserving route-level monkeypatching."""
 
-    async with _ROUTE_INFERENCE_SEMAPHORE:
-        return await run_in_threadpool(
-            process_image,
-            raw,
-            model,
-            colormap,
-            device,
-            filename,
-            metrics,
-            outputs,
-            max_dim,
-            gt_raw,
-            gt_filename,
-            gt_required,
-            gt_scale,
-            gt_invalid_value,
-        )
+    # This route wrapper is the single API request offload point.  It deliberately
+    # does not use the service-level async helper, so INFERENCE_MAX_CONCURRENCY=2
+    # is not accidentally applied twice for HTTP requests.
+    return await run_in_threadpool(
+        process_image,
+        raw,
+        model,
+        colormap,
+        device,
+        filename,
+        metrics,
+        outputs,
+        max_dim,
+        gt_raw,
+        gt_filename,
+        gt_required,
+        gt_scale,
+        gt_invalid_value,
+    )
 
 
 def _elapsed_ms(start: float) -> float:
@@ -258,6 +256,29 @@ def _cached_acceleration_checks(
         }
     _ACCEL_CACHE.update({"expires_at": now + _PROBE_TTL_SECONDS, "checks": checks, "error": error})
     return checks, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
+
+
+def _validated_device_or_422(device: str) -> str:
+    """Resolve a requested device with one stale-cache refresh before returning 422."""
+
+    def available_options(force: bool = False) -> list[str]:
+        devs, _, _ = _cached_devices(force=force)
+        return [*devs.keys(), "auto"]
+
+    avail = available_options()
+    if device not in avail:
+        raise HTTPException(422, f"Device '{device}' unavailable. Options: {avail}")
+    try:
+        return str(_resolve(device))
+    except ValueError as exc:
+        refreshed = available_options(force=True)
+        if device not in refreshed:
+            detail = f"Device '{device}' unavailable. Options: {refreshed}"
+            raise HTTPException(422, detail) from exc
+        try:
+            return str(_resolve(device))
+        except ValueError as refreshed_exc:
+            raise HTTPException(422, str(refreshed_exc)) from refreshed_exc
 
 
 def _percent(numerator: int, denominator: int) -> float:
@@ -508,16 +529,13 @@ async def estimate(
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
-    devs, _, _ = _cached_devices()
-    avail = list(devs.keys()) + ["auto"]
-    if device not in avail:
-        raise HTTPException(422, f"Device '{device}' unavailable. Options: {avail}")
+    resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
-    if len(raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
+    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
 
     gt_raw: bytes | None = None
@@ -525,12 +543,11 @@ async def estimate(
     if gt_file is not None:
         gt_raw = await gt_file.read()
         gt_filename = gt_file.filename
-        if len(gt_raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
+        if len(gt_raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
             raise HTTPException(413, f"Ground-truth file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
     elif gt_required:
         raise HTTPException(422, "Ground-truth mode requires a GT depth file")
 
-    resolved = str(_resolve(device))
     # GT metrics depend on uploaded labels and must not reuse image-only cached payloads.
     ck = (
         None
@@ -604,13 +621,13 @@ async def batch(
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
-    resolved = str(_resolve(device))
+    resolved = _validated_device_or_422(device)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str | None]] = []
     for upload in files:
         try:
             raw = await upload.read()
-            if len(raw) / 1024**2 > MAX_UPLOAD_SIZE_MB:
+            if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
                 raise ValueError("File too large")
             ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
             cached = _cache_service().get(ck)
