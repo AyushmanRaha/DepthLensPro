@@ -1176,7 +1176,6 @@ async function checkReadiness({ quiet = true } = {}) {
     const res = await apiFetch("/ready", { signal: timeoutSignal(5000) });
     const data = await res.json();
     state.engineStatus.readiness = data;
-    state.engineStatus.live = data;
     readinessDetails = data;
     inferenceReady = Boolean(data.inference_ready);
     if (inferenceReady) {
@@ -1233,6 +1232,7 @@ async function checkLive({ quiet = false, signal } = {}) {
   try {
     const res = await apiFetch("/live", { signal: requestSignal(signal, 2500) });
     const data = await res.json();
+    state.engineStatus.live = data;
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
     if (data.busy) {
