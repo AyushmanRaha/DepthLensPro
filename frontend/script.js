@@ -253,6 +253,7 @@ const el = {
   themeToggleBtn:     $("#themeToggleBtn"),
 
   // Header
+  headerNavShell:          $("#headerNavShell"),
   engineStatusHost:        $("#engineStatusHost"),
   engineStatusButton:      $("#engineStatusButton"),
   engineStatusPanel:       $("#engineStatusPanel"),
@@ -2114,11 +2115,179 @@ function initReconstructionPanel() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// POLISHED UI MOTION + GUIDE ACCORDION
+// ══════════════════════════════════════════════════════════════
+function prefersReducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
+}
+
+function bindPointerGlow(selector, { tilt = 0 } = {}) {
+  $$(selector).forEach(node => {
+    if (node.dataset.pointerGlowBound === "true") return;
+    node.dataset.pointerGlowBound = "true";
+    node.style.setProperty("--mx", "50%");
+    node.style.setProperty("--my", "50%");
+    node.style.setProperty("--tilt-x", "0deg");
+    node.style.setProperty("--tilt-y", "0deg");
+
+    node.addEventListener("pointermove", event => {
+      const rect = node.getBoundingClientRect();
+      const px = (event.clientX - rect.left) / Math.max(rect.width, 1);
+      const py = (event.clientY - rect.top) / Math.max(rect.height, 1);
+      node.style.setProperty("--mx", `${(px * 100).toFixed(1)}%`);
+      node.style.setProperty("--my", `${(py * 100).toFixed(1)}%`);
+      if (!prefersReducedMotion() && tilt) {
+        node.style.setProperty("--tilt-y", `${((px - 0.5) * tilt).toFixed(2)}deg`);
+        node.style.setProperty("--tilt-x", `${((0.5 - py) * tilt).toFixed(2)}deg`);
+      }
+    });
+
+    node.addEventListener("pointerleave", () => {
+      node.style.setProperty("--mx", "50%");
+      node.style.setProperty("--my", "50%");
+      node.style.setProperty("--tilt-x", "0deg");
+      node.style.setProperty("--tilt-y", "0deg");
+    });
+  });
+}
+
+function initScrollableNav() {
+  const shell = el.headerNavShell;
+  if (!shell || shell.dataset.scrollNavBound === "true") return;
+  shell.dataset.scrollNavBound = "true";
+
+  let dragging = false;
+  let suppressClick = false;
+  let startX = 0;
+  let startY = 0;
+  let startScrollLeft = 0;
+  const dragThreshold = 6;
+
+  shell.addEventListener("wheel", event => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    if (shell.scrollWidth <= shell.clientWidth) return;
+    event.preventDefault();
+    shell.scrollLeft += event.deltaY;
+  }, { passive: false });
+
+  shell.addEventListener("pointerdown", event => {
+    if (event.button !== undefined && event.button !== 0) return;
+    dragging = true;
+    suppressClick = false;
+    startX = event.clientX;
+    startY = event.clientY;
+    startScrollLeft = shell.scrollLeft;
+    shell.setPointerCapture?.(event.pointerId);
+  });
+
+  shell.addEventListener("pointermove", event => {
+    if (!dragging) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!suppressClick && Math.hypot(dx, dy) > dragThreshold) {
+      suppressClick = true;
+      shell.classList.add("dragging");
+    }
+    if (suppressClick) {
+      event.preventDefault();
+      shell.scrollLeft = startScrollLeft - dx;
+    }
+  });
+
+  ["pointerup", "pointercancel", "pointerleave"].forEach(type => {
+    shell.addEventListener(type, event => {
+      if (!dragging) return;
+      dragging = false;
+      shell.releasePointerCapture?.(event.pointerId);
+      shell.classList.remove("dragging");
+      window.setTimeout(() => { suppressClick = false; }, 120);
+    });
+  });
+
+  shell.addEventListener("click", event => {
+    if (!suppressClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClick = false;
+  }, true);
+}
+
+function setGuideSectionOpen(section, open) {
+  const toggle = $(".guide-section-toggle", section);
+  const body = $(".guide-section-body", section);
+  if (!toggle || !body) return;
+
+  section.classList.toggle("open", open);
+  toggle.setAttribute("aria-expanded", String(open));
+
+  if (prefersReducedMotion()) {
+    body.style.maxHeight = open ? "none" : "0px";
+    return;
+  }
+
+  if (open) {
+    body.style.maxHeight = `${body.scrollHeight}px`;
+  } else {
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    requestAnimationFrame(() => { body.style.maxHeight = "0px"; });
+  }
+}
+
+function refreshOpenGuideHeights() {
+  $$(".guide-section.open .guide-section-body").forEach(body => {
+    body.style.maxHeight = prefersReducedMotion() ? "none" : `${body.scrollHeight}px`;
+  });
+}
+
+function initGuideAccordion() {
+  const accordion = $("#guideAccordion");
+  if (!accordion || accordion.dataset.guideBound === "true") return;
+  accordion.dataset.guideBound = "true";
+
+  const toggles = $$(".guide-section-toggle", accordion);
+  toggles.forEach((toggle, index) => {
+    const section = toggle.closest(".guide-section");
+    if (!section) return;
+    setGuideSectionOpen(section, section.classList.contains("open") || toggle.getAttribute("aria-expanded") === "true");
+
+    toggle.addEventListener("click", () => {
+      setGuideSectionOpen(section, toggle.getAttribute("aria-expanded") !== "true");
+    });
+
+    toggle.addEventListener("keydown", event => {
+      if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const next = toggles[(index + direction + toggles.length) % toggles.length];
+      next?.focus();
+    });
+  });
+
+  window.addEventListener("resize", refreshOpenGuideHeights);
+}
+
+// ══════════════════════════════════════════════════════════════
 // PANEL NAVIGATION
 // ══════════════════════════════════════════════════════════════
 function switchPanel(name) {
-  el.navBtns.forEach(b => b.classList.toggle("active", b.dataset.panel===name));
-  el.panels.forEach(p => { p.hidden = p.id !== `panel-${name}`; });
+  el.navBtns.forEach(b => b.classList.toggle("active", b.dataset.panel === name));
+
+  const targetId = `panel-${name}`;
+  el.panels.forEach(p => {
+    const isActive = p.id === targetId;
+    p.hidden = !isActive;
+    p.classList.toggle("active", isActive);
+  });
+
+  const activeBtn = el.navBtns.find?.(b => b.dataset.panel === name) || $(`.nav-btn[data-panel="${cssEscapeValue(name)}"]`);
+  activeBtn?.scrollIntoView({
+    block: "nearest",
+    inline: "center",
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+  });
+
+  if (name === "guide") refreshOpenGuideHeights();
+
   if (name === "reconstruct") {
     syncReconstructControls();
     resizePointCloudCanvas();
@@ -3412,6 +3581,11 @@ async function init() {
   setStatus("connecting", "Starting engine…", DEFAULT_API_BASE_URL);
   syncQueueControls();
   initReconstructionPanel();
+  initScrollableNav();
+  initGuideAccordion();
+  bindPointerGlow(".nav-btn", { tilt: 5 });
+  bindPointerGlow(".guide-section-toggle", { tilt: 3 });
+  bindPointerGlow(".guide-card, .guide-section", { tilt: 1.5 });
   try {
     await resolveApiBaseUrl();
     if (!runningInElectron) toastOnce("Browser/file mode detected — start the backend manually for inference.", "warning", 7000);

@@ -129,18 +129,21 @@
             <!-- Button is moved here via JS during transition -->
           </div>
 
-          <nav
-            class="header-nav"
-            role="navigation"
-            aria-label="Main navigation"
-          >
-            <button class="nav-btn active" data-panel="main">WORKSPACE</button>
-            <button class="nav-btn" data-panel="webcam">WEBCAM</button>
-            <button class="nav-btn" data-panel="compare">COMPARE</button>
-            <button class="nav-btn" data-panel="performance">PERFORMANCE</button>
-            <button class="nav-btn" data-panel="experiments">EXPERIMENTS</button>
-            <button class="nav-btn" data-panel="reconstruct">3D</button>
-          </nav>
+          <div class="header-nav-shell" id="headerNavShell" aria-label="Scrollable main navigation tabs">
+            <nav
+              class="header-nav"
+              role="navigation"
+              aria-label="Main navigation"
+            >
+              <button class="nav-btn active" data-panel="main">WORKSPACE</button>
+              <button class="nav-btn" data-panel="webcam">WEBCAM</button>
+              <button class="nav-btn" data-panel="compare">COMPARE</button>
+              <button class="nav-btn" data-panel="performance">PERFORMANCE</button>
+              <button class="nav-btn" data-panel="experiments">EXPERIMENTS</button>
+              <button class="nav-btn" data-panel="reconstruct">3D</button>
+              <button class="nav-btn" data-panel="guide">GUIDE</button>
+            </nav>
+          </div>
 
           <!-- Reports local inference engine availability. -->
 <div class="engine-status-host" id="engineStatusHost">
@@ -999,6 +1002,145 @@
               </div>
             </section>
           </div>
+        </div>
+      </main>
+
+
+      <!-- ── Guide panel ──────────────────────────────────────────────── -->
+      <main class="panel guide-panel" id="panel-guide" hidden>
+        <div class="guide-layout">
+          <section class="card guide-card guide-hero" aria-labelledby="guideHeroTitle">
+            <p class="guide-section-kicker">DepthLens Pro field manual</p>
+            <h2 class="guide-hero-title" id="guideHeroTitle">Learn the renderer, workflows, metrics, and 3D depth language in one place.</h2>
+            <p class="guide-hero-copy">Use this self-contained guide when you are choosing a model, tuning real-time webcam depth, comparing engines, validating against ground truth, or exporting a point cloud. Nothing in this tab calls the backend; it is a local reference for confident, repeatable depth work.</p>
+            <div class="guide-quick-grid" aria-label="Guide highlights">
+              <span>Scrollable header tabs</span>
+              <span>Local-first inference flow</span>
+              <span>Metric and glossary reference</span>
+              <span>3D reconstruction checklist</span>
+            </div>
+          </section>
+
+          <section class="card guide-card" aria-labelledby="guideHeading">
+            <h2 class="card-title" id="guideHeading"><span class="card-icon">▣</span> Guide</h2>
+            <div class="guide-accordion" id="guideAccordion">
+              <article class="guide-section open">
+                <button class="guide-section-toggle" type="button" aria-expanded="true" aria-controls="guide-general">
+                  <span><span class="guide-section-kicker">Start here</span><span class="guide-section-title">General UI Guidelines</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-general"><div class="guide-section-inner">
+                  <p>The header tabs switch workspaces; if they overflow, scroll the tab bar with a wheel, trackpad, touch, or drag gesture. The engine status orb reports backend health, the theme toggle switches dark/light presentation, and cards group controls by task.</p>
+                  <ol class="guide-step-list"><li>Start in Workspace for normal image depth inference.</li><li>Watch disabled buttons and progress bars: they prevent duplicate work while uploads or inference are in flight.</li><li>Use toasts for recovery hints; the app is local-first, so images stay in the local renderer/backend flow unless you export them.</li><li>Use GUIDE anytime nomenclature or metrics are unclear.</li></ol>
+                  <p class="guide-callout">Buttons, sliders, and guide controls are intentionally no-drag zones inside the Electron draggable header/body so clicks remain precise.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-workspace">
+                  <span><span class="guide-section-kicker">Core workflow</span><span class="guide-section-title">Workspace: Queue, Device, Model, Colormap, GT, Dashboard</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-workspace"><div class="guide-section-inner">
+                  <p>Workspace turns an image queue into depth maps. Pick <strong>Auto device selection</strong> for the best detected accelerator, <strong>CPU</strong> for compatibility, or a <strong>GPU</strong> path such as CUDA, MPS, XPU, or NPU / Neural Engine when available.</p>
+                  <ol class="guide-step-list"><li>Choose a compute device and model architecture.</li><li>Upload one or more images to the image queue.</li><li>Select a colormap to convert single-channel depth into readable color.</li><li>Optionally attach ground truth depth to compute GT-aware metrics.</li><li>Read the session dashboard for latency, cache hits, image dimensions, and metric summaries.</li></ol>
+                  <p><strong>MiDaS Small</strong> is best for quick CPU tests and webcam previews. <strong>DPT Hybrid</strong> balances quality and speed. <strong>DPT Large</strong> favors detail and usually needs a strong GPU for practical latency.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-webcam">
+                  <span><span class="guide-section-kicker">Live mode</span><span class="guide-section-title">Webcam: Real-time Depth, FPS, Smoothing, Latency</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-webcam"><div class="guide-section-inner">
+                  <p>Webcam mode asks for camera permission, captures frames, and runs real-time monocular depth estimation. Target FPS caps protect the backend from overload, frame max dimension reduces compute, and smoothing stabilizes flicker at the cost of a little responsiveness.</p>
+                  <p class="guide-callout">Start with MiDaS Small, Auto/CPU, a modest max dimension, and low target FPS. Increase quality only after latency is stable.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-compare">
+                  <span><span class="guide-section-kicker">Quality tradeoffs</span><span class="guide-section-title">Compare: Run All Models and Read Visual/Metric Results</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-compare"><div class="guide-section-inner">
+                  <p>Compare runs one image through the available model set so you can inspect depth boundaries, object separation, and speed. Use it when deciding whether a scene needs DPT Large detail or whether MiDaS Small/DPT Hybrid is sufficient.</p>
+                  <p>Charts help separate quality-vs-speed decisions: visual sharpness can improve while latency and memory cost rise. When ground truth is present, prefer lower Abs Rel/RMSE and higher δ &lt; 1.25 or SSIM.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-performance">
+                  <span><span class="guide-section-kicker">Engine profiling</span><span class="guide-section-title">Performance: PyTorch vs ONNX Runtime Benchmark</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-performance"><div class="guide-section-inner">
+                  <p>Performance compares <strong>PyTorch</strong> execution with optional <strong>ONNX Runtime</strong>. ONNX can be unavailable if weights, dependencies, or a matching provider are missing. Provider means the runtime backend, such as CPU or CUDA; fallback means the app safely returns to another provider/path.</p>
+                  <div class="guide-mini-table"><span>Latency</span><span>Time for one inference; lower feels snappier.</span><span>Throughput</span><span>Images or frames per second; higher supports batch/live workloads.</span><span>Speedup</span><span>Relative improvement over a baseline.</span><span>RSS memory</span><span>Resident process memory while benchmarking.</span></div>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-experiments">
+                  <span><span class="guide-section-kicker">Validation</span><span class="guide-section-title">Experiments: GT Metrics, Exports, Reproducibility</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-experiments"><div class="guide-section-inner">
+                  <p>Experiments package repeated validation into named runs. Use GT runs when ground truth depth is aligned with each image; use image-only runs for qualitative batches. JSON exports preserve detailed metadata, while CSV exports are convenient for spreadsheets and reports.</p>
+                  <p>For reproducibility, record model, device, input size, colormap, timestamps, cache state, and any median-scale alignment used for relative-vs-GT comparisons.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-reconstruct">
+                  <span><span class="guide-section-kicker">Geometry export</span><span class="guide-section-title">3D Reconstruction: Point Clouds, PLY/OBJ, Preview Controls</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-reconstruct"><div class="guide-section-inner">
+                  <p>Monocular depth is generally <strong>relative depth</strong>, not calibrated <strong>metric depth</strong>. Reconstruction converts one source image and its depth map into an approximate point cloud, useful for visualization and creative geometry—not survey-grade measurement.</p>
+                  <ul class="guide-step-list"><li><strong>PLY</strong> is a point-cloud friendly export; <strong>OBJ</strong> is broadly accepted by 3D tools.</li><li>Max points and preview points trade detail for responsiveness.</li><li>Grid sampling is evenly spaced; random sampling can preserve stochastic coverage.</li><li>Focal scale and depth scale shape perspective and z spacing.</li><li>Near/Far percentile clipping removes extreme depth outliers.</li><li>Coordinate system and RGB color inclusion determine orientation and whether points carry image color.</li></ul>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-glossary">
+                  <span><span class="guide-section-kicker">Reference</span><span class="guide-section-title">Technical Glossary / Nomenclature</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-glossary"><div class="guide-section-inner">
+                  <div class="guide-term-grid">
+                    <div class="guide-term"><strong>Monocular depth estimation</strong><span>Predicting scene depth from a single RGB image.</span></div>
+                    <div class="guide-term"><strong>Depth map / single-channel depth</strong><span>A per-pixel distance-like field, often displayed with a colormap.</span></div>
+                    <div class="guide-term"><strong>Relative vs metric depth</strong><span>Relative ranks near/far; metric has calibrated units.</span></div>
+                    <div class="guide-term"><strong>Inference</strong><span>The model forward pass that produces the depth prediction.</span></div>
+                    <div class="guide-term"><strong>Cache hit</strong><span>A reused previous result instead of recomputing.</span></div>
+                    <div class="guide-term"><strong>Ground truth depth</strong><span>Reference depth from sensor/simulation/dataset.</span></div>
+                    <div class="guide-term"><strong>Median-scale alignment</strong><span>Scaling prediction by median ratios before GT comparison.</span></div>
+                    <div class="guide-term"><strong>Abs Rel / RMSE</strong><span>Error metrics; lower usually indicates better depth accuracy.</span></div>
+                    <div class="guide-term"><strong>δ &lt; 1.25</strong><span>Accuracy threshold measuring pixels within a depth ratio tolerance.</span></div>
+                    <div class="guide-term"><strong>SSIM / PSNR</strong><span>Image similarity and signal quality measures.</span></div>
+                    <div class="guide-term"><strong>SILog</strong><span>Scale-invariant logarithmic depth error.</span></div>
+                    <div class="guide-term"><strong>Gradient mean / edge density</strong><span>Describe depth transitions and structural edges.</span></div>
+                    <div class="guide-term"><strong>Entropy / dynamic range</strong><span>Describe distribution richness and spread of predicted depths.</span></div>
+                    <div class="guide-term"><strong>CPU, GPU, CUDA, MPS, XPU, NPU</strong><span>Compute targets from universal CPU to vendor accelerators and Neural Engine class hardware.</span></div>
+                    <div class="guide-term"><strong>PyTorch / ONNX Runtime / provider / fallback</strong><span>Model engines, execution backends, and safe alternate paths.</span></div>
+                    <div class="guide-term"><strong>Point cloud, focal scale, depth scale</strong><span>3D points and controls that shape projection and depth spacing.</span></div>
+                  </div>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-troubleshooting">
+                  <span><span class="guide-section-kicker">Recovery</span><span class="guide-section-title">Troubleshooting and Best Practices</span></span>
+                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                </button>
+                <div class="guide-section-body" id="guide-troubleshooting"><div class="guide-section-inner">
+                  <ul class="guide-step-list guide-warning"><li><strong>Backend offline/degraded:</strong> check the engine orb, refresh status, and confirm dependencies are installed.</li><li><strong>Unsupported device:</strong> switch to Auto or CPU; CUDA/MPS/XPU/NPU availability depends on hardware and runtime builds.</li><li><strong>Large files or slow inference:</strong> reduce image size, use MiDaS Small, or choose a faster device.</li><li><strong>GT mismatch:</strong> ensure ground truth dimensions and pairing match the source image.</li><li><strong>Webcam permission failure:</strong> allow camera access and close other apps using the camera.</li><li><strong>ONNX unavailable:</strong> use PyTorch or install/provide the correct ONNX weights/provider.</li></ul>
+                </div></div>
+              </article>
+            </div>
+          </section>
         </div>
       </main>
 
