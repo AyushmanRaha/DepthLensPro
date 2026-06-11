@@ -383,49 +383,85 @@ document.addEventListener("change", (e) => {
 // BACKGROUND CANVAS (workspace)
 // ══════════════════════════════════════════════════════════════
 (function bgCanvas() {
-  const cv = el.bgCanvas, ctx = cv.getContext("2d");
-  let W, H, pts = [];
-  const N = 50;
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const cv = document.getElementById('bgCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W = 0, H = 0, pts = [], raf = 0;
+  const N = 48;
+
+  function isDark() {
+    return document.documentElement.getAttribute('data-theme') !== 'light';
+  }
 
   function mkP() {
     return {
-      x: Math.random()*W, y: Math.random()*H,
-      vx:(Math.random()-0.5)*0.28, vy:(Math.random()-0.5)*0.28,
-      r: Math.random()*1.3+0.3, a: Math.random(),
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.22, vy: (Math.random() - 0.5) * 0.22,
+      r: Math.random() * 1.1 + 0.4,
     };
   }
+
   function resize() {
-    const dpr = Math.min(window.devicePixelRatio||1,2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
-    cv.width = Math.floor(W*dpr); cv.height = Math.floor(H*dpr);
+    cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
     cv.style.width = `${W}px`; cv.style.height = `${H}px`;
-    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
-  function reset() { resize(); pts = Array.from({length:N},mkP); }
 
   function draw() {
-    ctx.clearRect(0,0,W,H);
-    ctx.strokeStyle = "rgba(0,200,255,.055)"; ctx.lineWidth=1;
-    for (let x=0;x<W;x+=64) { ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke(); }
-    for (let y=0;y<H;y+=64) { ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke(); }
-    for (let i=0;i<pts.length;i++) {
-      const p=pts[i];
-      p.x=(p.x+p.vx+W)%W; p.y=(p.y+p.vy+H)%H;
-      for (let j=i+1;j<pts.length;j++) {
-        const q=pts[j], d=Math.hypot(p.x-q.x,p.y-q.y);
-        if (d<130) {
-          ctx.strokeStyle=`rgba(0,200,255,${0.11*(1-d/130)})`;
-          ctx.lineWidth=0.55; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+    ctx.clearRect(0, 0, W, H);
+    const dark = isDark();
+    const gridColor = dark ? 'rgba(99,179,237,0.04)' : 'rgba(37,99,235,0.04)';
+    const nodeColor = dark ? 'rgba(99,179,237,0.22)' : 'rgba(37,99,235,0.18)';
+    const edgeColor = dark ? 'rgba(99,179,237,0.07)' : 'rgba(37,99,235,0.06)';
+
+    // Grid
+    ctx.strokeStyle = gridColor; ctx.lineWidth = 0.75;
+    for (let x = 0; x < W; x += 72) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = 0; y < H; y += 72) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    // Nodes + edges
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      p.x = (p.x + p.vx + W) % W; p.y = (p.y + p.vy + H) % H;
+      for (let j = i + 1; j < pts.length; j++) {
+        const q = pts[j], d = Math.hypot(p.x - q.x, p.y - q.y);
+        if (d < 120) {
+          ctx.strokeStyle = edgeColor;
+          ctx.globalAlpha = (1 - d / 120) * 0.7;
+          ctx.lineWidth = 0.5; ctx.beginPath();
+          ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+          ctx.globalAlpha = 1;
         }
       }
-      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-      ctx.fillStyle=`rgba(0,200,255,${p.a*0.55})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = nodeColor; ctx.fill();
     }
-    if (!reduce) requestAnimationFrame(draw);
+    if (!reduce) raf = requestAnimationFrame(draw);
   }
-  window.addEventListener("resize",resize);
-  reset(); draw();
+
+  function init() {
+    resize();
+    pts = Array.from({ length: N }, mkP);
+    raf = requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', () => {
+    cancelAnimationFrame(raf);
+    resize();
+    if (!reduce) raf = requestAnimationFrame(draw);
+  });
+  document.addEventListener('depthlens-theme-changed', () => {
+    // Redraw once on theme change even in reduced motion
+    if (reduce) { ctx.clearRect(0, 0, W, H); draw(); cancelAnimationFrame(raf); }
+  });
+  init();
 })();
 
 // ══════════════════════════════════════════════════════════════
@@ -447,16 +483,16 @@ const COMPARE_METRICS = [
 function chartColors() {
   const isDark = document.documentElement.getAttribute("data-theme") !== "light";
   return {
-    grid:    isDark ? "rgba(0,200,255,.07)"  : "rgba(0,100,180,.08)",
-    tick:    isDark ? "#3a5a72"               : "#5a7a99",
-    line:    isDark ? "#00c8ff"               : "#0070cc",
-    fill:    isDark ? "rgba(0,200,255,.07)"   : "rgba(0,112,204,.06)",
-    bar:     isDark ? "rgba(0,200,255,.55)"   : "rgba(0,112,204,.55)",
-    barBrd:  isDark ? "#00c8ff"               : "#0070cc",
-    tooltip: isDark ? "#101e2e"               : "#ffffff",
-    ttBrd:   isDark ? "#00c8ff"               : "#0070cc",
-    ttTitle: isDark ? "#7faac8"               : "#2d4a66",
-    ttBody:  isDark ? "#dff0ff"               : "#0d1f33",
+    grid:    isDark ? "rgba(99,179,237,0.07)"  : "rgba(37,99,235,0.08)",
+    tick:    isDark ? "#607080"               : "#718096",
+    line:    isDark ? "#63b3ed"               : "#2563eb",
+    fill:    isDark ? "rgba(99,179,237,0.07)"   : "rgba(37,99,235,0.06)",
+    bar:     isDark ? "rgba(99,179,237,0.55)"   : "rgba(37,99,235,0.55)",
+    barBrd:  isDark ? "#63b3ed"               : "#2563eb",
+    tooltip: isDark ? "#111d30"               : "#ffffff",
+    ttBrd:   isDark ? "#63b3ed"               : "#2563eb",
+    ttTitle: isDark ? "#a0b3c8"               : "#4a5568",
+    ttBody:  isDark ? "#e2e8f0"               : "#1a202c",
   };
 }
 
@@ -633,7 +669,7 @@ function renderCompareChart(results, metricKey = state.compareView.metricKey, { 
       },
       scales: {
         x: {
-          ticks: { color: c.ttTitle, font: { family:"Rajdhani", size:12, weight:"600" } },
+          ticks: { color: c.ttTitle, font: { family:"Syne", size:12, weight:"600" } },
           grid: { color: c.grid },
         },
         y: {
@@ -988,7 +1024,6 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
   auto.innerHTML = `
     <input type="radio" name="device" value="auto" ${autoChecked?"checked":""} />
     <div class="device-opt-inner">
-      <span class="device-opt-icon">◎</span>
       <div>
         <span class="device-opt-name">Auto Select</span>
         <span class="device-opt-sub">${esc(autoDeviceLabel(devs,primary))}</span>
@@ -999,7 +1034,6 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
   deviceEntries.forEach(({key,info,kinds}) => {
     if (!matchesDeviceFilter(kinds, state.deviceFilter)) return;
     const isCuda=info.type==="cuda", isMps=info.type==="mps", isXpu=info.type==="xpu";
-    const icon = isCuda?"▦":isMps?"⬢":isXpu?"⬣":"◻";
     const classLabel=[kinds.includes("gpu")?"GPU":null,kinds.includes("npu")?"NPU":null,kinds.includes("cpu")?"CPU":null].filter(Boolean).join("/");
     const sub = isCuda ? `CUDA · ${info.memory_gb} GB VRAM · ${classLabel}`
       : isMps  ? `Apple ${info.chip||"Silicon"} · Metal + Neural Engine · ${classLabel}`
@@ -1012,7 +1046,6 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
     lbl.innerHTML = `
       <input type="radio" name="device" value="${esc(key)}" ${checked?"checked":""} />
       <div class="device-opt-inner">
-        <span class="device-opt-icon">${esc(icon)}</span>
         <div>
           <span class="device-opt-name">${esc(info.name||key)}</span>
           <span class="device-opt-sub">${esc(sub)}</span>
@@ -1118,7 +1151,7 @@ function renderFileItem(entry) {
       <div class="file-size">${fmtSize(entry.file.size)}</div>
     </div>
     <span class="file-status pending" id="fst-${entry.id}">Pending</span>
-    <button class="file-remove" data-id="${entry.id}" aria-label="Remove ${esc(entry.file.name)}">✕</button>`;
+    <button class="file-remove" data-id="${entry.id}" aria-label="Remove ${esc(entry.file.name)}">Remove</button>`;
   el.fileQueue.appendChild(li);
   $(".file-remove",li).addEventListener("click",()=>removeFile(entry.id));
 }
@@ -1319,7 +1352,7 @@ function appendGalleryItem(r) {
   item.innerHTML = `
     <div class="gallery-img-wrap">
       <img src="${safeDataImagePng(r.depth_map)}" alt="Depth map — ${esc(r.filename)}" loading="lazy"/>
-      <div class="gallery-overlay">◍</div>
+      <div class="gallery-overlay"></div>
     </div>
     <div class="gallery-meta">
       <div class="gallery-filename" title="${esc(r.filename)}">${esc(r.filename)}</div>
@@ -1363,21 +1396,21 @@ const METRIC_GROUPS = [
       {key:"gt_rmse",label:"True RMSE vs GT",unit:"",desc:"Root mean squared error after median-scale alignment to valid GT pixels.",needsGT:true},
       {key:"gt_log_rmse",label:"True Log RMSE vs GT",unit:"",desc:"Log-depth RMSE after median-scale alignment to valid GT pixels.",needsGT:true},
     ]},
-  { id:"accuracy", icon:"◔", label:"Threshold Accuracy",
+  { id:"accuracy", label:"Threshold Accuracy",
     note:"δ metrics require ground-truth depth maps and cannot be computed here.",
     metrics:[
       {key:"delta_1",label:"δ < 1.25¹",unit:"%",desc:"Fraction of pixels within 25% scale of ground truth. Requires GT.",needsGT:true},
       {key:"delta_2",label:"δ < 1.25²",unit:"%",desc:"Looser threshold (56%). Requires GT.",needsGT:true},
       {key:"delta_3",label:"δ < 1.25³",unit:"%",desc:"Loosest threshold (95%). Requires GT.",needsGT:true},
     ]},
-  { id:"scaleinv", icon:"⇲", label:"Scale-Invariant Metrics",
+  { id:"scaleinv", label:"Scale-Invariant Metrics",
     metrics:[
       {key:"silog",label:"Log-Depth Dispersion Proxy",unit:"",desc:"Prediction-only log-depth dispersion proxy. True SILog requires GT.",needsGT:false},
       {key:"dynamic_range",label:"Dynamic Range",unit:" bits",desc:"Log₂ ratio of max/min non-zero depth. Larger = more depth variation captured.",needsGT:false},
       {key:"entropy",label:"Shannon Entropy",unit:" bits",desc:"Entropy of the depth histogram. Higher = more uniformly distributed depth values.",needsGT:false},
       {key:"coverage",label:"Depth Coverage",unit:"%",desc:"Fraction of histogram bins with ≥1% of peak count. Higher = depth values spread across the full range.",needsGT:false,pct:true},
     ]},
-  { id:"structural", icon:"◬", label:"Structural & Geometric Metrics",
+  { id:"structural", label:"Structural & Geometric Metrics",
     metrics:[
       {key:"ssim",label:"RGB–Depth Structural Proxy",unit:"",desc:"Proxy comparing predicted depth structure to grayscale RGB input; not reference SSIM.",needsGT:false},
       {key:"gradient_mean",label:"Gradient Mean",unit:"",desc:"Mean Sobel gradient magnitude over the depth map. Higher = more depth edges/transitions.",needsGT:false},
@@ -1386,12 +1419,12 @@ const METRIC_GROUPS = [
       {key:"edge_density",label:"Edge Density",unit:"%",desc:"Fraction of pixels with gradient > mean+std. Indicates how richly detailed the depth edges are.",needsGT:false,pct:true},
       {key:"surface_normal_error",label:"Surface Normal Error",unit:"",desc:"Requires ground-truth normals derived from GT depth. Not computable without GT.",needsGT:true},
     ]},
-  { id:"perceptual", icon:"◉", label:"Perceptual & Consistency Metrics",
+  { id:"perceptual", label:"Perceptual & Consistency Metrics",
     metrics:[
       {key:"psnr",label:"Depth Variance PSNR Proxy",unit:" dB",desc:"Prediction-only PSNR-like variance proxy; true PSNR requires a reference depth map.",needsGT:false},
       {key:"lpips",label:"LPIPS (Perceptual Similarity)",unit:"",desc:"Learned perceptual metric. Requires a reference depth map. Not computable without GT.",needsGT:true},
     ]},
-  { id:"ranking", icon:"≋", label:"Ranking / Relative Depth Metrics",
+  { id:"ranking", label:"Ranking / Relative Depth Metrics",
     metrics:[
       {key:"ordinal_error",label:"Ordinal Error",unit:"",desc:"Fraction of pixel pairs where relative ordering of pred depth disagrees with GT. Requires GT.",needsGT:true},
     ]},
@@ -1426,7 +1459,7 @@ function renderMetricsAccordion(resultOrMetrics) {
     const hdr=document.createElement("div");
     hdr.className="metric-group-header"; hdr.setAttribute("role","button");
     hdr.setAttribute("tabindex","0"); hdr.setAttribute("aria-expanded","false");
-    hdr.innerHTML=`<span><span class="mg-icon">${esc(group.icon)}</span>${esc(group.label)}</span><span class="mg-toggle">▾</span>`;
+    hdr.innerHTML=`<span>${esc(group.label)}</span><span class="mg-toggle">▾</span>`;
     hdr.addEventListener("click",()=>toggleAccordion(div));
     hdr.addEventListener("keydown",e=>{ if (e.key==="Enter"||e.key===" "){e.preventDefault();toggleAccordion(div);} });
     const body=document.createElement("div");
@@ -1688,7 +1721,7 @@ function renderBenchmarkChart(data) {
         },
       },
       scales: {
-        x: { ticks: { color: c.ttTitle, font: { family:"Rajdhani", size:12, weight:"600" } }, grid: { color: c.grid } },
+        x: { ticks: { color: c.ttTitle, font: { family:"Syne", size:12, weight:"600" } }, grid: { color: c.grid } },
         y: { ticks: { color: c.tick, font: { family:"JetBrains Mono", size:9 } }, grid: { color: c.grid } },
       },
     },
@@ -1871,7 +1904,7 @@ function toastOnce(msg, type="info", dur=3500) {
 function toast(msg, type="info", dur=3500) {
   const t=document.createElement("div");
   t.className=`toast ${type}`;
-  t.innerHTML=`<span class="toast-dot"></span><span>${esc(msg)}</span>`;
+  t.innerHTML=`<span>${esc(msg)}</span>`;
   el.toastContainer.appendChild(t);
   setTimeout(()=>{
     t.style.animation="toastOut .28s ease forwards";
@@ -1993,6 +2026,23 @@ async function init() {
     state.initializingBackend = false;
     syncQueueControls();
   }
+
+  // Responsive layout: collapse sidebar to top on narrow viewports
+  const workspaceGrid = document.querySelector('.workspace-grid');
+  if (workspaceGrid && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        workspaceGrid.classList.toggle('layout-stacked', w < 900);
+      }
+    });
+    ro.observe(workspaceGrid);
+  }
+
+  // Smooth panel height transitions
+  document.querySelectorAll('.panel').forEach(panel => {
+    panel.style.setProperty('--panel-height', panel.scrollHeight + 'px');
+  });
 }
 
 init().catch(err => {
