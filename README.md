@@ -64,6 +64,7 @@ The repository demonstrates how to ship an AI-assisted desktop tool without hidi
 - Optional ONNX Runtime path for exported `.onnx` graphs, with diagnostics that explain missing, invalid, or provider-incompatible weights instead of breaking PyTorch inference.
 - Health, readiness, cache, ONNX, benchmark, and model endpoints designed for desktop startup checks and developer debugging.
 - Real-Time Webcam Depth MVP samples browser/Electron camera frames, sends capped-FPS JPEG uploads to the local FastAPI `/estimate` endpoint, and previews live depth maps without any frames leaving localhost. Start with MiDaS Small for the smoothest first demo.
+- 3D Reconstruction replaces the former About tab with a frontend workspace for the local `/api/reconstruct` endpoint. It exports relative colored point clouds as PLY/OBJ; because monocular depth is relative rather than metric calibrated, start with MiDaS Small on CPU or DPT Hybrid when hardware acceleration is available.
 
 ## Tech Stack
 
@@ -893,7 +894,7 @@ http://127.0.0.1:8765
 | `GET` | `/cache/metrics` | Cache backend, hit/miss, keyspace, Redis, TTL, and memory-limit metrics. |
 | `DELETE` | `/cache` | Clear Redis and in-memory cache entries. |
 | `POST` | `/estimate` | Single-image depth estimation with optional GT file and configurable metrics/outputs. |
-| `POST` | `/api/reconstruct` | Backend-only 3D reconstruction API that returns a base64 colored PLY/OBJ point-cloud artifact, depth preview PNG, preview points, and reconstruction metadata. |
+| `POST` | `/api/reconstruct` | Local 3D reconstruction API consumed by the 3D tab; returns a base64 colored PLY/OBJ point-cloud artifact, depth preview PNG, preview points, and reconstruction metadata. |
 | `POST` | `/reconstruct` | Alias for `/api/reconstruct`. |
 | `POST` | `/batch` | Batch depth estimation for up to 10 image files. |
 
@@ -916,7 +917,7 @@ http://127.0.0.1:8765
 | `include_rgb` | boolean | `true` | Include RGB vertex colors converted from uploaded image pixels. |
 | `coordinate_system` | string | `y_up` | `y_up` for frontend-friendly previews or `camera` for image-coordinate Y. |
 
-The exported point cloud is approximate because monocular depth is relative, not metric-scale accurate. This Stage 1 backend endpoint does not write artifacts to disk and does not add the frontend 3D panel; Stage 2 will replace the current ABOUT tab with the 3D Reconstruction tab/panel that consumes this API.
+The 3D Reconstruction frontend tab consumes this local endpoint and replaces the former About tab. It exports relative colored point clouds as PLY/OBJ and can preview points in the browser; the exported geometry is approximate because monocular depth is relative, not metric-scale accurate. For a first run, use MiDaS Small on CPU or DPT Hybrid when your hardware can support the heavier model.
 
 `/estimate` form fields:
 
