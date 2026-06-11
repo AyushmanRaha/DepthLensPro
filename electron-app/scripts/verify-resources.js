@@ -68,4 +68,15 @@ if (failed.length) {
   console.error("Run the root setup script before packaging. Use --onnx required for MiDaS Small or --onnx require-all for every ONNX model.");
   process.exit(1);
 }
+
+if (mode === "native") {
+  const packagedOnnxDir = path.join(root, "models", "onnx");
+  if (!fs.existsSync(packagedOnnxDir) || !fs.statSync(packagedOnnxDir).isDirectory()) {
+    console.error(
+      "models/onnx directory is missing from packaged resources. " +
+        "Ensure models/onnx/.gitkeep is committed and the extraResources filter includes **/.*"
+    );
+    process.exit(1);
+  }
+}
 console.log(`\nDepthLens resources verified under: ${root} (mode=${mode}, onnx=${onnxMode})`);
