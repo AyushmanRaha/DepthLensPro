@@ -34,7 +34,15 @@ const BACKEND_HOST = "127.0.0.1";
 const REQUESTED_BACKEND_PORT = Number.parseInt(process.env.DEPTHLENS_BACKEND_PORT || "8765", 10);
 let BACKEND_PORT = REQUESTED_BACKEND_PORT;
 let backendUrl = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
-const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
+const isDev = !app.isPackaged || process.env.NODE_ENV === "development";
+
+function getAppRoot() {
+  return isDev ? path.resolve(__dirname, "..") : process.resourcesPath;
+}
+
+function getResourcePath(...parts) {
+  return path.join(getAppRoot(), ...parts);
+}
 
 // ── State ──────────────────────────────────────────────────
 let mainWindow = null;
@@ -58,17 +66,6 @@ function backendOutputExcerpt() {
 }
 
 // ── Resource paths ─────────────────────────────────────────
-function getResourcePath(...parts) {
-  if (isDev) {
-    return path.join(__dirname, "..", ...parts);
-  }
-  return path.join(process.resourcesPath, ...parts);
-}
-
-function getAppRoot() {
-  return isDev ? path.join(__dirname, "..") : process.resourcesPath;
-}
-
 function logPath() {
   return log.transports.file.getFile().path;
 }
@@ -677,7 +674,9 @@ function createMainWindow() {
     return { action: "deny" };
   });
 
-  if (isDev) {
+  const shouldOpenDevTools = process.env.DEPTHLENS_OPEN_DEVTOOLS === "1";
+
+  if (isDev && shouldOpenDevTools) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 }

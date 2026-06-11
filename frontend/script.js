@@ -770,7 +770,10 @@ async function loadCacheMetrics({ signal } = {}) {
   if (!backendOnline || document.hidden) return false;
   const started = performance.now();
   try {
-    const res = await apiFetch("/cache/metrics", { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000) });
+    const timeout = AbortSignal.timeout(8000);
+    const res = await apiFetch("/cache/metrics", {
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout
+    });
     applyCacheMetrics(await res.json());
     logEndpointTiming("/cache/metrics", started, true);
     return true;
