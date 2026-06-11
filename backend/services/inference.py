@@ -577,6 +577,61 @@ def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict[str, Any]:
     }
 
 
+def infer_depth_arrays(
+    raw: bytes,
+    model: str,
+    device: str,
+    filename: str | None = None,
+    max_dim: int | None = None,
+    engine_requested: str = "auto",
+) -> dict[str, Any]:
+    """Decode an image and return reusable normalized depth arrays via the depth cache."""
+
+    model_id = normalize_model_id(model)
+    spec = get_model_spec(model_id)
+    depth_key = _depth_cache_key(raw, model_id, device, max_dim)
+    cached_depth = _get_cached_depth(depth_key)
+    img = _decode(raw, max_dim=max_dim)
+    if cached_depth is None:
+        t0 = time.perf_counter()
+        if (engine_requested or "auto").lower() == "auto":
+            depth, engine_metadata = _infer_with_metadata(img, model_id, device)
+        else:
+            depth, engine_metadata = _infer_with_metadata(img, model_id, device, engine_requested)
+        lat = round((time.perf_counter() - t0) * 1000, 1)
+        resolution = {"width": img.shape[1], "height": img.shape[0]}
+        _set_cached_depth(depth_key, depth, resolution)
+        depth_cached = False
+    else:
+        depth, resolution = cached_depth
+        lat = 0.0
+        depth_cached = True
+        engine_metadata = {
+            "model_id": model_id,
+            "model_display_name": spec.display_name,
+            "engine_requested": engine_requested,
+            "engine_used": "cache",
+            "device_requested": device,
+            "device_used": device,
+            "fallback_used": False,
+            "warnings": [],
+        }
+
+    return {
+        "img_bgr": img,
+        "depth": depth.astype(np.float32, copy=False),
+        "latency_ms": lat,
+        "model": model_id,
+        "model_id": model_id,
+        "model_display_name": spec.display_name,
+        "device_used": engine_metadata.get("device_used", device),
+        "resolution": resolution,
+        "filename": filename,
+        "depth_cached": depth_cached,
+        **engine_metadata,
+    }
+
+
 def process_image(
     raw: bytes,
     model: str,
@@ -593,34 +648,22 @@ def process_image(
     gt_invalid_value: float | None = None,
 ) -> dict[str, Any]:
     """Decode, infer, colorize, and package one image response."""
-    model_id = normalize_model_id(model)
+    arrays = infer_depth_arrays(raw, model, device, filename=filename, max_dim=max_dim)
+    model_id = arrays["model_id"]
     spec = get_model_spec(model_id)
     metrics_mode = normalize_metrics_mode(metrics)
     output_set = parse_outputs(outputs)
-    depth_key = _depth_cache_key(raw, model_id, device, max_dim)
-    cached_depth = _get_cached_depth(depth_key)
-    img = _decode(raw, max_dim=max_dim)
-    if cached_depth is None:
-        t0 = time.perf_counter()
-        depth, engine_metadata = _infer_with_metadata(img, model_id, device)
-        lat = round((time.perf_counter() - t0) * 1000, 1)
-        resolution = {"width": img.shape[1], "height": img.shape[0]}
-        _set_cached_depth(depth_key, depth, resolution)
-        depth_cached = False
-    else:
-        depth, resolution = cached_depth
-        lat = 0.0
-        depth_cached = True
-        engine_metadata = {
-            "model_id": model_id,
-            "model_display_name": spec.display_name,
-            "engine_requested": "auto",
-            "engine_used": "cache",
-            "device_requested": device,
-            "device_used": device,
-            "fallback_used": False,
-            "warnings": [],
-        }
+    img = arrays["img_bgr"]
+    depth = arrays["depth"]
+    lat = arrays["latency_ms"]
+    resolution = arrays["resolution"]
+    depth_cached = arrays["depth_cached"]
+    engine_metadata = {
+        key: value
+        for key, value in arrays.items()
+        if key
+        not in {"img_bgr", "depth", "latency_ms", "model", "resolution", "filename", "depth_cached"}
+    }
 
     gt_result: dict[str, Any] | None = None
     gt_metadata: dict[str, Any] = {"provided": False}

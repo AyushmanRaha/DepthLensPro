@@ -78,6 +78,12 @@ def process_image(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return cast(dict[str, Any], _inference().process_image(*args, **kwargs))
 
 
+def reconstruct_point_cloud(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from backend.services.reconstruction import reconstruct_point_cloud as impl
+
+    return impl(*args, **kwargs)
+
+
 def loaded_model_keys() -> list[str]:
     try:
         return cast(list[str], _inference().loaded_model_keys())
@@ -123,6 +129,9 @@ def _dependency_unavailable(exc: Exception) -> HTTPException:
 
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 MAX_UPLOAD_SIZE_MB = 20
+BENCHMARK_TIMEOUT_MESSAGE = (
+    "Benchmark timed out; backend remains live and PyTorch fallback is available."
+)
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
 _PROBE_TTL_SECONDS = 10.0
@@ -181,6 +190,48 @@ async def process_image_async(
         gt_required,
         gt_scale,
         gt_invalid_value,
+    )
+
+
+async def reconstruct_point_cloud_async(
+    *,
+    raw: bytes,
+    filename: str | None,
+    model: str,
+    device: str,
+    colormap: str = "inferno",
+    max_dim: int | None = None,
+    export_format: str = "ply",
+    max_points: int = 120000,
+    preview_points: int = 5000,
+    focal_scale: float = 1.2,
+    depth_scale: float = 1.0,
+    depth_near_percentile: float = 2.0,
+    depth_far_percentile: float = 98.0,
+    sampling: str = "grid",
+    include_rgb: bool = True,
+    coordinate_system: str = "y_up",
+) -> dict[str, Any]:
+    """Offload blocking point-cloud reconstruction while preserving route monkeypatching."""
+
+    return await run_in_threadpool(
+        reconstruct_point_cloud,
+        raw=raw,
+        filename=filename,
+        model=model,
+        device=device,
+        colormap=colormap,
+        max_dim=max_dim,
+        export_format=export_format,
+        max_points=max_points,
+        preview_points=preview_points,
+        focal_scale=focal_scale,
+        depth_scale=depth_scale,
+        depth_near_percentile=depth_near_percentile,
+        depth_far_percentile=depth_far_percentile,
+        sampling=sampling,
+        include_rgb=include_rgb,
+        coordinate_system=coordinate_system,
     )
 
 
@@ -335,8 +386,14 @@ def _validated_device_or_422(device: str) -> str:
     try:
         return str(_resolve(device))
     except asyncio.TimeoutError as exc:
-        log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
+        log.warning("Benchmark timed out", extra={"device": device})
+        raise HTTPException(
+            504,
+            {
+                "error_code": "BENCHMARK_TIMEOUT",
+                "message": BENCHMARK_TIMEOUT_MESSAGE,
+            },
+        ) from exc
     except ValueError as exc:
         refreshed = available_options(force=True)
         if device not in refreshed:
@@ -560,13 +617,20 @@ async def benchmark(
 
     try:
         from backend.services.benchmarks import BENCHMARK_TIMEOUT_SECONDS
+
         return await asyncio.wait_for(
             run_in_threadpool(run_benchmark, model=model, device=device, iterations=iterations),
             timeout=BENCHMARK_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
+        raise HTTPException(
+            504,
+            {
+                "error_code": "BENCHMARK_TIMEOUT",
+                "message": BENCHMARK_TIMEOUT_MESSAGE,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -602,7 +666,13 @@ async def estimate(
         outputs = ",".join(parse_outputs(outputs))
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
+        raise HTTPException(
+            504,
+            {
+                "error_code": "BENCHMARK_TIMEOUT",
+                "message": BENCHMARK_TIMEOUT_MESSAGE,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -656,7 +726,13 @@ async def estimate(
         )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
+        raise HTTPException(
+            504,
+            {
+                "error_code": "BENCHMARK_TIMEOUT",
+                "message": BENCHMARK_TIMEOUT_MESSAGE,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -674,6 +750,93 @@ async def estimate(
         model,
         resolved,
         result["latency_ms"],
+    )
+    return JSONResponse(result)
+
+
+@router.post("/api/reconstruct")
+@router.post("/reconstruct")
+async def reconstruct(
+    file: UploadFile = File(...),
+    model: str = Form("MiDaS_small"),
+    device: str = Form("auto"),
+    colormap: str = Form("inferno"),
+    max_dim: int | None = Form(None),
+    export_format: str = Form("ply"),
+    max_points: int = Form(120000),
+    preview_points: int = Form(5000),
+    focal_scale: float = Form(1.2),
+    depth_scale: float = Form(1.0),
+    depth_near_percentile: float = Form(2.0),
+    depth_far_percentile: float = Form(98.0),
+    sampling: str = Form("grid"),
+    include_rgb: bool = Form(True),
+    coordinate_system: str = Form("y_up"),
+) -> JSONResponse:
+    try:
+        model = normalize_model_id(model)
+    except UnknownModelError as exc:
+        raise HTTPException(
+            422,
+            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
+        ) from exc
+    if colormap not in COLORMAP_NAMES:
+        raise HTTPException(422, f"Unknown colormap '{colormap}'")
+
+    resolved = _validated_device_or_422(device)
+
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(415, "Expected an image file")
+
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+
+    try:
+        result = await reconstruct_point_cloud_async(
+            raw=raw,
+            filename=file.filename,
+            model=model,
+            device=resolved,
+            colormap=colormap,
+            max_dim=max_dim,
+            export_format=export_format,
+            max_points=max_points,
+            preview_points=preview_points,
+            focal_scale=focal_scale,
+            depth_scale=depth_scale,
+            depth_near_percentile=depth_near_percentile,
+            depth_far_percentile=depth_far_percentile,
+            sampling=sampling,
+            include_rgb=include_rgb,
+            coordinate_system=coordinate_system,
+        )
+    except asyncio.TimeoutError as exc:
+        log.warning("Reconstruction timed out", extra={"model": model, "device": device})
+        raise HTTPException(
+            504,
+            {
+                "error_code": "RECONSTRUCTION_TIMEOUT",
+                "message": "Reconstruction timed out; backend remains live.",
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        log.exception("Reconstruction failed")
+        raise HTTPException(
+            500,
+            {"error_code": "RECONSTRUCTION_FAILED", "message": "Reconstruction failed"},
+        ) from exc
+
+    log.info(
+        "✅ reconstruct %r | %s | %s | %s pts | %s | %s ms",
+        file.filename,
+        model,
+        resolved,
+        result.get("reconstruction", {}).get("point_count"),
+        result.get("artifact_format"),
+        result.get("total_latency_ms"),
     )
     return JSONResponse(result)
 
@@ -704,7 +867,13 @@ async def batch(
         outputs = ",".join(parse_outputs(outputs))
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
+        raise HTTPException(
+            504,
+            {
+                "error_code": "BENCHMARK_TIMEOUT",
+                "message": BENCHMARK_TIMEOUT_MESSAGE,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
