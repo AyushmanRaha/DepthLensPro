@@ -31,8 +31,16 @@ async def live() -> dict[str, Any]:
         log.info("FIRST_LIVE_REQUEST")
         _FIRST_LIVE_REQUEST_LOGGED = True
     now = time.time()
+    busy = False
+    try:
+        from backend.services.benchmarks import benchmark_busy
+        busy = benchmark_busy()
+    except Exception:
+        busy = False
     return {
         "status": "ok",
+        "busy": busy,
+        "state": "busy" if busy else "idle",
         "service": "DepthLens Pro API",
         "version": SERVICE_VERSION,
         "pid": os.getpid(),

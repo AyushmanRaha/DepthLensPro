@@ -826,7 +826,11 @@ async function checkLive({ quiet = false, signal } = {}) {
     const data = await res.json();
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
-    setStatus("online","Depth Engine: Detected",`Backend live · checking inference readiness`, deviceBadge(state.devices, state.primaryDevice));
+    if (data.busy) {
+      setStatus("online", "Depth Engine: Busy", "Benchmark/model load running · liveness OK", deviceBadge(state.devices, state.primaryDevice));
+    } else {
+      setStatus("online","Depth Engine: Detected",`Backend live · checking inference readiness`, deviceBadge(state.devices, state.primaryDevice));
+    }
     logEndpointTiming("/live", started, true);
     syncQueueControls();
     return true;
@@ -1742,7 +1746,8 @@ function renderBenchmark(data) {
   const cpuFallback = onnx?.uses_cpu_fallback || onnx?.diagnostics?.runtime?.uses_cpu_fallback || data?.onnx_diagnostics?.runtime?.uses_cpu_fallback;
   const onnxStatus = data?.onnx?.status || onnx?.state || "unavailable";
   el.benchProvider.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `ONNX Ready${provider ? ` · ${provider}` : ""}${cpuFallback ? " · CPU fallback" : ""}` : `ONNX ${onnxStatus}`;
-  el.benchStatus.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path || data?.onnx?.onnx_path}` : (data?.onnx?.message || onnx?.reason || "PyTorch benchmark completed; ONNX unavailable");
+  const diag = data?.onnx_diagnostics || onnx?.diagnostics || {};
+  el.benchStatus.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path || data?.onnx?.onnx_path}` : `${data?.onnx?.message || onnx?.reason || "PyTorch benchmark completed; ONNX unavailable"}${diag.expected_path ? ` · expected: ${diag.expected_path}` : ""}${diag.recommended_export_command ? ` · run: ${diag.recommended_export_command}` : ""}`;
   renderBenchmarkChart(data);
 }
 
@@ -1755,6 +1760,7 @@ async function runBenchmark() {
   el.benchmarkRunBtn.disabled = true;
   el.benchmarkRunBtn.textContent = "Running…";
   el.benchStatus.textContent = "Loading models and measuring latency…";
+  setStatus("online", "Depth Engine: Busy", "Benchmark running · /live remains available", deviceBadge(state.devices, state.primaryDevice));
   try {
     if (!engineReady()) {
       const ok = await checkHealth();
@@ -1768,6 +1774,7 @@ async function runBenchmark() {
   } catch (err) {
     el.benchProvider.textContent = "Failed";
     el.benchStatus.textContent = err.message;
+    checkLive({ quiet: true }).catch(() => {});
     if (err.name !== "AbortError") toastOnce(`Benchmark failed: ${err.message}`,"error");
   } finally {
     el.benchmarkRunBtn.disabled = false;

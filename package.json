@@ -1,0 +1,19 @@
+{
+  "name": "depthlens-pro-root",
+  "private": true,
+  "scripts": {
+    "doctor": "python3 scripts/doctor.py --doctor-only",
+    "setup": "python3 scripts/doctor.py",
+    "setup:mac": "scripts/setup-macos.sh",
+    "setup:linux": "scripts/setup-linux.sh",
+    "setup:win": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
+    "build:mac:arm64": "scripts/build-native-macos.sh",
+    "build:linux:arm64": "scripts/build-native-linux.sh",
+    "build:win:arm64": "powershell -ExecutionPolicy Bypass -File scripts/build-native-windows.ps1",
+    "verify:resources": "cd electron-app && npm run verify:resources",
+    "verify:onnx": "venv/bin/python backend/scripts/export_onnx.py --validate-only --all",
+    "backend:dev": "venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765",
+    "frontend:dev": "cd electron-app && npm run start:dev",
+    "stop:backend": "cd electron-app && npm run kill:backend"
+  }
+}

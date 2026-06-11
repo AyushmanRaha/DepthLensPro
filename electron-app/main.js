@@ -356,21 +356,38 @@ function getPythonCandidates() {
     candidates.push(path.join(root, "venv", "Scripts", "python.exe"));
     candidates.push(path.join(root, "venv", "Scripts", "python3.exe"));
     candidates.push(path.join(process.resourcesPath || root, "venv", "Scripts", "python.exe"));
-    candidates.push("py");
-    candidates.push("python");
+    if (isDev) {
+      candidates.push("py");
+      candidates.push("python");
+    }
   } else {
     candidates.push(path.join(root, "venv", "bin", "python3"));
     candidates.push(path.join(root, "venv", "bin", "python"));
     candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python3"));
     candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python"));
-    candidates.push("python3");
-    candidates.push("python");
-    candidates.push("/usr/bin/python3");
-    candidates.push("/usr/local/bin/python3");
-    candidates.push("/opt/homebrew/bin/python3");
+    if (isDev) {
+      candidates.push("python3");
+      candidates.push("python");
+      candidates.push("/usr/bin/python3");
+      candidates.push("/usr/local/bin/python3");
+      candidates.push("/opt/homebrew/bin/python3");
+    }
   }
 
   return [...new Set(candidates)];
+}
+
+function pythonVersionOk(candidate) {
+  try {
+    const output = execCapture(candidate, ["-c", "import sys,json; print(json.dumps(list(sys.version_info[:3])))"], { timeout: 3000 });
+    const version = JSON.parse(output || "[]");
+    const ok = version.length >= 2 && version[0] === 3 && version[1] >= 10 && version[1] <= 12;
+    log.info("PYTHON_VERSION_PROBE", { candidate, version, ok });
+    return ok;
+  } catch (err) {
+    log.warn("PYTHON_VERSION_PROBE_FAILED", { candidate, error: err.message });
+    return false;
+  }
 }
 
 function getPythonPath() {
@@ -378,20 +395,22 @@ function getPythonPath() {
   for (const candidate of candidates) {
     try {
       if (path.isAbsolute(candidate)) {
-        if (fs.existsSync(candidate)) {
+        if (fs.existsSync(candidate) && pythonVersionOk(candidate)) {
           log.info(`Python found at: ${candidate}`);
           return candidate;
         }
       } else {
-        log.info(`Using PATH Python candidate: ${candidate}`);
-        return candidate;
+        if (pythonVersionOk(candidate)) {
+          log.info(`Using PATH Python candidate: ${candidate}`);
+          return candidate;
+        }
       }
     } catch (_) {
       // Ignore bad candidate paths and continue.
     }
   }
   const fallback = candidates[0];
-  log.warn(`No Python found in candidate paths; will try: ${fallback}`);
+  log.warn(`No supported Python found in candidate paths; will try: ${fallback}`);
   return fallback;
 }
 
@@ -403,6 +422,8 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
   const frontendDir = path.join(cwd, "frontend");
   const backendApp = path.join(backendDir, "app.py");
   const frontendIndex = path.join(frontendDir, "index.html");
+  const modelsDir = path.join(cwd, "models");
+  const onnxDir = path.join(modelsDir, "onnx");
   return {
     backendUrl,
     pythonPath,
@@ -410,6 +431,8 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
     backendApp,
     frontendDir,
     frontendIndex,
+    modelsDir,
+    onnxDir,
     cwd,
     command,
     pythonExists: path.isAbsolute(pythonPath) ? pathExists(pythonPath) : "PATH lookup",
@@ -417,6 +440,8 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
     backendAppExists: pathExists(backendApp),
     frontendDirExists: pathExists(frontendDir),
     frontendIndexExists: pathExists(frontendIndex),
+    modelsDirExists: pathExists(modelsDir),
+    onnxDirExists: pathExists(onnxDir),
     logPath: logPath(),
   };
 }
@@ -430,6 +455,8 @@ function createStartupError(message, details, exitInfo = {}) {
     `Backend app attempted: ${details.backendApp} (exists: ${details.backendAppExists})\n` +
     `Frontend directory attempted: ${details.frontendDir} (exists: ${details.frontendDirExists})\n` +
     `Frontend index attempted: ${details.frontendIndex} (exists: ${details.frontendIndexExists})\n` +
+    `Models directory attempted: ${details.modelsDir} (exists: ${details.modelsDirExists})\n` +
+    `ONNX directory attempted: ${details.onnxDir} (exists: ${details.onnxDirExists})\n` +
     `Working directory attempted: ${details.cwd}\n` +
     `Command attempted: ${details.command}\n` +
     `Backend exit code: ${exitInfo.code ?? "n/a"}\n` +
@@ -534,8 +561,8 @@ async function startBackend() {
     );
   }
 
-  if (!details.backendDirExists || !details.backendAppExists || !details.frontendDirExists || !details.frontendIndexExists) {
-    throw createStartupError("Required app resources were not found. Run npm run verify:resources before packaging and ensure the repo-root venv exists.", details);
+  if (!details.backendDirExists || !details.backendAppExists || !details.frontendDirExists || !details.frontendIndexExists || (app.isPackaged && !details.modelsDirExists)) {
+    throw createStartupError("Required app resources were not found. Run npm run verify:resources before packaging and ensure the repo-root venv and models directory exist.", details);
   }
 
   args[args.indexOf("--port") + 1] = String(BACKEND_PORT);
@@ -550,6 +577,10 @@ async function startBackend() {
       ...process.env,
       PYTHONUNBUFFERED: "1",
       PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+      DEPTHLENSPRO_MODEL_DIR: path.join(cwd, "models"),
+      DEPTHLENS_ONNX_DIR: path.join(cwd, "models", "onnx"),
+      SSL_CERT_FILE: process.env.SSL_CERT_FILE || "",
+      REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE || process.env.SSL_CERT_FILE || "",
     },
     shell: false,
     windowsHide: true,

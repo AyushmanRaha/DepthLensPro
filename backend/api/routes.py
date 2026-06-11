@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
@@ -333,6 +334,9 @@ def _validated_device_or_422(device: str) -> str:
         raise HTTPException(422, f"Device '{device}' unavailable. Options: {avail}")
     try:
         return str(_resolve(device))
+    except asyncio.TimeoutError as exc:
+        log.warning("Benchmark timed out", extra={"model": model, "device": device})
+        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
     except ValueError as exc:
         refreshed = available_options(force=True)
         if device not in refreshed:
@@ -555,9 +559,14 @@ async def benchmark(
     """Return PyTorch and ONNX Runtime performance matrices for the UI."""
 
     try:
-        return await run_in_threadpool(
-            run_benchmark, model=model, device=device, iterations=iterations
+        from backend.services.benchmarks import BENCHMARK_TIMEOUT_SECONDS
+        return await asyncio.wait_for(
+            run_in_threadpool(run_benchmark, model=model, device=device, iterations=iterations),
+            timeout=BENCHMARK_TIMEOUT_SECONDS,
         )
+    except asyncio.TimeoutError as exc:
+        log.warning("Benchmark timed out", extra={"model": model, "device": device})
+        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -591,6 +600,9 @@ async def estimate(
     try:
         metrics = normalize_metrics_mode(metrics)
         outputs = ",".join(parse_outputs(outputs))
+    except asyncio.TimeoutError as exc:
+        log.warning("Benchmark timed out", extra={"model": model, "device": device})
+        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -642,6 +654,9 @@ async def estimate(
             gt_scale,
             gt_invalid_value,
         )
+    except asyncio.TimeoutError as exc:
+        log.warning("Benchmark timed out", extra={"model": model, "device": device})
+        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -687,6 +702,9 @@ async def batch(
     try:
         metrics = normalize_metrics_mode(metrics)
         outputs = ",".join(parse_outputs(outputs))
+    except asyncio.TimeoutError as exc:
+        log.warning("Benchmark timed out", extra={"model": model, "device": device})
+        raise HTTPException(504, {"error_code": "BENCHMARK_TIMEOUT", "message": "Benchmark timed out; backend remains live and PyTorch fallback is available."}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:

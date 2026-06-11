@@ -205,453 +205,153 @@ The bundle identifier is `com.ayushmanraha.depthlens-pro`, and the product name 
 
 ## Quick Start / Runbook
 
-DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. Electron starts that backend automatically, waits for `/live`, and passes the resolved backend URL to the renderer through the preload bridge.
+DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. Electron starts that backend automatically for the native app; terminal-only development can start the same backend manually.
 
-The first renderer pass calls `/ready` before enabling inference controls, then loads `/health`, `/devices`, and `/cache/metrics` as background diagnostics. Redis is optional; when Redis is unavailable, the cache service uses its in-memory backend.
+> **Important:** do not create the virtual environment with a raw `python3 -m venv venv` command. Some systems now resolve `python3` to Python 3.14, which DepthLensPro does not support. Use the setup/doctor scripts below so the repo selects Python 3.10, 3.11, or 3.12, rejects broken Python installs before dependency installation, repairs bad project venvs, configures certificates, installs npm dependencies, and verifies packaged resources.
+
+### Supported Platforms
+
+| Native package status | Platform | Architecture | Recommended command |
+|---|---|---|---|
+| Supported | macOS Apple Silicon | `darwin arm64` | `scripts/build-native-macos.sh` |
+| Supported | Windows ARM | `win32 arm64` | `./scripts/build-native-windows.ps1` |
+| Supported | Linux ARM | `linux arm64` / `aarch64` | `scripts/build-native-linux.sh` |
+| Unsupported | Intel macOS / macOS x64 | `darwin x64` | Electron startup and x64 build scripts fail with a clear message. |
+| Unsupported | Windows x64 | `win32 x64` | x64 installers are intentionally not produced. |
+| Unsupported | Linux x64 | `linux x64` | x64 AppImages are intentionally not produced. |
+
+The backend can still run PyTorch on CPU/CUDA/MPS/XPU where those runtimes are installed, but the desktop app packaging targets ARM platforms only.
 
 ### Prerequisites
 
-- Python `3.10` through `3.12`
-- `pip`
-- Node.js and npm
-- Git
+- Git.
+- Node.js and npm.
+- A working Python **3.10, 3.11, or 3.12** with `ensurepip`, `ssl`, `venv`, `pyexpat`, and `pip`.
+- macOS recommendation: install Python 3.12 from python.org if Homebrew Python fails `ensurepip` or `pyexpat` checks.
+- Windows recommendation: install Python 3.12 and the `py` launcher.
+- Linux recommendation: install `python3.12`/`python3.11` plus the matching `python3.x-venv` package.
 
-### A. Get the Repository in Downloads
+### Recommended one-command setup
 
-Keep the working copy under the user Downloads folder on every supported platform. The repository URL is a placeholder because this checkout does not declare a public remote.
-
-#### macOS / Linux
-
-This command clones the repository into `~/Downloads/DepthLensPro` and changes into the project root.
+From the repo root:
 
 ```bash
-cd ~/Downloads
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+# macOS Apple Silicon
+scripts/setup-macos.sh
+
+# Linux ARM
+scripts/setup-linux.sh
+```
+
+Windows PowerShell:
+
+```powershell
+./scripts/setup-windows.ps1
+```
+
+Cross-platform root npm aliases are also provided:
+
+```bash
+npm run setup
+npm run doctor
+npm run verify:resources
+```
+
+The setup flow prints a final summary with platform, architecture, selected Python path/version, venv Python, pip, Node, npm, backend dependency status, resource verification status, and ONNX status.
+
+### Native App Build / Install by Platform
+
+macOS Apple Silicon:
+
+```bash
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
+scripts/build-native-macos.sh
+open "electron-app/dist/mac-arm64/DepthLens Pro.app"
 ```
 
-#### Windows PowerShell
+Linux ARM:
 
-This command clones the repository into `%USERPROFILE%\Downloads\DepthLensPro` and changes into the project root.
-
-```powershell
-cd "$env:USERPROFILE\Downloads"
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+```bash
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
+scripts/build-native-linux.sh
+./electron-app/dist/DepthLens\ Pro-*-linux-arm64.AppImage
 ```
 
-#### Windows Command Prompt
+Windows ARM PowerShell:
 
-This command clones the repository into `%USERPROFILE%\Downloads\DepthLensPro` and changes into the project root.
-
-```bat
-cd %USERPROFILE%\Downloads
-git clone https://github.com/<your-org-or-user>/DepthLensPro.git
+```powershell
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
+./scripts/build-native-windows.ps1
 ```
 
-### B. Install and Verify Backend Dependencies
+The native build wrappers run setup first, verify resources in native packaging mode, and then call the Electron ARM build script. The Electron package includes `backend`, `frontend`, the repo-root `venv`, and `models` so `models/onnx` is available under packaged resources.
 
-Run this section after a fresh clone, branch switch, or dependency update. The commands create the repo-root Python virtual environment, install backend Python packages, verify dependency consistency, install Electron packages, and verify packaged resource paths.
+### Optional ONNX export
 
-#### macOS
-
-This command prepares Python and Node dependencies on macOS, and the expected outcome is a valid virtual environment plus verified Electron resources.
+ONNX acceleration is optional; PyTorch fallback remains available. MiDaS Small is the recommended first export because it is lightweight and now uses the same static input size as its runtime transform: `1x3x256x256`.
 
 ```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
+# Export or reuse only MiDaS Small, with atomic validation.
+venv/bin/python backend/scripts/export_onnx.py --model midas_small --force
+
+# Validate existing ONNX files without exporting.
+venv/bin/python backend/scripts/export_onnx.py --validate-only --all
+
+# Require every selected model to validate, including optional DPT models.
+venv/bin/python backend/scripts/export_onnx.py --validate-only --all --require-all
 ```
 
-#### Linux ARM
+The exporter is non-interactive, passes Torch Hub trust options, configures HTTPS certificates through `certifi` when available, writes to a temporary file, validates with `onnx.checker`, creates an ONNX Runtime `InferenceSession`, runs a dummy inference using the registry input shape, and only then atomically replaces the final `.onnx` path. Failed exports are quarantined with a timestamped `.failed` suffix instead of being left at the runtime path.
 
-This command prepares Python and Node dependencies on Linux ARM, and the expected outcome is a valid virtual environment plus verified Electron resources.
+DPT Hybrid and DPT Large ONNX files are treated as optional because exporter/runtime support can vary by PyTorch, ONNX, and ONNX Runtime provider. If they cannot be validated, the app reports the precise diagnostic and continues to offer PyTorch inference/benchmark fallback.
+
+### Terminal-only Local Test / Development Mode
 
 ```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
+# 1. Setup once from the repo root.
+scripts/setup-macos.sh        # macOS Apple Silicon
+# or: scripts/setup-linux.sh   # Linux ARM
+# or: ./scripts/setup-windows.ps1
+
+# 2. Start backend only.
+npm run backend:dev
+
+# 3. In another terminal, start Electron/frontend dev shell.
+npm run frontend:dev
+
+# 4. Stop a DepthLens-owned backend process if needed.
+npm run stop:backend
 ```
 
-#### Windows PowerShell
-
-This command prepares Python and Node dependencies, and the expected outcome is a valid virtual environment plus verified Electron resources.
-
-```powershell
-if (!(Test-Path venv)) { py -m venv venv }
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-```
-
-#### Windows Command Prompt
-
-This command prepares Python and Node dependencies, and the expected outcome is a valid virtual environment plus verified Electron resources.
-
-```bat
-if not exist venv py -m venv venv
-venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-python -m pip install -r backend\requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-```
-
-### C. Native App Build / Install by Platform
-
-Native builds package the backend, frontend, and repo-root virtual environment into an ARM desktop artifact. Each flow exports all ONNX graphs after resource verification so Performance Analysis works in the packaged app without a benchmark-triggered export.
-
-#### macOS Native App Build
-
-This command installs dependencies, exports all ONNX graphs, and builds the Apple Silicon DMG and app bundle.
+Direct backend verification:
 
 ```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm run build:mac:arm64
+curl http://127.0.0.1:8765/live
+curl http://127.0.0.1:8765/ready
+curl http://127.0.0.1:8765/onnx/status
 ```
 
-#### Windows Native App Build
+### Advanced/manual commands
 
-This PowerShell command installs dependencies, exports all ONNX graphs, and builds the Windows ARM NSIS installer.
-
-```powershell
-if (!(Test-Path venv)) { py -m venv venv }
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm run build:win:arm64
-```
-
-This Command Prompt command installs dependencies, exports all ONNX graphs, and builds the Windows ARM NSIS installer.
-
-```bat
-if not exist venv py -m venv venv
-venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-python -m pip install -r backend\requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend\scripts\export_onnx.py --all
-cd electron-app
-npm run build:win:arm64
-```
-
-#### Linux ARM Native App Build
-
-This command installs dependencies, exports all ONNX graphs, and builds the Linux ARM AppImage.
+Use these only if you are debugging setup itself. The project venv must still be created with a supported Python selected by the doctor:
 
 ```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm run build:linux:arm64
+python3 scripts/doctor.py --doctor-only
+python3 scripts/doctor.py
+cd electron-app && npm run verify:resources -- --mode native --onnx optional
+cd electron-app && npm run build:mac:arm64
 ```
 
-#### Native App Development Test
+### Final verification checklist
 
-This command starts the Electron development app after installing and verifying dependencies.
-
-```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-npm start
-```
-
-#### End-User Installation from Release Artifacts
-
-Install the ARM artifact for your platform and launch `DepthLens Pro`. The app starts FastAPI on loopback, waits for `/live`, then enables renderer controls only after `/ready` reports required inference dependencies.
-
-### D. Terminal-Only Local Test / Development
-
-Terminal-only mode starts the Electron app from source. Each platform block installs Python and Node dependencies, verifies the Python environment, exports ONNX graphs, installs Electron dependencies, and starts the app.
-
-#### macOS
-
-This command prepares all dependencies on macOS, exports ONNX graphs, and starts Electron from source.
-
-```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm install
-npm run verify:resources
-npm start
-```
-
-#### Linux ARM
-
-This command prepares all dependencies on Linux ARM, exports ONNX graphs, and starts Electron from source.
-
-```bash
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm install
-npm run verify:resources
-npm start
-```
-
-#### Windows PowerShell
-
-This command prepares all dependencies, exports ONNX graphs, and starts Electron from source.
-
-```powershell
-if (!(Test-Path venv)) { py -m venv venv }
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm install
-npm run verify:resources
-npm start
-```
-
-#### Windows Command Prompt
-
-This command prepares all dependencies, exports ONNX graphs, and starts Electron from source.
-
-```bat
-if not exist venv py -m venv venv
-venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-python -m pip install -r backend\requirements.txt
-python -m pip check
-python backend\scripts\export_onnx.py --all
-cd electron-app
-npm install
-npm run verify:resources
-npm start
-```
-
-#### Backend and Static Frontend in Separate Windows
-
-Use this mode only when debugging backend or renderer code without Electron lifecycle management. The backend serves API traffic on loopback, and the static frontend can be opened from disk or hosted separately for renderer-only inspection.
-
-This command starts the backend directly with Uvicorn and expects `/live` to answer on port `8765`.
-
-```bash
-source venv/bin/activate
-uvicorn backend.app:app --host 127.0.0.1 --port 8765 --workers 1
-```
-
-This command starts a simple static frontend server and expects the UI files to be available on port `5173`.
-
-```bash
-cd frontend
-python -m http.server 5173
-```
-
-### E. Update, Rebuild, and Run the Latest Code
-
-Use these flows when you already have a checkout and want a clean rebuild. They preserve the same dependency order as the first-run blocks.
-
-#### macOS / Linux
-
-This command updates the branch, refreshes Python and Node dependencies, verifies resources, exports ONNX graphs, and starts Electron.
-
-```bash
-git pull
-if [ ! -d venv ]; then python3 -m venv venv; fi
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm start
-```
-
-#### Windows PowerShell
-
-This command updates the branch, refreshes Python and Node dependencies, verifies resources, exports ONNX graphs, and starts Electron.
-
-```powershell
-git pull
-if (!(Test-Path venv)) { py -m venv venv }
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend/scripts/export_onnx.py --all
-cd electron-app
-npm start
-```
-
-#### Windows Command Prompt
-
-This command updates the branch, refreshes Python and Node dependencies, verifies resources, exports ONNX graphs, and starts Electron.
-
-```bat
-git pull
-if not exist venv py -m venv venv
-venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-python -m pip install -r backend\requirements.txt
-python -m pip check
-cd electron-app
-npm install
-npm run verify:resources
-cd ..
-python backend\scripts\export_onnx.py --all
-cd electron-app
-npm start
-```
-
-### F. Remove Old Native App Builds and Cached Data
-
-Use this section to remove duplicate desktop bundles, stale build outputs, and local app data. These cleanup commands do not install dependencies.
-
-#### macOS
-
-This command removes old macOS build output and scans common app locations for duplicate DepthLens Pro bundles.
-
-```bash
-cd electron-app
-npm run clean:dist
-npm run scan:apps
-```
-
-This command removes the user app cache and expects preferences, logs, and caches to reset on next launch.
-
-```bash
-rm -rf "$HOME/Library/Application Support/DepthLens Pro"
-rm -rf "$HOME/Library/Caches/DepthLens Pro"
-```
-
-#### Linux
-
-This command removes Linux build output and expects the next build to recreate `electron-app/dist`.
-
-```bash
-cd electron-app
-npm run clean:dist
-```
-
-This command removes Linux user cache and config directories for DepthLens Pro.
-
-```bash
-rm -rf "$HOME/.config/DepthLens Pro"
-rm -rf "$HOME/.cache/DepthLensPro"
-```
-
-#### Windows PowerShell
-
-This command removes Windows build output and expects the next build to recreate `electron-app\dist`.
-
-```powershell
-cd electron-app
-npm run clean:dist
-```
-
-This command removes Windows user app data for DepthLens Pro.
-
-```powershell
-Remove-Item "$env:APPDATA\DepthLens Pro" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:LOCALAPPDATA\DepthLens Pro" -Recurse -Force -ErrorAction SilentlyContinue
-```
-
-#### Windows Command Prompt
-
-This command removes Windows build output and expects the next build to recreate `electron-app\dist`.
-
-```bat
-cd electron-app
-npm run clean:dist
-```
-
-This command removes Windows user app data for DepthLens Pro.
-
-```bat
-rmdir /s /q "%APPDATA%\DepthLens Pro"
-rmdir /s /q "%LOCALAPPDATA%\DepthLens Pro"
-```
-
-### G. Docker Compose
-
-Docker Compose runs the backend and Redis for API-focused development. It does not package or launch the Electron desktop app.
-
-This command builds and starts the API plus Redis services, and the expected outcome is `/live` on `http://127.0.0.1:8765/live`.
-
-```bash
-docker compose up --build
-```
-
-The Compose file passes `HOST` (`str`, default `0.0.0.0` in Compose for container reachability; local backend config defaults to `127.0.0.1`), `PORT` (`int`, default `8765`), `LOG_LEVEL` (`str`, default `INFO`), `REDIS_HOST` (`str`, default `redis` in Compose and `127.0.0.1` in local config), `REDIS_PORT` (`int`, default `6379`), `REDIS_DB` (`int`, default `0`), `REDIS_PASSWORD` (`str | None`, default empty/`None`), `REDIS_SOCKET_TIMEOUT_SECONDS` (`float`, default `1.5`), `REDIS_MAX_CONNECTIONS` (`int`, default `20`), and `CACHE_TTL_SECONDS` (`int`, default `3600`) into the backend container. The backend also recognizes `DEPTHLENS_AUTO_EXPORT_ONNX` (`bool`, default `false`) if you intentionally want benchmark requests to export missing ONNX graphs.
-
----
+- `GET /live` returns `{"status":"ok"}` quickly. During heavy benchmarks it may include `"busy": true`, but it should remain responsive.
+- `GET /ready` returns `status: ready` when required runtime modules import successfully.
+- MiDaS Small PyTorch inference works even if ONNX is unavailable.
+- MiDaS Small ONNX Performance Analysis works after `backend/scripts/export_onnx.py --model midas_small --force` and uses `1x3x256x256` input.
+- DPT Hybrid/Large either pass ONNX validation or show `optional_unavailable`, `invalid_checker`, `invalid_session`, `invalid_dummy_inference`, `missing`, or `runtime_unavailable` diagnostics while keeping PyTorch fallback available.
 
 ## API Surface
 
@@ -660,7 +360,7 @@ All endpoints are served by the FastAPI app mounted from `backend.api.live` and 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` | Returns service name and API version. |
-| `GET` | `/live` | Returns lightweight liveness payload with `status`, `service`, `version`, `pid`, `timestamp`, and `uptime_seconds`. |
+| `GET` | `/live` | Returns lightweight liveness payload with `status`, `service`, `version`, `pid`, `timestamp`, `uptime_seconds`, and optional busy state. |
 | `GET` | `/ready` | Reports whether required inference dependencies are importable without loading models, plus optional modules, torch runtime, ONNX weights, models, colormaps, settings, and duration. |
 | `GET` | `/health` | Returns full diagnostics: status, version, primary device, devices, loaded models, cache entries and metrics, torch version, acceleration flags and checks, ONNX diagnostics, readiness, warmup, timings, telemetry, and system metadata. |
 | `GET` | `/devices` | Returns cached device inventory, primary device, and whether the payload came from the device cache. |
@@ -1000,13 +700,33 @@ npm run verify:resources
 
 Use the symptom, cause, and resolution entries below for common local issues. Keep `/live` separate from `/ready`: `/live` means the process answers, while `/ready` means required inference imports are available.
 
+### Setup, Python, certificates, and ONNX packaging
+
+**Symptom** → setup accidentally uses Python 3.14 or an old `venv` created by Python 3.14. **Cause** → `python3` can point at an unsupported interpreter and old virtualenvs can mask the problem. **Resolution** → run `scripts/setup-macos.sh`, `scripts/setup-linux.sh`, or `./scripts/setup-windows.ps1`; the doctor rejects Python <3.10 and >3.12, detects an unsupported existing `venv`, and recreates the project-owned venv safely.
+
+**Symptom** → Homebrew Python fails during `ensurepip` or imports `pyexpat` incorrectly. **Cause** → the Python install itself is broken before DepthLens dependencies are installed. **Resolution** → the doctor probes `ensurepip`, `ssl`, `venv`, `pyexpat`, and `pip` first and prints remediation. On macOS, install Python 3.12 from python.org if Homebrew remains broken.
+
+**Symptom** → Torch Hub or GitHub downloads fail with SSL certificate verification errors. **Cause** → Python cannot locate a current CA bundle. **Resolution** → setup installs/upgrades `certifi`; export-time code sets `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` from `certifi` when available.
+
+**Symptom** → Torch Hub asks “Do you trust this repository?” during ONNX export. **Cause** → interactive Torch Hub trust prompts are unsafe for builds/CI. **Resolution** → `backend/scripts/export_onnx.py` passes Torch Hub trust options and is non-interactive by default.
+
+**Symptom** → packaged Performance Analysis reports `ONNX missing_model_file`. **Cause** → native resources did not include `models/onnx`. **Resolution** → `electron-builder` now packages `../models` into app resources; run `cd electron-app && npm run verify:resources -- --mode native --onnx optional` before building.
+
+**Symptom** → ONNX is reported as invalid/corrupt. **Cause** → the file may be empty, fail `onnx.checker`, fail ONNX Runtime session creation, fail dummy inference, or use a provider unavailable on the current system. **Resolution** → run `venv/bin/python backend/scripts/export_onnx.py --validate-only --all`; invalid final-path files are quarantined and diagnostics report `empty`, `invalid_checker`, `invalid_session`, `invalid_dummy_inference`, `provider_unavailable`, `runtime_unavailable`, `export_failed`, or `optional_unavailable` instead of one generic error.
+
+**Symptom** → MiDaS Small ONNX expected 384 but runtime supplied 256. **Cause** → MiDaS `small_transform` produces 256×256 input. **Resolution** → registry/export metadata now uses `midas_small` input shape `1x3x256x256`; DPT Hybrid/Large remain `1x3x384x384`.
+
+**Symptom** → DPT Hybrid or DPT Large ONNX is unavailable. **Cause** → those exports are large and provider/tooling-sensitive. **Resolution** → they are optional unless `--require-all` is passed; PyTorch fallback remains available and Performance Analysis displays the precise diagnostic and recommended command.
+
+**Symptom** → backend appears offline during a long benchmark. **Cause** → model loading or CPU-heavy inference can take longer than UI polling timeouts. **Resolution** → `/live` stays lightweight and can report `busy: true`; benchmarks run with timeout handling and the UI shows `Depth Engine: Busy` rather than immediately treating a benchmark as permanent backend loss.
+
 ### Backend Readiness and Stale Backend Recovery
 
 **Symptom** → The app stays on “Starting engine” or reports no `/live` response. **Cause** → Port `8765` is occupied, the backend process exited before Uvicorn served `/live`, or the configured Python environment cannot import Uvicorn. **Resolution** → Run `cd electron-app && npm run backend:smoke`, then stop any non-DepthLens process that owns port `8765`.
 
-**Symptom** → `/live` returns `ok`, but inference controls stay disabled. **Cause** → `/ready` found a missing required Python module such as `torch`, `cv2`, `PIL`, `fastapi`, `uvicorn`, or `numpy`. **Resolution** → Activate the repo-root virtual environment and run `python -m pip install -r backend/requirements.txt && python -m pip check`.
+**Symptom** → `/live` returns `ok`, but inference controls stay disabled. **Cause** → `/ready` found a missing required Python module such as `torch`, `cv2`, `PIL`, `fastapi`, `uvicorn`, or `numpy`. **Resolution** → Activate the repo-root virtual environment and run `python -m pip install -r backend/requirements.txt && venv/bin/python -m pip check`.
 
-**Symptom** → Performance Analysis reports ONNX unavailable while PyTorch inference works. **Cause** → ONNX Runtime cannot import, cannot use the requested provider, or cannot load a valid graph from the configured path; benchmarks do not export missing graphs unless `DEPTHLENS_AUTO_EXPORT_ONNX=true` is set. **Resolution** → Run `python backend/scripts/export_onnx.py --all`, then inspect `curl http://127.0.0.1:8765/onnx/status?device=auto`.
+**Symptom** → Performance Analysis reports ONNX unavailable while PyTorch inference works. **Cause** → ONNX Runtime cannot import, cannot use the requested provider, or cannot load a valid graph from the configured path; benchmarks do not export missing graphs unless `DEPTHLENS_AUTO_EXPORT_ONNX=true` is set. **Resolution** → Run `venv/bin/python backend/scripts/export_onnx.py --all`, then inspect `curl http://127.0.0.1:8765/onnx/status?device=auto`.
 
 **Symptom** → Redis errors appear in logs, but inference still works. **Cause** → Redis is optional and the cache service falls back to the in-memory cache after connection failures. **Resolution** → Use the app normally or configure Redis with `REDIS_URL` (`str | None`, default `None`) when a shared cache is required.
 
@@ -1121,7 +841,7 @@ ONNX files resolve in this exact priority order:
 This command exports all supported ONNX graphs into the resolved default output directory and expects non-empty model files for `midas_small`, `dpt_hybrid`, and `dpt_large`.
 
 ```bash
-python backend/scripts/export_onnx.py --all
+venv/bin/python backend/scripts/export_onnx.py --all
 ```
 
 This command checks ONNX runtime and path status for the automatic device selection.
@@ -1140,18 +860,18 @@ CUDA, XPU, CoreML, OpenVINO, ROCm, MIGraphX, DirectML, TensorRT, and CPU provide
 
 ### Troubleshooting: `ONNXRuntimeError: model_path must not be empty`
 
-**Symptom** → ONNX Runtime raises `model_path must not be empty`. **Cause** → The selected model did not resolve to an existing non-empty `.onnx` file in the ONNX search path. **Resolution** → Run `python backend/scripts/export_onnx.py --all` and then `curl http://127.0.0.1:8765/onnx/status?device=auto`.
+**Symptom** → ONNX Runtime raises `model_path must not be empty`. **Cause** → The selected model did not resolve to an existing non-empty `.onnx` file in the ONNX search path. **Resolution** → Run `venv/bin/python backend/scripts/export_onnx.py --all` and then `curl http://127.0.0.1:8765/onnx/status?device=auto`.
 
 ### Troubleshooting: ONNX export failed with SymInt / `torch.export`
 
-**Symptom** → ONNX export fails with `SymInt`, reshape, unflatten, or `torch.export` errors. **Cause** → Some MiDaS/DPT graphs do not export cleanly through every PyTorch ONNX path. **Resolution** → Keep PyTorch inference enabled, inspect the export error, and retry `python backend/scripts/export_onnx.py --all --force` after updating compatible ONNX tooling.
+**Symptom** → ONNX export fails with `SymInt`, reshape, unflatten, or `torch.export` errors. **Cause** → Some MiDaS/DPT graphs do not export cleanly through every PyTorch ONNX path. **Resolution** → Keep PyTorch inference enabled, inspect the export error, and retry `venv/bin/python backend/scripts/export_onnx.py --all --force` after updating compatible ONNX tooling.
 
 ### Verification commands
 
 This command verifies the Python package environment without running tests or downloads beyond installed dependencies.
 
 ```bash
-python -m pip check
+venv/bin/python -m pip check
 ```
 
 This command verifies Electron resource paths before packaging.

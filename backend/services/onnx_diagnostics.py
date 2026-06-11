@@ -18,7 +18,7 @@ from backend.utils.hardware import (
 
 
 def export_command(model: str) -> str:
-    return f"python backend/scripts/export_onnx.py --model {model}"
+    return f"python backend/scripts/export_onnx.py --model {model} --force"
 
 
 def onnx_runtime_info(device: str = "auto") -> dict[str, Any]:
@@ -193,19 +193,43 @@ def create_onnx_session(
         }
 
 
-def _status_from_session_result(session_result: dict[str, Any], runtime: dict[str, Any]) -> str:
+def _checker_status(path: str | None) -> tuple[str | None, str | None]:
+    if not path:
+        return None, None
+    p = Path(path)
+    if not p.exists():
+        return "missing", None
+    if p.stat().st_size <= 0:
+        return "empty", "ONNX file is empty"
+    try:
+        onnx = importlib.import_module("onnx")
+    except Exception:
+        return None, None
+    try:
+        model = onnx.load(os.fspath(p), load_external_data=True)
+        onnx.checker.check_model(model)
+        return "checker_ok", None
+    except Exception as exc:
+        return "invalid_checker", f"{type(exc).__name__}: {exc}"
+
+
+def _status_from_session_result(session_result: dict[str, Any], runtime: dict[str, Any], checker_state: str | None = None) -> str:
     if session_result.get("ok"):
         return "available"
     error_code = session_result.get("error_code")
     if error_code in {"ONNX_MODEL_MISSING", "ONNX_MODEL_PATH_EMPTY"}:
         return "missing"
-    if error_code in {"ONNX_MODEL_EMPTY", "ONNX_SESSION_INIT_FAILED"}:
-        return "invalid/corrupt"
+    if error_code == "ONNX_MODEL_EMPTY":
+        return "empty"
+    if checker_state == "invalid_checker":
+        return "invalid_checker"
+    if error_code == "ONNX_SESSION_INIT_FAILED":
+        return "invalid_session"
     if error_code == "ONNXRUNTIME_MISSING" or not runtime.get("importable"):
         return "runtime_unavailable"
     if error_code == "ONNX_PROVIDER_UNAVAILABLE":
         return "provider_unavailable"
-    return "invalid/corrupt"
+    return "invalid_session"
 
 
 def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
@@ -221,7 +245,14 @@ def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
             )
         else:
             session_result = create_onnx_session(model, device)
-        state = _status_from_session_result(session_result, runtime)
+        checker_state, checker_error = _checker_status(resolved.get("onnx_path"))
+        state = _status_from_session_result(session_result, runtime, checker_state)
+    try:
+        optional_onnx = bool(get_model_spec(resolved.get("model_id") or model).model_id in {"dpt_hybrid", "dpt_large"})
+    except Exception:
+        optional_onnx = False
+    if optional_onnx and state in {"missing", "export_failed"}:
+        state = "optional_unavailable"
     return {
         "model": resolved.get("model_id") or model,
         "display_name": resolved.get("display_name"),
@@ -230,6 +261,10 @@ def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
         "exists": bool(resolved.get("exists")),
         "size_bytes": resolved.get("size_bytes") or 0,
         "state": state,
+        "legacy_state": "invalid/corrupt" if state in {"invalid_checker", "invalid_session", "invalid_dummy_inference"} else state,
+        "checker_error": locals().get("checker_error"),
+        "input_shape": [1, 3, *get_model_spec(resolved.get("model_id") or model).input_size] if (resolved.get("model_id") or model) in MODEL_REGISTRY else None,
+        "fallback_behavior": "PyTorch fallback remains available",
         "path": resolved,
         "providers_used": session_result.get("providers_used", []),
         "available_providers": session_result.get(
