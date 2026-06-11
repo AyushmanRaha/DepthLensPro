@@ -1,6 +1,5 @@
 /* DepthLens Pro — complete stylesheet v5.0
-   Welcome screen overhauled: liquid-metal animation, premium button,
-   vector bg lines. All other styles IDENTICAL to v4.1.
+   Welcome screen uses the Depth Field Calibration canvas animation.
 */
 
 /* ══════════════════════════════════════════════════════════
@@ -152,7 +151,7 @@ body.modal-open { overflow:hidden; position:fixed; width:100%; }
 .app-shell.ready { opacity:1; transform:none; filter:none; }
 
 /* ══════════════════════════════════════════════════════════
-   WELCOME SCREEN v5.0 — LIQUID METAL LOGO
+   WELCOME SCREEN v6.0 — DEPTH FIELD CALIBRATION
    ══════════════════════════════════════════════════════════ */
 
 /* ── Wrapper ── */
@@ -197,16 +196,16 @@ body.modal-open { overflow:hidden; position:fixed; width:100%; }
 /* ── CTA wrap ── */
 .welcome-cta-wrap {
   opacity: 0;
-  transform: translateY(20px) scale(0.88);
+  transform: translateY(14px) scale(0.96);
   pointer-events: none;
   transition: none;
 }
 .welcome-cta-wrap.revealed {
-  animation: ctaRevealPremium 0.72s cubic-bezier(0.34,1.56,0.64,1) both;
+  animation: ctaRevealPremium 0.58s cubic-bezier(0.22,1,0.36,1) both;
   pointer-events: auto;
 }
 @keyframes ctaRevealPremium {
-  0%   { opacity:0; transform: translateY(20px) scale(0.88); }
+  0%   { opacity:0; transform: translateY(14px) scale(0.96); }
   100% { opacity:1; transform: translateY(0) scale(1); }
 }
 
@@ -286,7 +285,7 @@ body.modal-open { overflow:hidden; position:fixed; width:100%; }
   transition: background 0.28s ease;
 }
 
-/* Hover: full spring bounce + intensified glow */
+/* Hover: restrained lift + intensified focus ring */
 .welcome-btn:hover {
   transform: translateY(-5px) scale(1.065);
   color: #ffffff;
@@ -413,7 +412,7 @@ body.modal-open { overflow:hidden; position:fixed; width:100%; }
   transition: none;
 }
 .theme-toggle-landing.revealed {
-  animation: ctaRevealPremium 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.18s both;
+  animation: ctaRevealPremium 0.55s cubic-bezier(0.22,1,0.36,1) 0.18s both;
   pointer-events: auto;
 }
 .theme-toggle-landing.is-migrating {
