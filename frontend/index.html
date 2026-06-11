@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DepthLens Pro — Monocular Depth Estimation</title>
-    <link rel="stylesheet" href="style.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&family=Exo+2:wght@300;400;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="style.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   </head>
 
@@ -164,11 +164,10 @@
               id="deviceCard"
               aria-labelledby="deviceHeading"
             >
-              <h2 class="card-title" id="deviceHeading">
-                <span class="card-icon">◉</span> Compute Device
+              <h2 class="card-title" id="deviceHeading">Compute Device
               </h2>
               <div class="device-info-banner" id="deviceInfoBanner">
-                <span class="device-info-icon">ℹ</span>
+                <span class="device-info-icon"></span>
                 <span>Connect the inference engine to detect GPU/CPU</span>
               </div>
               <div
@@ -179,9 +178,7 @@
               <div class="device-selector" id="deviceSelector">
                 <label class="device-opt selected" data-device="auto">
                   <input type="radio" name="device" value="auto" checked />
-                  <div class="device-opt-inner">
-                    <span class="device-opt-icon">◎</span>
-                    <div>
+                  <div class="device-opt-inner"><div>
                       <span class="device-opt-name">Auto</span>
                       <span class="device-opt-sub">Best available</span>
                     </div>
@@ -199,8 +196,7 @@
 
             <!-- Model selection -->
             <section class="card" aria-labelledby="modelHeading">
-              <h2 class="card-title" id="modelHeading">
-                <span class="card-icon">▣</span> Model Architecture
+              <h2 class="card-title" id="modelHeading">Model Architecture
               </h2>
               <div
                 class="model-grid"
@@ -291,8 +287,7 @@
 
             <!-- Colormap selection -->
             <section class="card" aria-labelledby="cmapHeading">
-              <h2 class="card-title" id="cmapHeading">
-                <span class="card-icon">▣</span> Colormap
+              <h2 class="card-title" id="cmapHeading">Colormap
               </h2>
               <div
                 class="colormap-grid"
@@ -320,8 +315,7 @@
 
             <!-- Session metrics -->
             <section class="card" aria-labelledby="metricsHeading">
-              <h2 class="card-title" id="metricsHeading">
-                <span class="card-icon">▣</span> Session Dashboard
+              <h2 class="card-title" id="metricsHeading">Session Dashboard
               </h2>
 
               <div class="metrics-grid">
@@ -378,8 +372,7 @@
           <section class="main-content">
             <!-- Upload controls -->
             <div class="card upload-card" id="uploadCard">
-              <h2 class="card-title">
-                <span class="card-icon">▣</span> Image Queue
+              <h2 class="card-title">Image Queue
               </h2>
 
               <div
@@ -450,9 +443,8 @@
 
               <div class="action-row">
                 <button class="btn btn-ghost" id="clearBtn" type="button" disabled>Clear All</button>
-                <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>✕ Cancel</button>
-                <button class="btn btn-primary" id="runBtn" type="button" disabled>
-                  <span class="btn-icon">▶</span> Generate Depth Maps
+                <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>Cancel</button>
+                <button class="btn btn-primary" id="runBtn" type="button" disabled>Generate Depth Maps
                 </button>
               </div>
 
@@ -474,12 +466,11 @@
 
             <div class="card results-card" id="resultsCard" hidden>
               <div class="results-header">
-                <h2 class="card-title">
-                  <span class="card-icon">▣</span> Results Gallery
+                <h2 class="card-title">Results Gallery
                 </h2>
                 <div class="results-actions">
-                  <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">⇩ Download All</button>
-                  <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">✕ Clear</button>
+                  <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">Download All</button>
+                  <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">Clear</button>
                 </div>
               </div>
               <div class="gallery" id="gallery" role="list" aria-label="Depth map results"></div>
@@ -492,8 +483,7 @@
       <main class="panel" id="panel-compare" hidden>
         <div class="compare-layout">
           <div class="card compare-upload-card">
-            <h2 class="card-title">
-              <span class="card-icon">▣</span> Model Comparison
+            <h2 class="card-title">Model Comparison
             </h2>
             <p class="compare-desc">
               Upload one image to run all three MiDaS models side-by-side and
@@ -523,11 +513,10 @@
                 <option value="auto">Auto</option>
               </select>
             </div>
-            <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>
-              <span class="btn-icon">▶</span> Run All Models
+            <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>Run All Models
             </button>
             <button class="btn btn-danger btn-sm w-full" id="compareCancelBtn" type="button" hidden>
-              ✕ Cancel Comparison
+              Cancel Comparison
             </button>
             <div class="progress-block" id="compareProgressBlock" hidden>
               <div class="progress-timer-row">
@@ -550,8 +539,7 @@
 
         <div class="card compare-chart-card" id="compareChartCard" hidden>
           <div class="compare-chart-head">
-            <h2 class="card-title">
-              <span class="card-icon">▣</span> Performance Comparison
+            <h2 class="card-title">Performance Comparison
             </h2>
             <button class="btn btn-ghost btn-sm" id="compareChartToggle" type="button" aria-expanded="true" aria-controls="compareChartBody">
               Hide Graph
@@ -575,7 +563,7 @@
       <main class="panel" id="panel-experiments" hidden>
         <div class="about-layout">
           <div class="card about-card">
-            <h2 class="card-title"><span class="card-icon">▣</span> Experiment Workspace</h2>
+            <h2 class="card-title">Experiment Workspace</h2>
             <p class="compare-desc">
               Name a local validation run, execute the current image queue, inspect outputs, and export reproducible JSON/CSV evidence. GT mode uses the optional Workspace ground-truth pair.
             </p>
@@ -608,8 +596,7 @@
       <main class="panel" id="panel-performance" hidden>
         <div class="about-layout">
           <div class="card about-card">
-            <h2 class="card-title">
-              <span class="card-icon">▣</span> Performance Analysis
+            <h2 class="card-title">Performance Analysis
             </h2>
             <p class="compare-desc">
               Benchmark the legacy PyTorch execution path against exported ONNX Runtime
@@ -675,8 +662,7 @@
       <main class="panel" id="panel-about" hidden>
         <div class="about-layout">
           <div class="card about-card">
-            <h2 class="card-title">
-              <span class="card-icon">▣</span> About DepthLens Pro
+            <h2 class="card-title">About DepthLens Pro
             </h2>
             <div class="about-content">
               <p>
@@ -752,7 +738,7 @@
                 <p class="lightbox-title" id="lightboxTitle">Depth Inspector</p>
                 <p class="lightbox-subtitle">Interactive depth blend + full diagnostic metrics</p>
               </div>
-              <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
+              <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">Close</button>
             </div>
 
             <div class="lightbox-body">
@@ -783,8 +769,8 @@
             <div class="lightbox-footer">
               <div class="lb-tags" id="lbTags"></div>
               <div class="lb-downloads">
-                <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
-                <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
+                <button class="btn btn-outline btn-sm" id="lbDlDepth">Depth Map</button>
+                <button class="btn btn-outline btn-sm" id="lbDlGray">Grayscale</button>
               </div>
             </div>
           </div>

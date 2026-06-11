@@ -44,46 +44,46 @@
   function getPalette() {
     if (isDark()) {
       return {
-        bgTop: "#06101c",
-        bgBottom: "#091421",
-        grid: "rgba(142, 190, 224, 0.075)",
-        gridMajor: "rgba(128, 211, 255, 0.13)",
-        point: "rgba(138, 218, 255, 0.34)",
-        pointDim: "rgba(138, 218, 255, 0.12)",
-        scan: "rgba(51, 214, 255, 0.88)",
-        scanSoft: "rgba(51, 214, 255, 0.16)",
-        contour: "rgba(108, 219, 255, 0.54)",
-        contourDim: "rgba(121, 174, 215, 0.18)",
-        textTop: "#ffffff",
-        textMid: "#e8f6ff",
-        textBottom: "#aacce8",
-        proTop: "#6cf2ff",
-        proMid: "#00c8ff",
-        proBottom: "#167db8",
-        shadow: "rgba(0, 18, 32, 0.42)",
-        sweep: "rgba(255, 255, 255, 0.24)",
+        bgTop: "#080e1a",
+        bgBottom: "#0d1525",
+        grid: "rgba(99, 179, 237, 0.06)",
+        gridMajor: "rgba(99, 179, 237, 0.12)",
+        point: "rgba(99, 179, 237, 0.28)",
+        pointDim: "rgba(99, 179, 237, 0.10)",
+        scan: "rgba(99, 179, 237, 0.90)",
+        scanSoft: "rgba(99, 179, 237, 0.14)",
+        contour: "rgba(99, 179, 237, 0.48)",
+        contourDim: "rgba(99, 179, 237, 0.16)",
+        textTop: "#f0f6ff",
+        textMid: "#e2e8f0",
+        textBottom: "#a0b3c8",
+        proTop: "#90cdf4",
+        proMid: "#63b3ed",
+        proBottom: "#2b6cb0",
+        shadow: "rgba(0, 14, 28, 0.45)",
+        sweep: "rgba(255, 255, 255, 0.22)",
       };
     }
 
     return {
-      bgTop: "#f5f8fc",
-      bgBottom: "#eaf1f8",
-      grid: "rgba(19, 74, 122, 0.075)",
-      gridMajor: "rgba(0, 112, 204, 0.12)",
-      point: "rgba(0, 112, 204, 0.30)",
-      pointDim: "rgba(0, 80, 150, 0.10)",
-      scan: "rgba(0, 102, 204, 0.82)",
-      scanSoft: "rgba(0, 112, 204, 0.13)",
-      contour: "rgba(0, 112, 204, 0.45)",
-      contourDim: "rgba(19, 74, 122, 0.16)",
-      textTop: "#06192c",
-      textMid: "#0d2744",
-      textBottom: "#1f466b",
-      proTop: "#0094eb",
-      proMid: "#0070cc",
-      proBottom: "#004f9e",
-      shadow: "rgba(0, 45, 95, 0.14)",
-      sweep: "rgba(255, 255, 255, 0.55)",
+      bgTop: "#f7f9fc",
+      bgBottom: "#eef3fa",
+      grid: "rgba(37, 99, 235, 0.06)",
+      gridMajor: "rgba(37, 99, 235, 0.11)",
+      point: "rgba(37, 99, 235, 0.24)",
+      pointDim: "rgba(37, 99, 235, 0.09)",
+      scan: "rgba(37, 99, 235, 0.82)",
+      scanSoft: "rgba(37, 99, 235, 0.11)",
+      contour: "rgba(37, 99, 235, 0.40)",
+      contourDim: "rgba(37, 99, 235, 0.14)",
+      textTop: "#1a202c",
+      textMid: "#2d3748",
+      textBottom: "#4a5568",
+      proTop: "#2563eb",
+      proMid: "#1d4ed8",
+      proBottom: "#1e40af",
+      shadow: "rgba(0, 30, 80, 0.12)",
+      sweep: "rgba(255, 255, 255, 0.60)",
     };
   }
 
@@ -145,7 +145,7 @@
 
   function buildLogoMetrics() {
     const fontSize = Math.min(logoH * 0.70, logoW * 0.126);
-    logoCtx.font = `700 ${fontSize}px Rajdhani, Exo 2, sans-serif`;
+    logoCtx.font = `800 ${fontSize}px Syne, Inter, sans-serif`;
     logoCtx.textBaseline = "middle";
     logoCtx.textAlign = "left";
 
@@ -439,7 +439,7 @@
     const revealWidth = finalState ? logoMetrics.totalWidth : logoMetrics.totalWidth * easeOutCubic(alpha);
 
     logoCtx.save();
-    logoCtx.font = `700 ${fontSize}px Rajdhani, Exo 2, sans-serif`;
+    logoCtx.font = `800 ${fontSize}px Syne, Inter, sans-serif`;
     logoCtx.textBaseline = "middle";
     logoCtx.textAlign = "left";
     logoCtx.globalAlpha = clamp01(alpha);
