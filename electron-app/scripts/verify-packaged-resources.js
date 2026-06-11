@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
-const { verifyResourceRoot, formatResult } = require("./verify-resources");
+const { verifyResourceRoot, formatResult, parseOnnxModels } = require("./verify-resources");
 
 const APP_ROOT = path.resolve(__dirname, "..");
 
@@ -12,6 +12,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     dist: path.join(APP_ROOT, "dist"),
     mode: "native",
     onnxMode: "optional",
+    onnxModels: ["midas_small"],
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -20,6 +21,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--dist") options.dist = path.resolve(argv[++i] || options.dist);
     else if (arg === "--mode") options.mode = argv[++i] || options.mode;
     else if (arg === "--onnx") options.onnxMode = argv[++i] || options.onnxMode;
+    else if (arg === "--models" || arg === "--onnx-models") options.onnxModels = parseOnnxModels(argv[++i] || "midas_small");
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -28,7 +30,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    "Usage: node scripts/verify-packaged-resources.js [--platform darwin|win32|linux] [--arch arm64] [--mode native] [--onnx optional|required|require-all]",
+    "Usage: node scripts/verify-packaged-resources.js [--platform darwin|win32|linux] [--arch arm64] [--mode native] [--onnx optional|required|require-all|off] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list]",
     "",
     "Discovers electron-builder packaged resource roots under electron-app/dist and verifies backend, frontend, venv, models, and models/onnx.",
   ].join("\n");
@@ -107,6 +109,7 @@ function verifyPackagedResources(options) {
     mode: options.mode,
     onnxMode: options.onnxMode,
     platform: options.platform,
+    onnxModels: options.onnxModels,
   }));
   return { roots, results, ok: results.length > 0 && results.every((result) => result.ok) };
 }

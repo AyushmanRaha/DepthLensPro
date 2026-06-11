@@ -30,6 +30,55 @@ PYTHON_310_WARNING = (
     "python.org and re-run."
 )
 SUPPORTED_ARCHES = {"arm64", "aarch64"}
+ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
+
+
+def parse_onnx_model_list(value: str | None) -> list[str]:
+    """Parse a comma-separated ONNX model selection into canonical model IDs."""
+    if value is None or value == "":
+        return ["midas_small"]
+    raw = [item.strip() for item in value.split(",") if item.strip()]
+    if raw == ["all"]:
+        return list(ONNX_MODEL_IDS)
+    invalid = [item for item in raw if item not in ONNX_MODEL_IDS]
+    if invalid:
+        raise argparse.ArgumentTypeError(f"Unsupported ONNX model(s): {', '.join(invalid)}. Expected one of: {', '.join(ONNX_MODEL_IDS)} or all")
+    return raw
+
+
+def should_export_onnx(args: argparse.Namespace, *, stdin_is_tty: bool | None = None) -> bool:
+    """Return whether setup should export/validate ONNX. Default is non-interactive No."""
+    if args.with_onnx and args.without_onnx:
+        raise SystemExit("Choose either --with-onnx or --without-onnx, not both.")
+    if args.with_onnx or args.onnx_validate_only:
+        return True
+    if args.without_onnx:
+        return False
+    if stdin_is_tty is None:
+        stdin_is_tty = sys.stdin.isatty()
+    if not stdin_is_tty:
+        print("ONNX export skipped by default in non-interactive setup. Pass --with-onnx to export or --without-onnx to make the skip explicit.")
+        return False
+    answer = input("Export optional ONNX model files now? This may download large weights. [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
+def onnx_export_command(py: Path, args: argparse.Namespace) -> list[str]:
+    models = parse_onnx_model_list(args.onnx_models)
+    cmd = [str(py), str(ROOT / "backend" / "scripts" / "export_onnx.py"), "--output-dir", str(ROOT / "models" / "onnx")]
+    if args.onnx_validate_only:
+        cmd.append("--validate-only")
+    if args.onnx_force:
+        cmd.append("--force")
+    if args.onnx_strict:
+        cmd.append("--strict")
+    if models == list(ONNX_MODEL_IDS):
+        cmd.append("--all")
+    elif len(models) == 1:
+        cmd.extend(["--model", models[0]])
+    else:
+        cmd.extend(["--models", ",".join(models)])
+    return cmd
 
 
 @dataclass
@@ -215,6 +264,11 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
         if not keep.exists():
             keep.touch()
     print("Ensured models/onnx directory structure.")
+    export_onnx = should_export_onnx(args)
+    if export_onnx:
+        _run(onnx_export_command(py, args), env=env)
+    else:
+        print("ONNX export intentionally skipped; PyTorch fallback remains available and packaged ONNX verification will be optional.")
     resources = _run(["npm", "run", "verify:resources"], cwd=ROOT / "electron-app", check=False)
     node_v = _run(["node", "--version"], check=False).stdout.strip() if shutil.which("node") else "missing"
     npm_v = _run(["npm", "--version"], check=False).stdout.strip() if shutil.which("npm") else "missing"
@@ -243,7 +297,17 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="DepthLens Pro setup and environment doctor")
     p.add_argument("--doctor-only", action="store_true", help="check/create venv and verify tools without installing app dependencies")
     p.add_argument("--enforce-arch", action="store_true", help="fail if the current machine cannot build the supported native app")
-    return p.parse_args(argv)
+    p.add_argument("--with-onnx", action="store_true", help="export/validate requested ONNX models during setup")
+    p.add_argument("--without-onnx", action="store_true", help="skip ONNX export explicitly")
+    p.add_argument("--onnx-models", default="midas_small", help="comma-separated ONNX models: midas_small, dpt_hybrid, dpt_large, or all")
+    p.add_argument("--onnx-strict", action="store_true", help="fail setup if any requested ONNX model is missing or invalid")
+    p.add_argument("--onnx-validate-only", action="store_true", help="validate requested ONNX models without exporting")
+    p.add_argument("--onnx-force", action="store_true", help="regenerate requested ONNX models even when cached files validate")
+    args = p.parse_args(argv)
+    parse_onnx_model_list(args.onnx_models)
+    if args.with_onnx and args.without_onnx:
+        p.error("choose either --with-onnx or --without-onnx, not both")
+    return args
 
 
 if __name__ == "__main__":

@@ -131,3 +131,27 @@ function verify(root, options = {}) {
 }
 
 console.log("Resource verification tests passed.");
+
+{
+  const root = tempRoot();
+  makeTree(root, { onnxFile: true });
+  const result = verify(root, { onnxMode: "required", onnxModels: ["midas_small"] });
+  assert.strictEqual(result.ok, true, "required MiDaS Small passes when midas_small.onnx is present");
+}
+
+{
+  const root = tempRoot();
+  makeTree(root, { onnxFile: true });
+  const result = verify(root, { onnxMode: "required", onnxModels: ["dpt_hybrid"] });
+  assert.strictEqual(result.ok, false, "required selected DPT Hybrid fails when dpt_hybrid.onnx is missing");
+}
+
+{
+  const mac = spawnSync("bash", ["-n", path.join(__dirname, "..", "scripts", "build-native-macos.sh")], { encoding: "utf8" });
+  assert.strictEqual(mac.status, 0, mac.stderr || mac.stdout);
+  const linux = spawnSync("bash", ["-n", path.join(__dirname, "..", "scripts", "build-native-linux.sh")], { encoding: "utf8" });
+  assert.strictEqual(linux.status, 0, linux.stderr || linux.stdout);
+  const winScript = fs.readFileSync(path.join(__dirname, "..", "scripts", "build-native-windows.ps1"), "utf8");
+  assert(winScript.includes("@SetupArgs"), "Windows build script must pass through all setup arguments");
+  assert(winScript.includes("--onnx-models"), "Windows build script must parse --onnx-models examples");
+}

@@ -239,18 +239,31 @@ function getProcessCommandLine(pid) {
   return execCapture("ps", ["-p", String(pid), "-o", "command="]);
 }
 
+function parsePidFromText(text) {
+  const match = String(text || "").match(/pid=(\d+)/i) || String(text || "").match(/PID[=: ]+(\d+)/i);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
 function getListeningPid(port = BACKEND_PORT) {
   if (process.platform === "win32") {
+    const ps = execCapture("powershell.exe", ["-NoProfile", "-Command", `$c=Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $c.OwningProcess }`]);
+    const psPid = Number.parseInt(ps, 10);
+    if (Number.isFinite(psPid)) return psPid;
     const out = execCapture("cmd.exe", ["/c", `netstat -ano -p tcp | findstr :${port}`]);
     const line = out.split(/\r?\n/).find((row) => row.includes("LISTENING"));
     const pid = line?.trim().split(/\s+/).pop();
-    return pid ? Number.parseInt(pid, 10) : null;
+    const parsed = pid ? Number.parseInt(pid, 10) : null;
+    return Number.isFinite(parsed) ? parsed : null;
   }
-  const out = execCapture("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
-  const line = out.split(/\r?\n/).find((row) => /\bLISTEN\b/.test(row) && !row.startsWith("COMMAND"));
-  if (!line) return null;
-  const pid = Number.parseInt(line.trim().split(/\s+/)[1], 10);
-  return Number.isFinite(pid) ? pid : null;
+  const lsof = execCapture("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
+  const line = lsof.split(/\r?\n/).find((row) => /\bLISTEN\b/.test(row) && !row.startsWith("COMMAND"));
+  if (line) {
+    const pid = Number.parseInt(line.trim().split(/\s+/)[1], 10);
+    if (Number.isFinite(pid)) return pid;
+  }
+  const ss = execCapture("ss", ["-ltnp", `sport = :${port}`]);
+  const ssPid = parsePidFromText(ss);
+  return Number.isFinite(ssPid) ? ssPid : null;
 }
 
 async function isPidAlive(pid) {
@@ -315,7 +328,9 @@ async function cleanupStaleBackendIfSafe(reason, details) {
   const info = await inspectBackendPort();
   if (!info.pid || !info.depthLensOwned) {
     const pidText = info.pid ? String(info.pid) : "unknown";
-    const command = info.pid ? (process.platform === "win32" ? `taskkill /PID ${info.pid} /F` : `kill -9 ${info.pid}`) : "No safe kill command available because no PID was detected.";
+    const command = info.pid
+      ? (process.platform === "win32" ? `taskkill /PID ${info.pid} /F` : `kill ${info.pid}`)
+      : "No safe kill command available because no PID was detected.";
     const { dialog } = require("electron");
     dialog.showMessageBoxSync({
       type: "error",
