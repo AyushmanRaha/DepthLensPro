@@ -101,8 +101,12 @@
     return a + (b - a) * t;
   }
 
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
   function clamp01(value) {
-    return Math.max(0, Math.min(1, value));
+    return clamp(value, 0, 1);
   }
 
   function seededRandom(seed) {
@@ -144,16 +148,35 @@
   }
 
   function buildLogoMetrics() {
-    const fontSize = Math.min(logoH * 0.70, logoW * 0.126);
-    logoCtx.font = `800 ${fontSize}px Syne, Inter, sans-serif`;
+    const vw = window.innerWidth || document.documentElement.clientWidth || logoW;
+    const vh = window.innerHeight || document.documentElement.clientHeight || logoH;
+    const isMobile = vw <= 560;
+    const targetFontSize = isMobile
+      ? Math.round(clamp(Math.min(vw * 0.11, vh * 0.16), 52, 118))
+      : Math.round(clamp(Math.min(vw * 0.095, vh * 0.18), 72, 156));
+    const maxByCanvasHeight = logoH * 0.78;
+    let fontSize = Math.min(targetFontSize, maxByCanvasHeight);
+
     logoCtx.textBaseline = "middle";
     logoCtx.textAlign = "left";
+    logoCtx.font = `800 ${fontSize}px Syne, Inter, sans-serif`;
 
-    const main = logoCtx.measureText("DepthLens");
-    const pro = logoCtx.measureText("Pro");
-    const totalWidth = main.width + pro.width;
+    let main = logoCtx.measureText("DepthLens");
+    let pro = logoCtx.measureText("Pro");
+    let totalWidth = main.width + pro.width;
+    const maxTextWidth = logoW - 24;
+    if (totalWidth > maxTextWidth) {
+      fontSize = Math.max(48, Math.floor(fontSize * (maxTextWidth / totalWidth)));
+      logoCtx.font = `800 ${fontSize}px Syne, Inter, sans-serif`;
+      main = logoCtx.measureText("DepthLens");
+      pro = logoCtx.measureText("Pro");
+      totalWidth = main.width + pro.width;
+    }
+
+    const ascent = Math.max(main.actualBoundingBoxAscent || 0, pro.actualBoundingBoxAscent || 0, fontSize * 0.72);
+    const descent = Math.max(main.actualBoundingBoxDescent || 0, pro.actualBoundingBoxDescent || 0, fontSize * 0.22);
     const x = (logoW - totalWidth) / 2;
-    const y = logoH / 2 + fontSize * 0.02;
+    const y = logoH / 2 + (ascent - descent) / 2;
 
     logoMetrics = {
       fontSize,
@@ -162,8 +185,8 @@
       mainWidth: main.width,
       proWidth: pro.width,
       totalWidth,
-      textTop: y - fontSize * 0.46,
-      textBottom: y + fontSize * 0.38,
+      textTop: y - ascent,
+      textBottom: y + descent,
     };
   }
 
