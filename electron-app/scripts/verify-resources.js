@@ -6,6 +6,16 @@ const DEFAULT_ROOT = path.resolve(path.join(__dirname, "..", ".."));
 const VALID_ROOT_KINDS = new Set(["repo", "packaged"]);
 const VALID_MODES = new Set(["basic", "native"]);
 const VALID_ONNX_MODES = new Set(["off", "optional", "required", "require-all"]);
+const ONNX_MODELS = ["midas_small", "dpt_hybrid", "dpt_large"];
+
+function parseOnnxModels(value = "midas_small") {
+  if (!value) return ["midas_small"];
+  const items = String(value).split(",").map((item) => item.trim()).filter(Boolean);
+  if (items.length === 1 && items[0] === "all") return [...ONNX_MODELS];
+  const invalid = items.filter((item) => !ONNX_MODELS.includes(item));
+  if (invalid.length) throw new Error(`Invalid --models ${invalid.join(",")}; expected ${ONNX_MODELS.join(",")} or all.`);
+  return items;
+}
 
 function parseArgs(argv = process.argv.slice(2)) {
   const options = {
@@ -13,6 +23,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     rootKind: "repo",
     mode: "basic",
     onnxMode: "optional",
+    onnxModels: ["midas_small"],
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -20,6 +31,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (arg === "--root-kind") options.rootKind = argv[++i] || options.rootKind;
     else if (arg === "--mode") options.mode = argv[++i] || options.mode;
     else if (arg === "--onnx") options.onnxMode = argv[++i] || options.onnxMode;
+    else if (arg === "--models" || arg === "--onnx-models") options.onnxModels = parseOnnxModels(argv[++i] || "midas_small");
     else if (arg === "--root") options.root = path.resolve(argv[++i] || options.root);
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (!arg.startsWith("--")) options.root = path.resolve(arg);
@@ -34,7 +46,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--onnx off|optional|required|require-all] [resource-root]",
+    "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
     "",
     "Examples:",
     "  node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
@@ -65,6 +77,7 @@ function verifyResourceRoot(options = {}) {
   const rootKind = options.rootKind || "repo";
   const mode = options.mode || "basic";
   const onnxMode = options.onnxMode || "optional";
+  const onnxModels = options.onnxModels || ["midas_small"];
   const platform = options.platform || process.platform;
   const checks = [];
   const infos = [];
@@ -96,11 +109,11 @@ function verifyResourceRoot(options = {}) {
   addCheck("models", requiresModelDirs, isDirectory);
   addCheck(path.join("models", "onnx"), requiresModelDirs, isDirectory);
 
-  const onnxFiles = [
-    { rel: path.join("models", "onnx", "midas_small.onnx"), required: onnxMode === "required" || onnxMode === "require-all" },
-    { rel: path.join("models", "onnx", "dpt_hybrid.onnx"), required: onnxMode === "require-all" },
-    { rel: path.join("models", "onnx", "dpt_large.onnx"), required: onnxMode === "require-all" },
-  ];
+  const requiredModels = onnxMode === "off" || onnxMode === "optional" ? [] : (onnxMode === "require-all" ? ONNX_MODELS : onnxModels);
+  const onnxFiles = ONNX_MODELS.map((model) => ({
+    rel: path.join("models", "onnx", `${model}.onnx`),
+    required: requiredModels.includes(model),
+  }));
   for (const item of onnxFiles) {
     const full = path.join(root, item.rel);
     const exists = isFile(full);
@@ -110,7 +123,7 @@ function verifyResourceRoot(options = {}) {
   }
 
   const failed = checks.filter((check) => check.required && !check.ok);
-  return { root, rootKind, mode, onnxMode, platform, checks, infos, failed, ok: failed.length === 0 };
+  return { root, rootKind, mode, onnxMode, onnxModels, platform, checks, infos, failed, ok: failed.length === 0 };
 }
 
 function remediation(result) {
@@ -153,7 +166,8 @@ function formatResult(result) {
     lines.push(remediation(result));
   } else {
     lines.push("");
-    lines.push(`DepthLens resources verified under: ${result.root} (root-kind=${result.rootKind}, mode=${result.mode}, onnx=${result.onnxMode})`);
+    if (result.onnxMode === "off") lines.push("ONNX was intentionally skipped for this verification run.");
+    lines.push(`DepthLens resources verified under: ${result.root} (root-kind=${result.rootKind}, mode=${result.mode}, onnx=${result.onnxMode}, models=${(result.onnxModels || []).join(",")})`);
   }
   return lines.join("\n");
 }
@@ -189,4 +203,6 @@ module.exports = {
   verifyResourceRoot,
   formatResult,
   remediation,
+  parseOnnxModels,
+  ONNX_MODELS,
 };

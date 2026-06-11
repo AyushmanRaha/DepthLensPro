@@ -25,6 +25,16 @@ from backend.services.onnx_diagnostics import create_onnx_session  # noqa: E402
 OPTIONAL_ONNX_MODELS = {"dpt_hybrid", "dpt_large"}
 
 
+def parse_model_list(value: str) -> list[str]:
+    raw = [item.strip() for item in value.split(",") if item.strip()]
+    if raw == ["all"]:
+        return sorted(MODEL_REGISTRY)
+    invalid = [item for item in raw if item not in MODEL_REGISTRY]
+    if invalid:
+        raise argparse.ArgumentTypeError(f"Unsupported model(s): {', '.join(invalid)}")
+    return raw
+
+
 def configure_certificates() -> dict[str, str | None]:
     """Point Python HTTPS clients at certifi when available."""
     try:
@@ -166,6 +176,7 @@ def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export DepthLens Pro MiDaS models to ONNX.")
     parser.add_argument("--model", choices=sorted(MODEL_REGISTRY), default="midas_small")
+    parser.add_argument("--models", type=parse_model_list, help="Comma-separated model IDs to export/validate, or all.")
     parser.add_argument("--all", action="store_true", help="Export every supported MiDaS model.")
     parser.add_argument("--output-dir", type=Path, default=onnx_model_path("midas_small").parent, help="Directory for generated .onnx files.")
     parser.add_argument("--opset", type=int, default=17, help="ONNX opset version.")
@@ -178,7 +189,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    models = sorted(MODEL_REGISTRY) if args.all else [args.model]
+    models = sorted(MODEL_REGISTRY) if args.all else (args.models if args.models else [args.model])
     failures = []
     for model_name in models:
         result = validate_model(model_name, args.output_dir) if args.validate_only else export_model_to_onnx(model_name, force=args.force, output_dir=args.output_dir, opset=args.opset)

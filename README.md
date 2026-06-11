@@ -891,3 +891,231 @@ This command verifies Electron resource paths before packaging.
 cd electron-app
 npm run verify:resources
 ```
+
+## Cross-platform ARM native and terminal runbook
+
+DepthLens Pro native packaging is intentionally limited to ARM targets: macOS Apple Silicon (`darwin arm64`), Windows ARM (`win32 arm64`), and Linux ARM (`linux arm64`/`aarch64`). Intel Mac, Windows x64, Linux x64, and macOS universal packages are unsupported and must remain blocked by setup, build, and Electron startup checks. ONNX options are identical on all setup and native build entrypoints: `--with-onnx`, `--without-onnx`, `--onnx-models midas_small`, `--onnx-models dpt_hybrid`, `--onnx-models dpt_large`, `--onnx-models midas_small,dpt_hybrid`, `--onnx-models all`, `--onnx-strict`, `--onnx-validate-only`, and `--onnx-force`.
+
+### Native app clone-to-run recipes
+
+#### A. macOS Apple Silicon native app without ONNX
+```bash
+python3 --version
+node --version
+npm --version
+cd ~/Developer
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+scripts/build-native-macos.sh --without-onnx
+cd electron-app && npm run verify:resources:native && node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --onnx off
+open "dist/mac-arm64/DepthLens Pro.app"
+```
+Artifact: `electron-app/dist/mac-arm64/DepthLens Pro.app` and a DMG in `electron-app/dist/`. To replace a stale install, quit the app, remove `/Applications/DepthLens Pro.app`, and copy/open the fresh artifact.
+
+#### B. macOS Apple Silicon native app with MiDaS Small ONNX
+```bash
+cd ~/Developer
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+scripts/build-native-macos.sh --with-onnx --onnx-models midas_small --onnx-strict
+cd electron-app && node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --onnx required --models midas_small
+open "dist/mac-arm64/DepthLens Pro.app"
+```
+
+#### C. macOS Apple Silicon native app with all ONNX weights
+```bash
+cd ~/Developer
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+scripts/build-native-macos.sh --with-onnx --onnx-models all --onnx-strict
+cd electron-app && node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --onnx require-all --models all
+open "dist/mac-arm64/DepthLens Pro.app"
+```
+
+#### D. Windows ARM native app without ONNX
+```powershell
+python --version
+node --version
+npm --version
+cd $HOME\source
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+.\scripts\build-native-windows.ps1 --without-onnx
+cd electron-app
+node scripts/verify-packaged-resources.js --platform win32 --arch arm64 --mode native --onnx off
+& ".\dist\win-arm64-unpacked\DepthLens Pro.exe"
+```
+Artifact: `electron-app\dist\win-arm64-unpacked` and an NSIS installer in `electron-app\dist`. Replace stale installs from Settings > Apps or remove `%LOCALAPPDATA%\Programs\DepthLens Pro` before installing/opening the fresh build.
+
+#### E. Windows ARM native app with MiDaS Small ONNX
+```powershell
+cd $HOME\source
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+.\scripts\build-native-windows.ps1 --with-onnx --onnx-models midas_small --onnx-strict
+cd electron-app
+node scripts/verify-packaged-resources.js --platform win32 --arch arm64 --mode native --onnx required --models midas_small
+& ".\dist\win-arm64-unpacked\DepthLens Pro.exe"
+```
+
+#### F. Windows ARM native app with all ONNX weights
+```powershell
+cd $HOME\source
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+.\scripts\build-native-windows.ps1 --with-onnx --onnx-models all --onnx-strict
+cd electron-app
+node scripts/verify-packaged-resources.js --platform win32 --arch arm64 --mode native --onnx require-all --models all
+& ".\dist\win-arm64-unpacked\DepthLens Pro.exe"
+```
+
+#### G. Linux ARM native app without ONNX
+```bash
+python3 --version
+node --version
+npm --version
+cd ~/src
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+scripts/build-native-linux.sh --without-onnx
+cd electron-app && node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx off
+chmod +x dist/*arm64*.AppImage && ./dist/*arm64*.AppImage
+```
+Artifact: `electron-app/dist/*arm64*.AppImage` and unpacked resources when retained by electron-builder. Replace stale desktop entries/AppImages under `/opt`, `/usr/local/bin`, or `~/.local/share/applications` before launching the fresh build.
+
+#### H. Linux ARM native app with MiDaS Small ONNX
+```bash
+cd ~/src
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+scripts/build-native-linux.sh --with-onnx --onnx-models midas_small --onnx-strict
+cd electron-app && node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx required --models midas_small
+chmod +x dist/*arm64*.AppImage && ./dist/*arm64*.AppImage
+```
+
+#### I. Linux ARM native app with all ONNX weights
+```bash
+cd ~/src
+git clone https://github.com/<owner>/DepthLensPro.git
+cd DepthLensPro
+scripts/build-native-linux.sh --with-onnx --onnx-models all --onnx-strict
+cd electron-app && node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx require-all --models all
+chmod +x dist/*arm64*.AppImage && ./dist/*arm64*.AppImage
+```
+
+### Terminal-only backend/frontend runbook
+
+Do not start a second backend on port `8765`; run `python scripts/diagnose_backend.py` first if unsure.
+
+#### J. macOS terminal-only without ONNX
+```bash
+cd ~/Developer && git clone https://github.com/<owner>/DepthLensPro.git && cd DepthLensPro
+scripts/setup-macos.sh --without-onnx
+venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+Terminal 2:
+```bash
+curl http://127.0.0.1:8765/live
+curl http://127.0.0.1:8765/ready
+curl http://127.0.0.1:8765/onnx/status
+cd electron-app && npm run start:dev
+```
+Stop with `Ctrl-C` in Terminal 1.
+
+#### K. macOS terminal-only with ONNX
+```bash
+cd ~/Developer && git clone https://github.com/<owner>/DepthLensPro.git && cd DepthLensPro
+scripts/setup-macos.sh --with-onnx --onnx-models midas_small --onnx-strict
+venv/bin/python backend/scripts/export_onnx.py --validate-only --model midas_small --strict
+venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+Use the same Terminal 2 `curl` and `npm run start:dev` commands as above.
+
+#### L. Windows ARM terminal-only without ONNX
+```powershell
+cd $HOME\source; git clone https://github.com/<owner>/DepthLensPro.git; cd DepthLensPro
+.\scripts\setup-windows.ps1 --without-onnx
+.\venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+Terminal 2:
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/live
+Invoke-RestMethod http://127.0.0.1:8765/ready
+Invoke-RestMethod http://127.0.0.1:8765/onnx/status
+cd electron-app; npm run start:dev
+```
+Stop with `Ctrl-C` in Terminal 1.
+
+#### M. Windows ARM terminal-only with ONNX
+```powershell
+cd $HOME\source; git clone https://github.com/<owner>/DepthLensPro.git; cd DepthLensPro
+.\scripts\setup-windows.ps1 --with-onnx --onnx-models midas_small --onnx-strict
+.\venv\Scripts\python.exe backend\scripts\export_onnx.py --validate-only --model midas_small --strict
+.\venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+Use the same Terminal 2 `Invoke-RestMethod` and `npm run start:dev` commands as above.
+
+#### N. Linux ARM terminal-only without ONNX
+```bash
+cd ~/src && git clone https://github.com/<owner>/DepthLensPro.git && cd DepthLensPro
+scripts/setup-linux.sh --without-onnx
+venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+Terminal 2:
+```bash
+curl http://127.0.0.1:8765/live
+curl http://127.0.0.1:8765/ready
+curl http://127.0.0.1:8765/onnx/status
+cd electron-app && npm run start:dev
+```
+Stop with `Ctrl-C` in Terminal 1.
+
+#### O. Linux ARM terminal-only with ONNX
+```bash
+cd ~/src && git clone https://github.com/<owner>/DepthLensPro.git && cd DepthLensPro
+scripts/setup-linux.sh --with-onnx --onnx-models midas_small --onnx-strict
+venv/bin/python backend/scripts/export_onnx.py --validate-only --model midas_small --strict
+venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
+```
+Use the same Terminal 2 `curl` and `npm run start:dev` commands as above.
+
+### Cross-platform diagnostics and troubleshooting
+
+Run diagnostics from the repo root on every supported platform:
+```bash
+python scripts/diagnose_backend.py
+```
+Windows equivalent:
+```powershell
+python .\scripts\diagnose_backend.py
+```
+The report includes platform, architecture, repo root, Python and venv Python versions, Node/npm versions, backend port occupancy, PID/command line where available, `/live`, `/ready`, `/onnx/status`, model and ONNX directories, ONNX file status for `midas_small`, `dpt_hybrid`, `dpt_large`, Electron log path, and platform-specific remediation commands. If PID discovery is unavailable, the diagnostic continues with a warning.
+
+Troubleshooting command blocks:
+
+- **Depth Engine Offline or `/live` timeout**: run `python scripts/diagnose_backend.py`, verify `/live`, and start only one backend on port `8765`.
+- **Port `8765` already in use**: macOS/Linux use `lsof -nP -iTCP:8765 -sTCP:LISTEN` when available or the diagnostic fallback; Windows use `Get-NetTCPConnection -LocalPort 8765 -State Listen` or the diagnostic fallback. Kill only a confirmed stale DepthLens PID.
+- **Stale backend PID files**: remove `backend.pid` and `backend.json` under the Electron user-data directory reported in diagnostics, then restart.
+- **Stale installed app copy**: replace `/Applications/DepthLens Pro.app` on macOS, uninstall/remove `%LOCALAPPDATA%\Programs\DepthLens Pro` on Windows, or replace old AppImage/desktop entries on Linux.
+- **ONNX files present in repo but missing in packaged app**: rebuild with `--with-onnx --onnx-models <selection>` and re-run `node scripts/verify-packaged-resources.js --platform <darwin|win32|linux> --arch arm64 --mode native --onnx required --models <selection>`.
+- **Redis unavailable**: use `DEPTHLENS_CACHE_BACKEND=memory`; Redis is optional for local setup.
+- **ONNX/CoreML warnings on macOS**: PyTorch MPS and ONNX Runtime providers are separate; `/onnx/status` reports the available provider fallback.
+- **ONNX provider fallback on Windows/Linux**: CPU fallback is expected unless the installed ONNX Runtime exposes DirectML, CUDA, OpenVINO, or another provider.
+- **DPT Hybrid/Large export warnings**: these large exports are optional unless `--onnx-strict`/`--onnx-models all` is used; PyTorch fallback remains available.
+- **Python dependency/import failure**: rerun the platform setup script and `venv/bin/python -m pip check` or `.\venv\Scripts\python.exe -m pip check`.
+- **npm install failure**: verify Node/npm, remove stale `electron-app/node_modules`, and rerun the setup script.
+- **zsh comment paste issue on macOS**: run `setopt interactivecomments` before pasting commented shell blocks.
+- **PowerShell execution policy on Windows**: run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` for the current shell.
+- **Linux missing `python3.12-venv`/distro package**: install the distro's matching Python venv package, then rerun `scripts/setup-linux.sh`.
+
+### Cross-platform PR acceptance criteria
+
+- macOS ARM native build still works.
+- Windows ARM native build still works.
+- Linux ARM native build still works.
+- ONNX prompt/flags behave consistently across macOS, Windows, and Linux.
+- Packaged ONNX verification works across macOS, Windows, and Linux.
+- `/live` is lightweight and platform-independent.
+- Electron startup recovery works across macOS, Windows, and Linux.
+- README contains complete clone-to-run command sequences for every supported platform and workflow.
+- No new macOS-only assumptions are introduced into shared setup, backend, frontend, Electron lifecycle, diagnostics, or verification code.
