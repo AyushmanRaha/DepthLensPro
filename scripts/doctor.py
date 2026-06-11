@@ -24,6 +24,11 @@ VENV = ROOT / "venv"
 MIN_VERSION = (3, 10)
 MAX_VERSION = (3, 12)
 REQUIRED_STDLIB = ("ensurepip", "ssl", "venv", "pyexpat")
+PYTHON_310_WARNING = (
+    "Python 3.10 was selected. The pinned backend dependencies are only guaranteed "
+    "on Python 3.11-3.12. If pip install fails, install Python 3.12 from "
+    "python.org and re-run."
+)
 SUPPORTED_ARCHES = {"arm64", "aarch64"}
 
 
@@ -43,7 +48,12 @@ class CheckResult:
 
 def _run(cmd: list[str], *, cwd: Path = ROOT, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     print(f"$ {' '.join(cmd)}")
-    return subprocess.run(cmd, cwd=cwd, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    try:
+        return subprocess.run(cmd, cwd=cwd, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    except subprocess.CalledProcessError as exc:
+        if exc.stdout:
+            print(exc.stdout, end="" if exc.stdout.endswith("\n") else "\n")
+        raise
 
 
 def _probe_python(command: list[str]) -> CheckResult:
@@ -86,17 +96,22 @@ def candidate_pythons() -> list[Candidate]:
     system = platform.system()
     candidates: list[Candidate] = []
     if system == "Darwin":
-        for minor in (12, 11, 10):
+        for minor in (12, 11):
             candidates.append(Candidate([f"/Library/Frameworks/Python.framework/Versions/3.{minor}/bin/python3"], f"python.org 3.{minor}"))
-        for minor in (12, 11, 10):
+        for minor in (12, 11):
             candidates.append(Candidate([f"/opt/homebrew/bin/python3.{minor}"], f"Homebrew Apple Silicon 3.{minor}"))
             candidates.append(Candidate([f"/usr/local/bin/python3.{minor}"], f"Homebrew Intel/Rosetta 3.{minor}"))
+        candidates.append(Candidate(["/Library/Frameworks/Python.framework/Versions/3.10/bin/python3"], "python.org 3.10"))
+        candidates.append(Candidate(["/opt/homebrew/bin/python3.10"], "Homebrew Apple Silicon 3.10"))
+        candidates.append(Candidate(["/usr/local/bin/python3.10"], "Homebrew Intel/Rosetta 3.10"))
         candidates.append(Candidate(["python3"], "PATH python3"))
     elif system == "Windows":
         for minor in (12, 11, 10):
             candidates.append(Candidate(["py", f"-3.{minor}"], f"Windows py launcher 3.{minor}"))
         candidates.append(Candidate(["python"], "PATH python"))
     else:
+        for minor in (12, 11):
+            candidates.append(Candidate([f"/usr/bin/python3.{minor}"], f"system python3.{minor}"))
         for minor in (12, 11, 10):
             candidates.append(Candidate([f"python3.{minor}"], f"PATH python3.{minor}"))
         candidates.append(Candidate(["python3"], "PATH python3"))
@@ -117,13 +132,14 @@ def find_python() -> tuple[list[str], CheckResult, list[tuple[Candidate, CheckRe
             continue
         result = _probe_python(cand.command)
         if result.ok:
+            print(f"Selected Python: {result.executable or ' '.join(cand.command)} (version {'.'.join(map(str, result.version or ()))})")
             return cand.command, result, failures
         failures.append((cand, result))
     lines = ["No working supported Python found (required: 3.10-3.12 with ensurepip, ssl, venv, pyexpat)."]
     for cand, res in failures:
         lines.append(f"- {cand.label} ({' '.join(cand.command)}): {res.error}")
     if platform.system() == "Darwin":
-        lines.append("Recommended macOS remediation: install Python 3.12 from https://www.python.org/downloads/macos/ if Homebrew Python fails ensurepip/pyexpat.")
+        lines.append("Recommended macOS remediation: install Python 3.12 from https://www.python.org/downloads/macos/ if Homebrew Python fails ensurepip/pyexpat. " + PYTHON_310_WARNING)
     elif platform.system() == "Windows":
         lines.append("Recommended Windows remediation: install Python 3.12 for ARM64/x64 from python.org and enable the py launcher.")
     else:
@@ -175,6 +191,10 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
     if args.enforce_arch and arch not in SUPPORTED_ARCHES:
         raise SystemExit(f"Unsupported native app architecture {platform.machine()}. Supported native builds are ARM64/aarch64.")
     selected_cmd, selected, failures = find_python()
+    if selected.version and selected.version[:2] == (3, 10):
+        print(f"WARNING: {PYTHON_310_WARNING}")
+    if platform.system() == "Darwin" and "zsh" in os.environ.get("SHELL", ""):
+        print("Tip: if pasting multi-line command blocks into Terminal causes 'zsh: command not found: #', run: setopt interactivecomments")
     status = existing_venv_status()
     if status is None or not status.ok:
         recreate_venv(selected_cmd)
@@ -190,6 +210,11 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
         raise SystemExit(pip_check.stdout)
     if not args.doctor_only:
         _run(["npm", "install"], cwd=ROOT / "electron-app")
+    (ROOT / "models" / "onnx").mkdir(parents=True, exist_ok=True)
+    for keep in [ROOT / "models" / ".gitkeep", ROOT / "models" / "onnx" / ".gitkeep"]:
+        if not keep.exists():
+            keep.touch()
+    print("Ensured models/onnx directory structure.")
     resources = _run(["npm", "run", "verify:resources"], cwd=ROOT / "electron-app", check=False)
     node_v = _run(["node", "--version"], check=False).stdout.strip() if shutil.which("node") else "missing"
     npm_v = _run(["npm", "--version"], check=False).stdout.strip() if shutil.which("npm") else "missing"

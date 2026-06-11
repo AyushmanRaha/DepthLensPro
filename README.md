@@ -207,151 +207,117 @@ The bundle identifier is `com.ayushmanraha.depthlens-pro`, and the product name 
 
 DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default. Electron starts that backend automatically for the native app; terminal-only development can start the same backend manually.
 
-> **Important:** do not create the virtual environment with a raw `python3 -m venv venv` command. Some systems now resolve `python3` to Python 3.14, which DepthLensPro does not support. Use the setup/doctor scripts below so the repo selects Python 3.10, 3.11, or 3.12, rejects broken Python installs before dependency installation, repairs bad project venvs, configures certificates, installs npm dependencies, and verifies packaged resources.
+### Section A — Prerequisites
 
-### Supported Platforms
+**macOS Apple Silicon prerequisites:** Install Git, Node.js + npm from nodejs.org, and Python 3.12 from python.org (recommended) or Homebrew. Do **not** use a bare `python3 -m venv`; use the setup scripts below so DepthLens Pro selects and validates the correct interpreter.
 
-| Native package status | Platform | Architecture | Recommended command |
-|---|---|---|---|
-| Supported | macOS Apple Silicon | `darwin arm64` | `scripts/build-native-macos.sh` |
-| Supported | Windows ARM | `win32 arm64` | `./scripts/build-native-windows.ps1` |
-| Supported | Linux ARM | `linux arm64` / `aarch64` | `scripts/build-native-linux.sh` |
-| Unsupported | Intel macOS / macOS x64 | `darwin x64` | Electron startup and x64 build scripts fail with a clear message. |
-| Unsupported | Windows x64 | `win32 x64` | x64 installers are intentionally not produced. |
-| Unsupported | Linux x64 | `linux x64` | x64 AppImages are intentionally not produced. |
+**Windows ARM prerequisites:** Install Git, Node.js + npm, and Python 3.12 for ARM64 from python.org with the `py` launcher enabled.
 
-The backend can still run PyTorch on CPU/CUDA/MPS/XPU where those runtimes are installed, but the desktop app packaging targets ARM platforms only.
+**Linux ARM prerequisites:** Install Git, Node.js + npm, and `python3.12` + `python3.12-venv` from your distro package manager.
 
-### Prerequisites
+### Section B — Native app build
 
-- Git.
-- Node.js and npm.
-- A working Python **3.10, 3.11, or 3.12** with `ensurepip`, `ssl`, `venv`, `pyexpat`, and `pip`.
-- macOS recommendation: install Python 3.12 from python.org if Homebrew Python fails `ensurepip` or `pyexpat` checks.
-- Windows recommendation: install Python 3.12 and the `py` launcher.
-- Linux recommendation: install `python3.12`/`python3.11` plus the matching `python3.x-venv` package.
+#### macOS Apple Silicon
 
-### Recommended one-command setup
+1. Clone the repository.
 
-From the repo root:
+   ```bash
+   git clone https://github.com/AyushmanRaha/DepthLensPro.git
+   cd DepthLensPro
+   ```
 
-```bash
-# macOS Apple Silicon
-scripts/setup-macos.sh
+2. Run the one-command setup + native build.
 
-# Linux ARM
-scripts/setup-linux.sh
-```
+   ```bash
+   scripts/build-native-macos.sh
+   ```
 
-Windows PowerShell:
+   This runs the doctor, creates the venv with Python 3.12, installs backend deps, npm installs, cleans stale dist, verifies resources, and builds the `.app`.
 
-```powershell
-./scripts/setup-windows.ps1
-```
+3. Open the app.
 
-Cross-platform root npm aliases are also provided:
+   ```bash
+   open "electron-app/dist/mac-arm64/DepthLens Pro.app"
+   ```
 
-```bash
-npm run setup
-npm run doctor
-npm run verify:resources
-```
+#### Windows ARM
 
-The setup flow prints a final summary with platform, architecture, selected Python path/version, venv Python, pip, Node, npm, backend dependency status, resource verification status, and ONNX status.
+1. Clone the repository.
 
-### Native App Build / Install by Platform
+   ```powershell
+   git clone https://github.com/AyushmanRaha/DepthLensPro.git
+   cd DepthLensPro
+   ```
 
-macOS Apple Silicon:
+2. Run in PowerShell:
 
-```bash
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-scripts/build-native-macos.sh
-open "electron-app/dist/mac-arm64/DepthLens Pro.app"
-```
+   ```powershell
+   .\scripts\build-native-windows.ps1
+   ```
 
-Linux ARM:
+3. Install the generated NSIS installer from `electron-app/dist/`.
 
-```bash
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-scripts/build-native-linux.sh
-./electron-app/dist/DepthLens\ Pro-*-linux-arm64.AppImage
-```
+#### Linux ARM
 
-Windows ARM PowerShell:
+1. Clone the repository.
 
-```powershell
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-./scripts/build-native-windows.ps1
-```
+   ```bash
+   git clone https://github.com/AyushmanRaha/DepthLensPro.git
+   cd DepthLensPro
+   ```
 
-The native build wrappers run setup first, verify resources in native packaging mode, and then call the Electron ARM build script. The Electron package includes `backend`, `frontend`, the repo-root `venv`, and `models` so `models/onnx` is available under packaged resources.
+2. Run:
 
-### Optional ONNX export
+   ```bash
+   scripts/build-native-linux.sh
+   ```
 
-ONNX acceleration is optional; PyTorch fallback remains available. MiDaS Small is the recommended first export because it is lightweight and now uses the same static input size as its runtime transform: `1x3x256x256`.
+3. Run the AppImage:
 
-```bash
-# Export or reuse only MiDaS Small, with atomic validation.
-venv/bin/python backend/scripts/export_onnx.py --model midas_small --force
+   ```bash
+   ./electron-app/dist/DepthLens\ Pro-*-linux-arm64.AppImage
+   ```
 
-# Validate existing ONNX files without exporting.
-venv/bin/python backend/scripts/export_onnx.py --validate-only --all
+### Section C — Terminal-only local development (no Electron, backend only)
 
-# Require every selected model to validate, including optional DPT models.
-venv/bin/python backend/scripts/export_onnx.py --validate-only --all --require-all
-```
+1. Run setup (creates venv, installs deps):
 
-The exporter is non-interactive, passes Torch Hub trust options, configures HTTPS certificates through `certifi` when available, writes to a temporary file, validates with `onnx.checker`, creates an ONNX Runtime `InferenceSession`, runs a dummy inference using the registry input shape, and only then atomically replaces the final `.onnx` path. Failed exports are quarantined with a timestamped `.failed` suffix instead of being left at the runtime path.
+   ```bash
+   npm run setup          # macOS/Linux
+   npm run setup:win      # Windows PowerShell
+   ```
 
-DPT Hybrid and DPT Large ONNX files are treated as optional because exporter/runtime support can vary by PyTorch, ONNX, and ONNX Runtime provider. If they cannot be validated, the app reports the precise diagnostic and continues to offer PyTorch inference/benchmark fallback.
+2. Start the FastAPI backend:
 
-### Terminal-only Local Test / Development Mode
+   ```bash
+   npm run backend:dev
+   ```
 
-```bash
-# 1. Setup once from the repo root.
-scripts/setup-macos.sh        # macOS Apple Silicon
-# or: scripts/setup-linux.sh   # Linux ARM
-# or: ./scripts/setup-windows.ps1
+3. In a second terminal, start the Electron dev shell:
 
-# 2. Start backend only.
-npm run backend:dev
+   ```bash
+   npm run frontend:dev
+   ```
 
-# 3. In another terminal, start Electron/frontend dev shell.
-npm run frontend:dev
+4. Verify the backend is live:
 
-# 4. Stop a DepthLens-owned backend process if needed.
-npm run stop:backend
-```
+   ```bash
+   curl http://127.0.0.1:8765/live
+   ```
 
-Direct backend verification:
+### Section D — Troubleshooting
 
-```bash
-curl http://127.0.0.1:8765/live
-curl http://127.0.0.1:8765/ready
-curl http://127.0.0.1:8765/onnx/status
-```
+**Symptom:** "pip install failed" with CalledProcessError but no visible pip output. **Cause:** Python 3.10 was selected but the pinned deps require Python 3.11+. **Fix:** Install Python 3.12 from python.org, delete the venv (`rm -rf venv`), and re-run the setup script.
 
-### Advanced/manual commands
+**Symptom:** App opens but shows "Required app resources were not found" / models/onnx missing. **Cause:** The models/onnx directory was not present or was dropped by electron-builder. **Fix:** Ensure `models/onnx/.gitkeep` is committed, then run `rm -rf electron-app/dist` and re-run the build script.
 
-Use these only if you are debugging setup itself. The project venv must still be created with a supported Python selected by the doctor:
+**Symptom:** `zsh: command not found: #` when pasting commands. **Cause:** zsh interactive comments are disabled. **Fix:** Run `setopt interactivecomments` in your terminal session, or paste commands without comment lines.
 
-```bash
-python3 scripts/doctor.py --doctor-only
-python3 scripts/doctor.py
-cd electron-app && npm run verify:resources -- --mode native --onnx optional
-cd electron-app && npm run build:mac:arm64
-```
+**Symptom:** `/live` returns `ok`, but inference controls stay disabled. **Cause:** `/ready` found a missing required Python module such as `torch`, `cv2`, `PIL`, `fastapi`, `uvicorn`, or `numpy`. **Fix:** Activate the repo-root virtual environment and run `python -m pip install -r backend/requirements.txt && venv/bin/python -m pip check`.
 
-### Final verification checklist
+**Symptom:** MiDaS Small ONNX Performance Analysis is unavailable. **Cause:** ONNX acceleration is optional and the ONNX file may not have been exported. **Fix:** Run `venv/bin/python backend/scripts/export_onnx.py --model midas_small --force`; PyTorch fallback remains available.
 
-- `GET /live` returns `{"status":"ok"}` quickly. During heavy benchmarks it may include `"busy": true`, but it should remain responsive.
-- `GET /ready` returns `status: ready` when required runtime modules import successfully.
-- MiDaS Small PyTorch inference works even if ONNX is unavailable.
-- MiDaS Small ONNX Performance Analysis works after `backend/scripts/export_onnx.py --model midas_small --force` and uses `1x3x256x256` input.
-- DPT Hybrid/Large either pass ONNX validation or show `optional_unavailable`, `invalid_checker`, `invalid_session`, `invalid_dummy_inference`, `missing`, or `runtime_unavailable` diagnostics while keeping PyTorch fallback available.
+**Symptom:** DPT Hybrid or DPT Large ONNX is unavailable. **Cause:** Those exports are large and provider/tooling-sensitive. **Fix:** Treat them as optional unless `--require-all` is passed; PyTorch fallback remains available and diagnostics identify the precise validation failure.
 
 ## API Surface
 

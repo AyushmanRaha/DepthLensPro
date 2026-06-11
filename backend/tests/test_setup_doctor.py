@@ -11,8 +11,10 @@ import doctor  # type: ignore  # noqa: E402
 
 
 def test_supported_python_version_range() -> None:
-    assert doctor.MIN_VERSION <= (3, 10) <= doctor.MAX_VERSION
     assert doctor.MIN_VERSION <= (3, 12) <= doctor.MAX_VERSION
+    assert doctor.MIN_VERSION <= (3, 11) <= doctor.MAX_VERSION
+    assert doctor.MIN_VERSION <= (3, 10) <= doctor.MAX_VERSION
+    # 3.10 is still in range but the doctor warns about it
     assert not (doctor.MIN_VERSION <= (3, 14) <= doctor.MAX_VERSION)
     assert not (doctor.MIN_VERSION <= (3, 9) <= doctor.MAX_VERSION)
 

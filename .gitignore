@@ -72,3 +72,5 @@ backend/onnx_weights/*.onnx
 *.pid
 backend.pid
 *.log
+!models/.gitkeep
+!models/onnx/.gitkeep
