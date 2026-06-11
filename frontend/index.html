@@ -11,6 +11,7 @@
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' https://fonts.gstatic.com data:;
         img-src 'self' data: blob:;
+        media-src 'self' blob:;
         connect-src 'self' http://127.0.0.1:*;
         object-src 'none';
         base-uri 'self';
@@ -134,6 +135,7 @@
             aria-label="Main navigation"
           >
             <button class="nav-btn active" data-panel="main">WORKSPACE</button>
+            <button class="nav-btn" data-panel="webcam">WEBCAM</button>
             <button class="nav-btn" data-panel="compare">COMPARE</button>
             <button class="nav-btn" data-panel="performance">PERFORMANCE</button>
             <button class="nav-btn" data-panel="experiments">EXPERIMENTS</button>
@@ -500,6 +502,106 @@
           </section>
         </div>
       </main>
+
+      <!-- ── Real-time webcam depth panel ─────────────────────────────── -->
+      <main class="panel" id="panel-webcam" hidden>
+        <div class="webcam-layout">
+          <section class="card webcam-hero" aria-labelledby="webcamHeading">
+            <div>
+              <h2 class="card-title" id="webcamHeading">
+                <span class="card-icon">◉</span> Real-Time Webcam Depth
+              </h2>
+              <p class="webcam-desc">
+                Sample live camera frames, send them through the existing local
+                <code>/estimate</code> endpoint, and preview depth maps without
+                changing the FastAPI/Electron boundary.
+              </p>
+              <p class="webcam-hint">Your browser or Electron shell will ask for camera permission. Frames are sampled at a capped target FPS and stay on localhost.</p>
+            </div>
+            <span class="webcam-status-pill" id="webcamStatusPill" aria-live="polite">Camera stopped · inference idle</span>
+          </section>
+
+          <section class="card webcam-controls-card" aria-labelledby="webcamControlsHeading">
+            <h2 class="card-title" id="webcamControlsHeading">
+              <span class="card-icon">▣</span> Webcam Controls
+            </h2>
+            <div class="webcam-control-grid">
+              <button class="btn btn-primary" id="webcamStartBtn" type="button">▶ Start Camera</button>
+              <button class="btn btn-danger" id="webcamStopBtn" type="button" disabled>■ Stop Camera</button>
+              <button class="btn btn-ghost" id="webcamPauseBtn" type="button" disabled>Pause Inference</button>
+              <button class="btn btn-outline" id="webcamCaptureBtn" type="button" disabled>⇩ Capture Depth Frame</button>
+              <label class="webcam-control-field" for="webcamTargetFps">
+                <span>Target FPS</span>
+                <select class="select-input" id="webcamTargetFps">
+                  <option value="1">1 FPS</option>
+                  <option value="2" selected>2 FPS</option>
+                  <option value="3">3 FPS</option>
+                  <option value="5">5 FPS</option>
+                </select>
+              </label>
+              <label class="webcam-control-field" for="webcamMaxDim">
+                <span>Frame max dimension</span>
+                <select class="select-input" id="webcamMaxDim">
+                  <option value="256">256 px</option>
+                  <option value="384" selected>384 px</option>
+                  <option value="512">512 px</option>
+                </select>
+              </label>
+              <label class="webcam-control-field" for="webcamSmoothing">
+                <span>Visual smoothing</span>
+                <select class="select-input" id="webcamSmoothing">
+                  <option value="0">Off</option>
+                  <option value="0.25" selected>Low</option>
+                  <option value="0.45">Medium</option>
+                  <option value="0.65">High</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="card webcam-preview-card" aria-labelledby="webcamPreviewHeading">
+            <h2 class="card-title" id="webcamPreviewHeading">
+              <span class="card-icon">▣</span> Live Preview
+            </h2>
+            <div class="webcam-preview-grid">
+              <div class="webcam-preview-tile">
+                <div class="webcam-preview-label">RGB Camera</div>
+                <video class="webcam-video" id="webcamVideo" autoplay muted playsinline aria-label="Live RGB webcam preview"></video>
+                <canvas id="webcamCaptureCanvas" hidden></canvas>
+              </div>
+              <div class="webcam-preview-tile">
+                <div class="webcam-preview-label">Latest Depth</div>
+                <div class="webcam-depth-stage">
+                  <img class="webcam-depth-img" id="webcamDepthImg" alt="Latest webcam depth map" />
+                  <div class="webcam-placeholder" id="webcamDepthPlaceholder">Start camera inference to see depth frames.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card webcam-telemetry-card" aria-labelledby="webcamTelemetryHeading" aria-live="polite">
+            <h2 class="card-title" id="webcamTelemetryHeading">
+              <span class="card-icon">◈</span> Live Telemetry
+            </h2>
+            <div class="webcam-telemetry-grid">
+              <div class="metric-cell"><span class="metric-value" id="webcamCameraState">Stopped</span><span class="metric-label">Camera State</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamInferenceState">Idle</span><span class="metric-label">Inference State</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamTargetFpsMetric">2</span><span class="metric-label">Target FPS</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamEffectiveFps">0.00</span><span class="metric-label">Processed FPS</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamBackendLatency">—</span><span class="metric-label">Backend Latency</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamEndToEndLatency">—</span><span class="metric-label">End-to-End Latency</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamProcessedFrames">0</span><span class="metric-label">Processed Frames</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamSkippedFrames">0</span><span class="metric-label">Skipped Frames</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamErrorCount">0</span><span class="metric-label">Error Count</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamActiveModel">MiDaS_small</span><span class="metric-label">Active Model</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamActiveDevice">auto</span><span class="metric-label">Active Device</span></div>
+              <div class="metric-cell"><span class="metric-value" id="webcamActiveColormap">inferno</span><span class="metric-label">Active Colormap</span></div>
+            </div>
+            <div class="webcam-log" id="webcamLog" aria-label="Webcam event log"></div>
+          </section>
+        </div>
+      </main>
+
 
       <!-- ── Model comparison panel ──────────────────────────────────── -->
       <main class="panel" id="panel-compare" hidden>
