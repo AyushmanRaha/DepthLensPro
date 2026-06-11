@@ -158,7 +158,8 @@ flowchart TB
 3. The renderer waits for `/ready` before enabling inference controls, then loads `/health`, `/devices`, `/models`, `/colormaps`, `/cache/metrics`, and `/onnx/status` for diagnostics.
 4. `/estimate` decodes one image, normalizes model/device/output options, optionally decodes a GT depth file, runs inference, computes requested metrics, caches eligible responses, and returns base64 image outputs.
 5. `/batch` applies the same inference path to up to 10 image uploads and reports per-file success or failure.
-6. `/benchmark` compares the PyTorch path against ONNX Runtime when an exported ONNX graph and compatible provider are available.
+6. `/api/reconstruct` reuses the local inference/depth-cache path to export an approximate colored PLY/OBJ point cloud from relative monocular depth.
+7. `/benchmark` compares the PyTorch path against ONNX Runtime when an exported ONNX graph and compatible provider are available.
 
 ## Quick Start / Runbook
 
@@ -173,7 +174,7 @@ This section is intentionally detailed. If you are new to the project, follow it
 | Path C: Backend Only | You only need the HTTP API, tests, or diagnostics. | FastAPI only. | Yes, for API work. |
 | Path D: Docker Compose | You want the backend service and Redis in containers. | Backend container plus Redis container. | Optional; requires Docker. |
 
-> Native packaging scripts enforce ARM64/aarch64. Intel Mac, Windows x64, Linux x64, and macOS universal native packages are intentionally blocked by the current build scripts.
+> Native packaging scripts enforce ARM64/aarch64. The macOS packaged target is macOS Apple Silicon only, the Windows packaged target is Windows ARM only, and the Linux packaged target is Linux ARM only; Intel Mac / macOS x64, Windows x64, Linux x64, and macOS universal native packages are intentionally blocked by the current build scripts.
 
 ### Prerequisites
 
@@ -867,7 +868,7 @@ Docker Compose:
 docker compose up --build
 ```
 
-Unsupported native packaging targets are explicitly wired to fail: macOS x64, macOS universal, Windows x64, and Linux x64. The backend can run on other machines when Python dependencies install successfully, but the native app packaging scripts are ARM64-only in this repository.
+The packaging verification script `verify-packaged-resources.js` checks packaged resources. Unsupported native packaging targets are explicitly wired to fail: macOS x64, macOS universal, Windows x64, and Linux x64. The backend can run on other machines when Python dependencies install successfully, but the native app packaging scripts are ARM64-only in this repository.
 
 ## API Reference
 
@@ -892,7 +893,30 @@ http://127.0.0.1:8765
 | `GET` | `/cache/metrics` | Cache backend, hit/miss, keyspace, Redis, TTL, and memory-limit metrics. |
 | `DELETE` | `/cache` | Clear Redis and in-memory cache entries. |
 | `POST` | `/estimate` | Single-image depth estimation with optional GT file and configurable metrics/outputs. |
+| `POST` | `/api/reconstruct` | Backend-only 3D reconstruction API that returns a base64 colored PLY/OBJ point-cloud artifact, depth preview PNG, preview points, and reconstruction metadata. |
+| `POST` | `/reconstruct` | Alias for `/api/reconstruct`. |
 | `POST` | `/batch` | Batch depth estimation for up to 10 image files. |
+
+`/api/reconstruct` form fields:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `file` | upload | required | Must be an `image/*` upload; max 20 MB. |
+| `model` | string | `MiDaS_small` | Uses the same canonical model validation and local inference pipeline as `/estimate`. |
+| `device` | string | `auto` | Resolved with the same device validation as `/estimate`. |
+| `colormap` | string | `inferno` | Depth preview colormap. |
+| `max_dim` | integer | `DEPTHLENS_MAX_DIM` | Optional long-edge resize limit before inference/reconstruction. |
+| `export_format` | string | `ply` | `ply` or `obj`; returned as base64 in `artifact_base64`. |
+| `max_points` | integer | `120000` | Reconstructed point budget, bounded by the backend for safe response sizes. |
+| `preview_points` | integer | `5000` | JSON preview point budget for a future WebGL/canvas panel. |
+| `focal_scale` | float | `1.2` | Approximate pinhole focal length multiplier; this is not metric calibration. |
+| `depth_scale` | float | `1.0` | Relative Z scale applied after percentile stabilization. |
+| `depth_near_percentile` / `depth_far_percentile` | float | `2.0` / `98.0` | Percentile range used to stabilize relative monocular depth before projection. |
+| `sampling` | string | `grid` | `grid` or deterministic `random`. |
+| `include_rgb` | boolean | `true` | Include RGB vertex colors converted from uploaded image pixels. |
+| `coordinate_system` | string | `y_up` | `y_up` for frontend-friendly previews or `camera` for image-coordinate Y. |
+
+The exported point cloud is approximate because monocular depth is relative, not metric-scale accurate. This Stage 1 backend endpoint does not write artifacts to disk and does not add the frontend 3D panel; Stage 2 will replace the current ABOUT tab with the 3D Reconstruction tab/panel that consumes this API.
 
 `/estimate` form fields:
 
