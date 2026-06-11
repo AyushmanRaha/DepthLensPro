@@ -23,3 +23,6 @@ DEPTHLENS_SKIP_WARMUP=1
 DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1
 DEPTHLENS_CACHE_BACKEND=memory
 ONNX_WEIGHTS_DIR=/workspace/DepthLensPro/models/onnx
+
+For frontend overhaul tasks, read and follow CODEX_FRONTEND_OVERHAUL.md.
+Do not modify files outside the allowed list in that markdown.
