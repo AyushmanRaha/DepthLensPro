@@ -136,6 +136,64 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     assert second.json()["cached"] is True
     assert calls["count"] == 1
 
+def test_estimate_generic_failure_uses_sanitized_error(monkeypatch: Any) -> None:
+    cache_service.clear()
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+
+    def fail_process(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("secret path /tmp/model.onnx")
+
+    monkeypatch.setattr("backend.api.routes.process_image", fail_process)
+
+    response = client.post(
+        "/estimate",
+        files={"file": ("sample.png", io.BytesIO(b"unique-failure-image"), "image/png")},
+        data={"device": "auto"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "error_code": "INFERENCE_FAILED",
+        "message": "Inference failed",
+    }
+
+
+def test_batch_rejects_non_image_upload_before_processing(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("non-image batch item should not reach inference")
+
+    monkeypatch.setattr("backend.api.routes.process_image", fail_if_called)
+
+    response = client.post(
+        "/batch",
+        files=[("files", ("notes.txt", io.BytesIO(b"not image"), "text/plain"))],
+        data={"device": "auto"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["succeeded"] == 0
+    assert payload["failed"] == 1
+    assert payload["errors"][0]["error"] == "Expected an image file"
+
 
 def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
     def fake_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:

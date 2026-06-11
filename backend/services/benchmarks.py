@@ -23,7 +23,7 @@ _AUTO_EXPORT_LOCKS: dict[str, threading.Lock] = {}
 _AUTO_EXPORT_LOCKS_GUARD = threading.Lock()
 
 
-def _env_flag(name: str, default: bool = True) -> bool:
+def _env_flag(name: str, default: bool = False) -> bool:
     """Return a permissive boolean environment flag value."""
 
     raw = os.getenv(name)
@@ -45,8 +45,8 @@ def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any
     exportable_states = {"missing_weights", "missing_model_file", "missing", "invalid/corrupt"}
     if onnx_diag.get("state") not in exportable_states:
         return onnx_diag
-    if not _env_flag("DEPTHLENS_AUTO_EXPORT_ONNX", True):
-        return onnx_diag
+    if not _env_flag("DEPTHLENS_AUTO_EXPORT_ONNX", False):
+        return {**onnx_diag, "auto_export_enabled": False}
 
     requested_device = str(onnx_diag.get("runtime", {}).get("requested_device", "auto"))
     with _auto_export_lock(model):

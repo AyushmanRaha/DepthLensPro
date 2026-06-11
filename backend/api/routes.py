@@ -110,10 +110,13 @@ router = APIRouter()
 
 
 def _dependency_unavailable(exc: Exception) -> HTTPException:
+    log.warning("Inference runtime dependency unavailable: %s: %s", type(exc).__name__, exc)
     return HTTPException(
         503,
-        "Inference runtime is not ready. Check /ready for dependency diagnostics: "
-        f"{type(exc).__name__}: {exc}",
+        {
+            "error_code": "INFERENCE_RUNTIME_UNAVAILABLE",
+            "message": "Inference runtime is not ready. Check /ready for dependency diagnostics.",
+        },
     )
 
 
@@ -643,7 +646,10 @@ async def estimate(
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
         log.exception("Inference failed")
-        raise HTTPException(500, f"Inference error: {exc}") from exc
+        raise HTTPException(
+            500,
+            {"error_code": "INFERENCE_FAILED", "message": "Inference failed"},
+        ) from exc
 
     if ck is not None:
         _cache_service().set(ck, result)
@@ -690,6 +696,8 @@ async def batch(
     errors: list[dict[str, str | None]] = []
     for upload in files:
         try:
+            if not (upload.content_type or "").startswith("image/"):
+                raise ValueError("Expected an image file")
             raw = await upload.read()
             if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
                 raise ValueError("File too large")

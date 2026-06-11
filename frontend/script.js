@@ -88,6 +88,30 @@ function apiUrl(path) {
   return buildApiUrl(API || DEFAULT_API_BASE_URL, path);
 }
 
+function timeoutSignal(ms) {
+  if (window.AbortSignal?.timeout) return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+function anySignal(signals) {
+  const liveSignals = signals.filter(Boolean);
+  if (window.AbortSignal?.any) return AbortSignal.any(liveSignals);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  for (const signal of liveSignals) {
+    if (signal.aborted) { abort(); break; }
+    signal.addEventListener("abort", abort, { once: true });
+  }
+  return controller.signal;
+}
+
+function requestSignal(signal, timeoutMs) {
+  const timeout = timeoutSignal(timeoutMs);
+  return signal ? anySignal([signal, timeout]) : timeout;
+}
+
 async function apiFetch(path, options = {}) {
   const base = await resolveApiBaseUrl();
   const url = buildApiUrl(base, path);
@@ -97,7 +121,10 @@ async function apiFetch(path, options = {}) {
       let detail = `HTTP ${res.status}`;
       try {
         const err = await res.clone().json();
-        detail = err.detail || err.error || detail;
+        const rawDetail = err.detail || err.error || detail;
+        detail = typeof rawDetail === "object"
+          ? (rawDetail.message || rawDetail.error_code || JSON.stringify(rawDetail))
+          : rawDetail;
       } catch {}
       throw new Error(`${detail} (${url})`);
     }
@@ -740,7 +767,7 @@ async function checkReadiness({ quiet = true } = {}) {
   if (!backendOnline) { inferenceReady = false; return false; }
   const started = performance.now();
   try {
-    const res = await apiFetch("/ready", { signal: AbortSignal.timeout(5000) });
+    const res = await apiFetch("/ready", { signal: timeoutSignal(5000) });
     const data = await res.json();
     readinessDetails = data;
     inferenceReady = Boolean(data.inference_ready);
@@ -749,7 +776,8 @@ async function checkReadiness({ quiet = true } = {}) {
     } else {
       const summary = readinessSummary(data);
       setStatus("offline", "Depth Engine: Degraded", summary);
-      el.deviceInfoBanner.querySelector("span:last-child").textContent = `Inference runtime degraded: ${summary}`;
+      const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
+      if (bannerText) bannerText.textContent = `Inference runtime degraded: ${summary}`;
       if (!quiet) toastOnce(`Inference runtime is not ready: ${summary}`, "error", 8000);
     }
     logEndpointTiming("/ready", started, inferenceReady);
@@ -770,9 +798,8 @@ async function loadCacheMetrics({ signal } = {}) {
   if (!backendOnline || document.hidden) return false;
   const started = performance.now();
   try {
-    const timeout = AbortSignal.timeout(8000);
     const res = await apiFetch("/cache/metrics", {
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout
+      signal: requestSignal(signal, 8000)
     });
     applyCacheMetrics(await res.json());
     logEndpointTiming("/cache/metrics", started, true);
@@ -795,7 +822,7 @@ async function checkLive({ quiet = false, signal } = {}) {
   if (!quiet) setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
   const started = performance.now();
   try {
-    const res = await apiFetch("/live", { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2500)]) : AbortSignal.timeout(2500) });
+    const res = await apiFetch("/live", { signal: requestSignal(signal, 2500) });
     const data = await res.json();
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
@@ -808,7 +835,8 @@ async function checkLive({ quiet = false, signal } = {}) {
     backendOnline = false;
     inferenceReady = false;
     setStatus("offline","Depth Engine: Offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
-    el.deviceInfoBanner.querySelector("span:last-child").textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
+    const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
+    if (bannerText) bannerText.textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
     if (!quiet) toastOnce(`Backend liveness check failed: ${err.message}`, "error", 6000);
     syncQueueControls();
     return false;
@@ -822,7 +850,7 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
   if (!signal) state.healthAbort = controller;
   const requestSignal = signal || controller.signal;
   try {
-    const res = await apiFetch("/health", { signal: AbortSignal.any([requestSignal, AbortSignal.timeout(6000)]) });
+    const res = await apiFetch("/health", { signal: anySignal([requestSignal, timeoutSignal(6000)]) });
     const data = await res.json();
     applyCacheMetrics(data.cache_metrics);
     const devs = data.devices || state.devices || {};
@@ -894,7 +922,7 @@ function currentSelectedDevice(fallback = "auto") {
 async function loadDevices(devs, primaryFromHealth = null) {
   if (!devs || !Object.keys(devs).length) {
     try {
-      const r = await apiFetch("/devices",{signal:AbortSignal.timeout(3000)});
+      const r = await apiFetch("/devices",{signal:timeoutSignal(3000)});
       const payload = await r.json();
       devs = payload.devices || {};
       primaryFromHealth = payload.primary_device || primaryFromHealth;
@@ -1035,7 +1063,8 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
 }
 
 function updateDeviceInfoBanner(text) {
-  el.deviceInfoBanner.querySelector("span:last-child").textContent = `Detected: ${text}. Choose compute target below.`;
+  const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
+  if (bannerText) bannerText.textContent = `Detected: ${text}. Choose compute target below.`;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1135,11 +1164,13 @@ function removeFile(id) {
 
 function syncQueueControls() {
   const has = state.files.length>0;
-  el.clearBtn.disabled = !has || Boolean(state.abort);
+  if (el.clearBtn) el.clearBtn.disabled = !has || Boolean(state.abort);
   const ready = engineReady();
   const gtBlocked = state.gtMode && (state.files.length !== 1 || !state.gtFile);
-  el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !ready || gtBlocked;
-  if (el.runBtn) el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready; open Diagnostics or check /ready" : (gtBlocked ? "GT mode requires exactly one source image and one GT depth file" : "")));
+  if (el.runBtn) {
+    el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !ready || gtBlocked;
+    el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready; open Diagnostics or check /ready" : (gtBlocked ? "GT mode requires exactly one source image and one GT depth file" : "")));
+  }
 }
 
 function setFileSt(id,cls,txt) {
@@ -1147,13 +1178,13 @@ function setFileSt(id,cls,txt) {
   s.className=`file-status ${cls}`; s.textContent=txt;
 }
 
-el.fileInput.addEventListener("change",()=>{ addFiles(el.fileInput.files); el.fileInput.value=""; });
-el.dropZone.addEventListener("dragover",e=>{ e.preventDefault(); el.dropZone.classList.add("drag-over"); });
-el.dropZone.addEventListener("dragleave",e=>{ if (!el.dropZone.contains(e.relatedTarget)) el.dropZone.classList.remove("drag-over"); });
-el.dropZone.addEventListener("drop",e=>{ e.preventDefault(); el.dropZone.classList.remove("drag-over"); addFiles(e.dataTransfer.files); });
-el.dropZone.addEventListener("click",e=>{ if (e.target.closest("#fileInput")) return; el.fileInput.click(); });
-el.dropZone.addEventListener("keydown",e=>{ if (e.key==="Enter"||e.key===" "){e.preventDefault();el.fileInput.click();} });
-el.clearBtn.addEventListener("click",()=>{ state.files=[]; el.fileQueue.innerHTML=""; syncQueueControls(); });
+el.fileInput?.addEventListener("change",()=>{ addFiles(el.fileInput.files); el.fileInput.value=""; });
+el.dropZone?.addEventListener("dragover",e=>{ e.preventDefault(); el.dropZone.classList.add("drag-over"); });
+el.dropZone?.addEventListener("dragleave",e=>{ if (!el.dropZone.contains(e.relatedTarget)) el.dropZone.classList.remove("drag-over"); });
+el.dropZone?.addEventListener("drop",e=>{ e.preventDefault(); el.dropZone.classList.remove("drag-over"); addFiles(e.dataTransfer.files); });
+el.dropZone?.addEventListener("click",e=>{ if (e.target.closest("#fileInput")) return; el.fileInput.click(); });
+el.dropZone?.addEventListener("keydown",e=>{ if (e.key==="Enter"||e.key===" "){e.preventDefault();el.fileInput.click();} });
+el.clearBtn?.addEventListener("click",()=>{ state.files=[]; el.fileQueue.innerHTML=""; syncQueueControls(); });
 
 // ══════════════════════════════════════════════════════════════
 // INFERENCE
@@ -1191,8 +1222,8 @@ function fmtDuration(ms) {
   return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ${s%60}s`;
 }
 
-el.runBtn.addEventListener("click",runBatch);
-el.cancelBtn.addEventListener("click",cancelBatch);
+el.runBtn?.addEventListener("click",runBatch);
+el.cancelBtn?.addEventListener("click",cancelBatch);
 
 function cancelBatch() {
   if (state.abort) { state.abort.abort(); state.abort=null; }
@@ -1255,7 +1286,7 @@ async function runBatch() {
   }
 
   const elapsed=Date.now()-batchStart;
-  const done=pending.filter(e=>e.status==="done").length;
+  const done=pending.filter(e=>e.status==="done"||e.status==="completed_with_warning").length;
   setProgress(100,`Done — ${done} image${done!==1?"s":""} in ${fmtDuration(elapsed)}`,"");
   if (done>0) toast(`Batch complete — ${done} succeeded`,"success");
   } catch (err) {
@@ -1283,7 +1314,7 @@ async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs
   if (!engineReady()) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
   const res=await apiFetch("/estimate",{
     method:"POST", body:fd,
-    signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000),
+    signal: requestSignal(signal, 180_000),
   });
   return res.json();
 }
@@ -1343,8 +1374,8 @@ function appendGalleryItem(r) {
   el.gallery.appendChild(item);
 }
 
-el.clearResultsBtn.addEventListener("click",()=>{ state.results=[]; el.gallery.innerHTML=""; el.resultsCard.hidden=true; });
-el.downloadAllBtn.addEventListener("click",()=>{
+el.clearResultsBtn?.addEventListener("click",()=>{ state.results=[]; el.gallery.innerHTML=""; el.resultsCard.hidden=true; });
+el.downloadAllBtn?.addEventListener("click",()=>{
   if (!state.results.length) return;
   state.results.forEach(r=>dlB64(`depth_${r.filename}`,r.depth_map));
   toast(`Downloading ${state.results.length} depth maps…`);
@@ -1532,34 +1563,34 @@ function closeLightbox() {
     finalize();
   };
   lightboxTransitionCleanup = () => el.lightboxBackdrop.removeEventListener("transitionend",onDone);
-  el.lightboxBackdrop.addEventListener("transitionend",onDone, { once: true });
+  el.lightboxBackdrop?.addEventListener("transitionend",onDone, { once: true });
   lightboxCloseTimer=setTimeout(finalize,420);
 }
 
-el.lightboxClose.addEventListener("click",closeLightbox);
-el.lightboxBackdrop.addEventListener("click",e=>{ if (e.target===el.lightboxBackdrop) closeLightbox(); });
+el.lightboxClose?.addEventListener("click",closeLightbox);
+el.lightboxBackdrop?.addEventListener("click",e=>{ if (e.target===el.lightboxBackdrop) closeLightbox(); });
 document.addEventListener("keydown",e=>{ if (e.key==="Escape") closeLightbox(); });
-el.lbSlider.addEventListener("input",()=>{ updateBlendPreview(); });
-el.lbDlDepth.addEventListener("click",()=>{ const r=state.lb.current; if (r) dlB64(`depth_${r.filename}`,r.depth_map); });
-el.lbDlGray.addEventListener("click",()=>{ const r=state.lb.current; if (r) dlB64(`gray_${r.filename}`,r.grayscale); });
+el.lbSlider?.addEventListener("input",()=>{ updateBlendPreview(); });
+el.lbDlDepth?.addEventListener("click",()=>{ const r=state.lb.current; if (r) dlB64(`depth_${r.filename}`,r.depth_map); });
+el.lbDlGray?.addEventListener("click",()=>{ const r=state.lb.current; if (r) dlB64(`gray_${r.filename}`,r.grayscale); });
 
 // ══════════════════════════════════════════════════════════════
 // COMPARE PANEL
 // ══════════════════════════════════════════════════════════════
-el.compareFileInput.addEventListener("change",()=>{
+el.compareFileInput?.addEventListener("change",()=>{
   state.compareFile=el.compareFileInput.files[0];
   if (state.compareFile) { el.compareFileName.textContent=state.compareFile.name; el.compareRunBtn.disabled=false; toast(`Loaded: ${state.compareFile.name}`); }
 });
-el.compareDropZone.addEventListener("dragover",e=>{ e.preventDefault(); el.compareDropZone.classList.add("drag-over"); });
-el.compareDropZone.addEventListener("dragleave",e=>{ if (!el.compareDropZone.contains(e.relatedTarget)) el.compareDropZone.classList.remove("drag-over"); });
-el.compareDropZone.addEventListener("drop",e=>{
+el.compareDropZone?.addEventListener("dragover",e=>{ e.preventDefault(); el.compareDropZone.classList.add("drag-over"); });
+el.compareDropZone?.addEventListener("dragleave",e=>{ if (!el.compareDropZone.contains(e.relatedTarget)) el.compareDropZone.classList.remove("drag-over"); });
+el.compareDropZone?.addEventListener("drop",e=>{
   e.preventDefault(); el.compareDropZone.classList.remove("drag-over");
   const f=e.dataTransfer.files[0];
   if (f?.type.startsWith("image/")) { state.compareFile=f; el.compareFileName.textContent=f.name; el.compareRunBtn.disabled=false; toast(`Loaded: ${f.name}`); }
 });
-el.compareDropZone.addEventListener("click",()=>el.compareFileInput.click());
-el.compareRunBtn.addEventListener("click",runComparison);
-el.compareCancelBtn.addEventListener("click",()=>{ state.compareAbort?.abort(); toast("Comparison cancelled","warning"); });
+el.compareDropZone?.addEventListener("click",()=>el.compareFileInput.click());
+el.compareRunBtn?.addEventListener("click",runComparison);
+el.compareCancelBtn?.addEventListener("click",()=>{ state.compareAbort?.abort(); toast("Comparison cancelled","warning"); });
 
 async function runComparison() {
   if (!state.compareFile) return;
@@ -1730,7 +1761,7 @@ async function runBenchmark() {
       if (!ok) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
     }
     const res = await apiFetch(`/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
-      signal: AbortSignal.any([state.benchmarkAbort.signal, AbortSignal.timeout(240_000)]),
+      signal: anySignal([state.benchmarkAbort.signal, timeoutSignal(240_000)]),
     });
     renderBenchmark(await res.json());
     toast("Benchmark complete","success");

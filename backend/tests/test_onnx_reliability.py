@@ -117,6 +117,7 @@ def test_atomic_export_preserves_final_file_after_validation_failure(
 def test_benchmark_auto_export_is_locked_for_concurrent_calls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setenv("DEPTHLENS_AUTO_EXPORT_ONNX", "true")
     calls: list[str] = []
     status_calls = 0
     status_lock = threading.Lock()

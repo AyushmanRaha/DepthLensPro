@@ -48,6 +48,7 @@ MAX_SIZE_MB = 20
 MODELS: dict[str, tuple[torch.nn.Module, torch.device]] = {}
 ONNX_ENGINES: dict[str, ONNXExecutionEngine] = {}
 _DEPTH_CACHE: dict[str, tuple[float, np.ndarray, dict[str, int]]] = {}
+_DEPTH_CACHE_LOCK = threading.RLock()
 _DEPTH_CACHE_MAX_ENTRIES = 12
 _ONNX_MISSING_WARNED: set[str] = set()
 TRANSFORMS: dict[str, Callable[[np.ndarray], torch.Tensor]] = {}
@@ -66,7 +67,8 @@ def clear_models() -> None:
         TRANSFORMS.clear()
         _MODEL_FORWARD_LOCKS.clear()
         _ONNX_FORWARD_LOCKS.clear()
-        _DEPTH_CACHE.clear()
+        with _DEPTH_CACHE_LOCK:
+            _DEPTH_CACHE.clear()
         _ONNX_MISSING_WARNED.clear()
 
 
@@ -470,25 +472,27 @@ def _metrics_for_mode(
 
 def _get_cached_depth(cache_key: str) -> tuple[np.ndarray, dict[str, int]] | None:
     now = time.time()
-    item = _DEPTH_CACHE.get(cache_key)
-    if item is None:
-        return None
-    expires_at, depth, resolution = item
-    if expires_at <= now:
-        _DEPTH_CACHE.pop(cache_key, None)
-        return None
-    return depth.copy(), dict(resolution)
+    with _DEPTH_CACHE_LOCK:
+        item = _DEPTH_CACHE.get(cache_key)
+        if item is None:
+            return None
+        expires_at, depth, resolution = item
+        if expires_at <= now:
+            _DEPTH_CACHE.pop(cache_key, None)
+            return None
+        return depth.copy(), dict(resolution)
 
 
 def _set_cached_depth(cache_key: str, depth: np.ndarray, resolution: dict[str, int]) -> None:
-    if len(_DEPTH_CACHE) >= _DEPTH_CACHE_MAX_ENTRIES:
-        oldest = min(_DEPTH_CACHE.items(), key=lambda kv: kv[1][0])[0]
-        _DEPTH_CACHE.pop(oldest, None)
-    _DEPTH_CACHE[cache_key] = (
-        time.time() + int(settings.CACHE_TTL_SECONDS),
-        depth.copy(),
-        dict(resolution),
-    )
+    with _DEPTH_CACHE_LOCK:
+        if len(_DEPTH_CACHE) >= _DEPTH_CACHE_MAX_ENTRIES:
+            oldest = min(_DEPTH_CACHE.items(), key=lambda kv: kv[1][0])[0]
+            _DEPTH_CACHE.pop(oldest, None)
+        _DEPTH_CACHE[cache_key] = (
+            time.time() + int(settings.CACHE_TTL_SECONDS),
+            depth.copy(),
+            dict(resolution),
+        )
 
 
 def _compute_metrics(depth: np.ndarray, img_bgr: np.ndarray) -> dict[str, Any]:
