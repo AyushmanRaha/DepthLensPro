@@ -139,7 +139,7 @@
             <button class="nav-btn" data-panel="compare">COMPARE</button>
             <button class="nav-btn" data-panel="performance">PERFORMANCE</button>
             <button class="nav-btn" data-panel="experiments">EXPERIMENTS</button>
-            <button class="nav-btn" data-panel="about">ABOUT</button>
+            <button class="nav-btn" data-panel="reconstruct">3D</button>
           </nav>
 
           <!-- Reports local inference engine availability. -->
@@ -878,67 +878,126 @@
         </div>
       </main>
 
-      <!-- ── About panel ─────────────────────────────────────────────── -->
-      <main class="panel" id="panel-about" hidden>
-        <div class="about-layout">
-          <div class="card about-card">
-            <h2 class="card-title">
-              <span class="card-icon">▣</span> About DepthLens Pro
-            </h2>
-            <div class="about-content">
-              <p>
-                DepthLens Pro is a full-stack machine vision application for
-                monocular depth estimation. Built for the
-                <strong>Machine Vision</strong> course, it transforms 2D images
-                into 3D depth maps using the <strong>MiDaS</strong> neural
-                network family.
-              </p>
-
-              <h3>Architecture</h3>
-              <div class="arch-grid">
-                <div class="arch-cell">
-                  <span class="arch-label">Frontend</span>
-                  <p>Vanilla HTML/CSS/JS + Chart.js. Responsive dark UI, drag-and-drop, lightbox, and persistent settings via localStorage.</p>
-                </div>
-                <div class="arch-cell">
-                  <span class="arch-label">Backend</span>
-                  <p>FastAPI (Python) with device-aware model loading, in-process caching, and 20+ MDE metrics computed per inference.</p>
-                </div>
-                <div class="arch-cell">
-                  <span class="arch-label">ML Models</span>
-                  <p>PyTorch MiDaS via Torch Hub. Three models with different speed/accuracy trade-offs. 8 colourmap options.</p>
-                </div>
-              </div>
-
-              <h3>Running Locally</h3>
-              <div class="code-block">
-                <span class="code-comment"># 1. Start the inference engine (FastAPI)</span>
-                python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765
-
-                <span class="code-comment"># 2. Serve the frontend</span>
-                cd frontend python3 -m http.server 3000
-                <span class="code-comment"># Electron uses http://127.0.0.1:8765 by default</span>
-              </div>
-
-              <h3>Model Reference</h3>
-              <table class="about-table">
-                <thead>
-                  <tr>
-                    <th>Model</th><th>Architecture</th><th>Speed (CPU)</th><th>Quality</th><th>Compute</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><td>MiDaS Small</td><td>EfficientNet-Lite</td><td>~30 ms</td><td>Good</td><td>CPU or GPU</td></tr>
-                  <tr><td>DPT-Hybrid</td><td>ViT-Hybrid</td><td>~120 ms</td><td>Very Good</td><td>GPU recommended</td></tr>
-                  <tr><td>DPT-Large</td><td>ViT-Large</td><td>~400 ms</td><td>Excellent</td><td>GPU required</td></tr>
-                </tbody>
-              </table>
-
-              <h3>About the Metrics</h3>
-              <p>Metrics computed per depth map are split into two categories:</p>
-              <p><strong>Computable (no ground truth needed)</strong> — SSIM, gradient error, edge density, PSNR, entropy, SILog, and distribution stats are derived directly from the predicted depth map and the input image.</p>
-              <p><strong>GT-required</strong> — Abs Rel, Sq Rel, threshold accuracy (δ&lt;1.25ⁿ), LPIPS, and ordinal error require a reference depth map (e.g. from LiDAR or stereo). These show "N/A" since only the source image is available.</p>
+      <!-- ── 3D Reconstruction panel ───────────────────────────────── -->
+      <main class="panel" id="panel-reconstruct" hidden>
+        <div class="reconstruct-layout">
+          <section class="card reconstruct-hero-card">
+            <div>
+              <h2 class="card-title"><span class="card-icon">◇</span> 3D Reconstruction</h2>
+              <p class="muted">Generate colored point clouds from monocular depth.</p>
+              <p class="reconstruct-note">Depth is relative, not metric scale. Use these exports as approximate visual geometry unless you calibrate the camera externally.</p>
             </div>
+            <span class="reconstruct-status-pill" id="reconstructStatusPill" data-state="idle">Idle</span>
+          </section>
+
+          <div class="reconstruct-grid">
+            <section class="card">
+              <h3 class="card-title"><span class="card-icon">↥</span> Source Image</h3>
+              <div class="reconstruct-drop-zone" id="reconstructDropZone" role="button" tabindex="0" aria-label="Upload reconstruction source image">
+                <input id="reconstructFileInput" type="file" accept="image/*" hidden />
+                <div class="reconstruct-drop-copy">
+                  <span class="drop-icon">◎</span>
+                  <strong>Drop an image here</strong>
+                  <span>or browse for a local image under 20 MB</span>
+                </div>
+                <img id="reconstructInputPreview" class="reconstruct-preview" alt="Selected reconstruction input preview" hidden />
+              </div>
+              <p class="file-name" id="reconstructFileName">No image selected</p>
+              <div class="reconstruct-download-row">
+                <button class="btn btn-outline" id="reconstructBrowseBtn" type="button">Browse Image</button>
+                <button class="btn btn-outline" id="reconstructUseLatestBtn" type="button">Use Latest Result</button>
+                <button class="btn btn-ghost" id="reconstructClearBtn" type="button">Clear</button>
+              </div>
+            </section>
+
+            <section class="card">
+              <h3 class="card-title"><span class="card-icon">⚙</span> Point Cloud Options</h3>
+              <div class="reconstruct-options-grid">
+                <label>Export Format<select id="reconstructFormat"><option value="ply" selected>PLY</option><option value="obj">OBJ</option></select></label>
+                <label>Max Dimension<select id="reconstructMaxDim"><option value="384">384 px</option><option value="512" selected>512 px</option><option value="768">768 px</option></select></label>
+                <label>Max Points<select id="reconstructMaxPoints"><option value="50000">50,000</option><option value="120000" selected>120,000</option><option value="250000">250,000</option></select></label>
+                <label>Preview Points<select id="reconstructPreviewPoints"><option value="2000">2,000</option><option value="5000" selected>5,000</option><option value="10000">10,000</option></select></label>
+                <label>Sampling<select id="reconstructSampling"><option value="grid" selected>Grid</option><option value="random">Random</option></select></label>
+                <label>Coordinate System<select id="reconstructCoordinateSystem"><option value="y_up" selected>Y Up</option><option value="camera">Camera</option></select></label>
+                <label class="reconstruct-checkbox"><input id="reconstructIncludeRgb" type="checkbox" checked /> Include RGB colors</label>
+                <label>Focal Scale<input id="reconstructFocalScale" type="range" min="0.5" max="3.0" step="0.1" value="1.2" /></label>
+                <label>Depth Scale<input id="reconstructDepthScale" type="range" min="0.1" max="5.0" step="0.1" value="1.0" /></label>
+                <label>Near Percentile<input id="reconstructNearPct" type="number" min="0" max="49" step="0.5" value="2" /></label>
+                <label>Far Percentile<input id="reconstructFarPct" type="number" min="51" max="100" step="0.5" value="98" /></label>
+              </div>
+              <div class="reconstruct-download-row">
+                <button class="btn btn-primary" id="reconstructRunBtn" type="button" disabled>Generate Point Cloud</button>
+                <button class="btn btn-outline" id="reconstructCancelBtn" type="button" hidden>Cancel</button>
+              </div>
+            </section>
+          </div>
+
+          <section class="card reconstruct-progress" id="reconstructProgressBlock" hidden>
+            <div class="progress-timer-row">
+              <span class="progress-status-text" id="reconstructProgressText">Preparing reconstruction…</span>
+              <span class="progress-eta" id="reconstructProgressEta">Estimating…</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="reconstructProgressFill"></div>
+              <span class="progress-pct" id="reconstructProgressPct">0%</span>
+            </div>
+          </section>
+
+          <div class="reconstruct-grid reconstruct-grid-wide">
+            <section class="card point-cloud-viewer-card">
+              <div class="point-cloud-head">
+                <h3 class="card-title"><span class="card-icon">✦</span> Point Cloud Preview</h3>
+                <div class="point-cloud-controls">
+                  <button class="btn btn-outline btn-sm" id="pointCloudResetViewBtn" type="button">Reset View</button>
+                  <label>Point Size<input id="pointCloudPointSize" type="range" min="1" max="6" step="0.5" value="2" /></label>
+                  <label class="reconstruct-checkbox"><input id="pointCloudAutoRotate" type="checkbox" /> Auto rotate</label>
+                </div>
+              </div>
+              <div class="point-cloud-canvas-wrap">
+                <canvas id="pointCloudCanvas" class="point-cloud-canvas" aria-label="Interactive point cloud preview"></canvas>
+                <div class="point-cloud-placeholder" id="pointCloudPlaceholder">Generate a reconstruction to preview points.</div>
+              </div>
+              <p class="point-cloud-mode-message" id="pointCloudModeMessage">Drag to rotate · wheel to zoom · double-click to reset.</p>
+            </section>
+
+            <section class="card">
+              <h3 class="card-title"><span class="card-icon">▤</span> Reconstruction Details</h3>
+              <div class="reconstruct-telemetry-grid">
+                <div class="metric-cell"><span class="metric-value" id="reconstructPointCount">—</span><span class="metric-label">Points</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructPreviewCount">—</span><span class="metric-label">Preview</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructArtifactSize">—</span><span class="metric-label">Artifact</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructLatency">—</span><span class="metric-label">Latency</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructModel">—</span><span class="metric-label">Model</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructDevice">—</span><span class="metric-label">Device</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructEngine">—</span><span class="metric-label">Engine</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructResolution">—</span><span class="metric-label">Resolution</span></div>
+                <div class="metric-cell metric-cell-wide"><span class="metric-value" id="reconstructBounds">—</span><span class="metric-label">Bounds</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructDepthCached">—</span><span class="metric-label">Depth Cache</span></div>
+                <div class="metric-cell"><span class="metric-value" id="reconstructFormatLabel">—</span><span class="metric-label">Format</span></div>
+              </div>
+              <ul class="reconstruct-warning-list" id="reconstructWarnings"></ul>
+            </section>
+          </div>
+
+          <div class="reconstruct-grid">
+            <section class="card">
+              <h3 class="card-title"><span class="card-icon">◈</span> Depth Preview</h3>
+              <div class="reconstruct-depth-preview-wrap">
+                <img id="reconstructDepthPreview" class="reconstruct-depth-preview" alt="Reconstruction depth preview" hidden />
+                <p class="muted" id="reconstructDepthEmpty">Depth preview appears after generation.</p>
+              </div>
+              <button class="btn btn-outline" id="reconstructDownloadDepthBtn" type="button" disabled>Download Depth Preview</button>
+            </section>
+
+            <section class="card">
+              <h3 class="card-title"><span class="card-icon">⇩</span> Export</h3>
+              <p class="muted">Download the generated PLY/OBJ point cloud or save the reconstruction metadata JSON for reproducibility.</p>
+              <div class="reconstruct-download-row">
+                <button class="btn btn-primary" id="reconstructDownloadBtn" type="button" disabled>Download Point Cloud</button>
+                <button class="btn btn-outline" id="reconstructCopyMetaBtn" type="button" disabled>Copy Metadata JSON</button>
+                <button class="btn btn-outline" id="reconstructDownloadMetaBtn" type="button" disabled>Export Metadata JSON</button>
+              </div>
+            </section>
           </div>
         </div>
       </main>
