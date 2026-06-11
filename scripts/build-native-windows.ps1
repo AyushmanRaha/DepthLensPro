@@ -6,6 +6,7 @@ npm run clean:dist
 Pop-Location
 Write-Host "Cleaned previous dist/ output."
 Push-Location electron-app
-npm run verify:resources -- --mode native --onnx optional
-npm run build:win:arm64
+npm run verify:resources:native
+npm run build:win:arm64:raw
+npm run verify:packaged:win
 Pop-Location

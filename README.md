@@ -232,7 +232,7 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
    scripts/build-native-macos.sh
    ```
 
-   This runs the doctor, creates the venv with Python 3.12, installs backend deps, npm installs, cleans stale dist, verifies resources, and builds the `.app`.
+   This runs the doctor, creates the venv with Python 3.12, installs backend deps, npm installs, cleans stale dist, verifies repo-root resources, builds the `.app`, and verifies the packaged `Contents/Resources` tree before the command succeeds.
 
 3. Open the app.
 
@@ -255,7 +255,7 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
    .\scripts\build-native-windows.ps1
    ```
 
-3. Install the generated NSIS installer from `electron-app/dist/`.
+3. Install the generated NSIS installer from `electron-app/dist/`. The build script verifies repo-root resources before packaging and the generated Windows ARM unpacked resource tree after packaging before the installer is considered valid.
 
 #### Linux ARM
 
@@ -272,7 +272,7 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
    scripts/build-native-linux.sh
    ```
 
-3. Run the AppImage:
+3. Run the AppImage. The build script verifies repo-root resources before packaging and verifies the Linux ARM unpacked resource tree that electron-builder leaves in `electron-app/dist` before the command succeeds:
 
    ```bash
    ./electron-app/dist/DepthLens\ Pro-*-linux-arm64.AppImage
@@ -309,7 +309,7 @@ DepthLensPro uses a local FastAPI backend at `http://127.0.0.1:8765` by default.
 
 **Symptom:** "pip install failed" with CalledProcessError but no visible pip output. **Cause:** Python 3.10 was selected but the pinned deps require Python 3.11+. **Fix:** Install Python 3.12 from python.org, delete the venv (`rm -rf venv`), and re-run the setup script.
 
-**Symptom:** App opens but shows "Required app resources were not found" / models/onnx missing. **Cause:** The models/onnx directory was not present or was dropped by electron-builder. **Fix:** Ensure `models/onnx/.gitkeep` is committed, then run `rm -rf electron-app/dist` and re-run the build script.
+**Symptom:** App opens but shows "Required app resources were not found" / `models/onnx` missing. **Cause:** The packaged app is incomplete or you are launching a stale installed app. `models/` and `models/onnx/` are required packaged runtime directories even when actual `.onnx` model files are optional. **Fix:** Re-run the supported root native build script. If you installed or copied an older app, remove `/Applications/DepthLens Pro.app` on macOS, uninstall/reinstall the Windows app, or replace the old Linux desktop/AppImage location before launching the newly built artifact.
 
 **Symptom:** `zsh: command not found: #` when pasting commands. **Cause:** zsh interactive comments are disabled. **Fix:** Run `setopt interactivecomments` in your terminal session, or paste commands without comment lines.
 
@@ -627,7 +627,9 @@ DepthLensPro/
 │   ├── index.html
 │   └── script.js
 └── models/
+    ├── README.md
     └── onnx/
+        └── README.md
 ```
 
 ---
@@ -640,7 +642,8 @@ CI and local checks focus on lightweight validation with mocks or stubs where mo
 |---|---|---|
 | Python tests | `backend/tests/` | Cache serialization safety, route behavior, ONNX diagnostics, benchmarks, warmup guards, GT handling, and mocked inference flows. |
 | Python format/lint/type gates | `pyproject.toml`, `mypy.ini`, `.github/workflows/ci.yml` | Black, Ruff, mypy, and pytest configuration. |
-| Electron resource verification | `electron-app/scripts/verify-resources.js` | Confirms packaged resource paths for backend, frontend, and repo-root virtual environment. |
+| Electron resource verification | `electron-app/scripts/verify-resources.js` | Confirms repo-root or packaged resource paths for backend, frontend, platform venv Python, `models/`, and `models/onnx/`. |
+| Packaged artifact verification | `electron-app/scripts/verify-packaged-resources.js` | Discovers electron-builder macOS, Windows ARM, and Linux ARM resource roots after packaging and fails incomplete native artifacts. |
 | Electron security policy test | `electron-app/test-security-policy.js` | Validates navigation policy behavior. |
 | Packaging scripts | `electron-app/package.json` | Builds ARM-only macOS, Windows, and Linux artifacts; unsupported x64 scripts call `unsupported-arch.js`. |
 
@@ -653,11 +656,20 @@ mypy backend/
 pytest
 ```
 
-This command verifies Electron packaging resources from the Electron app directory.
+This command verifies Electron repo-root resources from the Electron app directory.
 
 ```bash
 cd electron-app
-npm run verify:resources
+npm run verify:resources:native
+```
+
+These commands verify packaged output after a native build. They are also run by the supported root native build scripts and by the direct `electron-app` ARM build scripts.
+
+```bash
+cd electron-app
+npm run verify:packaged:mac      # macOS Apple Silicon .app resources
+npm run verify:packaged:win      # Windows ARM unpacked resources
+npm run verify:packaged:linux    # Linux ARM unpacked resources
 ```
 
 ---
@@ -676,7 +688,7 @@ Use the symptom, cause, and resolution entries below for common local issues. Ke
 
 **Symptom** → Torch Hub asks “Do you trust this repository?” during ONNX export. **Cause** → interactive Torch Hub trust prompts are unsafe for builds/CI. **Resolution** → `backend/scripts/export_onnx.py` passes Torch Hub trust options and is non-interactive by default.
 
-**Symptom** → packaged Performance Analysis reports `ONNX missing_model_file`. **Cause** → native resources did not include `models/onnx`. **Resolution** → `electron-builder` now packages `../models` into app resources; run `cd electron-app && npm run verify:resources -- --mode native --onnx optional` before building.
+**Symptom** → packaged Performance Analysis reports `ONNX missing_model_file`. **Cause** → no optional ONNX graph was exported for that model, or native resources did not include `models/onnx`. **Resolution** → `models/onnx/` is required as a directory in every native package, but `.onnx` binaries remain optional for the default build and PyTorch fallback remains available. Run `cd electron-app && npm run verify:resources:native` before building and `npm run verify:packaged:mac`, `npm run verify:packaged:win`, or `npm run verify:packaged:linux` after building.
 
 **Symptom** → ONNX is reported as invalid/corrupt. **Cause** → the file may be empty, fail `onnx.checker`, fail ONNX Runtime session creation, fail dummy inference, or use a provider unavailable on the current system. **Resolution** → run `venv/bin/python backend/scripts/export_onnx.py --validate-only --all`; invalid final-path files are quarantined and diagnostics report `empty`, `invalid_checker`, `invalid_session`, `invalid_dummy_inference`, `provider_unavailable`, `runtime_unavailable`, `export_failed`, or `optional_unavailable` instead of one generic error.
 
@@ -685,6 +697,39 @@ Use the symptom, cause, and resolution entries below for common local issues. Ke
 **Symptom** → DPT Hybrid or DPT Large ONNX is unavailable. **Cause** → those exports are large and provider/tooling-sensitive. **Resolution** → they are optional unless `--require-all` is passed; PyTorch fallback remains available and Performance Analysis displays the precise diagnostic and recommended command.
 
 **Symptom** → backend appears offline during a long benchmark. **Cause** → model loading or CPU-heavy inference can take longer than UI polling timeouts. **Resolution** → `/live` stays lightweight and can report `busy: true`; benchmarks run with timeout handling and the UI shows `Depth Engine: Busy` rather than immediately treating a benchmark as permanent backend loss.
+
+
+### Native packaged resource verification and stale installs
+
+The supported root native build scripts now fail unless both verification phases pass:
+
+1. repo-root resources before electron-builder runs; and
+2. packaged resource roots after electron-builder finishes.
+
+Required native runtime resources are `backend/`, `backend/app.py`, `frontend/`, `frontend/index.html`, the platform virtualenv Python executable, `models/`, and `models/onnx/`. ONNX graph files such as `midas_small.onnx` remain optional unless a command explicitly uses `--onnx required` or `--onnx require-all`.
+
+Direct Electron build commands are also guarded: `npm run build:mac:arm64`, `npm run build:win:arm64`, and `npm run build:linux:arm64` run the same repo-root and packaged-resource verification around the raw electron-builder command. The unsupported x64/universal scripts continue to fail with the unsupported-architecture helper.
+
+If a packaged app under an installed location still reports missing resources after a successful rebuild, remove the stale installed copy and launch or reinstall the new artifact:
+
+```bash
+# macOS Apple Silicon
+rm -rf "/Applications/DepthLens Pro.app"
+scripts/build-native-macos.sh
+open "electron-app/dist/mac-arm64/DepthLens Pro.app"
+```
+
+```powershell
+# Windows ARM
+# Uninstall the old DepthLens Pro from Settings, then rebuild and reinstall the new NSIS installer.
+.\scripts\build-native-windows.ps1
+```
+
+```bash
+# Linux ARM
+scripts/build-native-linux.sh
+./electron-app/dist/DepthLens\ Pro-*-linux-arm64.AppImage
+```
 
 ### Backend Readiness and Stale Backend Recovery
 

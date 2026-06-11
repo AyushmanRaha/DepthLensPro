@@ -34,3 +34,8 @@ jobs:
 
       - name: Pytest
         run: pytest
+
+      - name: Electron lightweight tests
+        run: |
+          cd electron-app
+          npm test

@@ -435,6 +435,8 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
     onnxDir,
     cwd,
     command,
+    isPackaged: app.isPackaged,
+    resourceKind: app.isPackaged ? "packaged resources" : "repo-root resources",
     pythonExists: path.isAbsolute(pythonPath) ? pathExists(pythonPath) : "PATH lookup",
     backendDirExists: pathExists(backendDir),
     backendAppExists: pathExists(backendApp),
@@ -449,6 +451,7 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
 function createStartupError(message, details, exitInfo = {}) {
   return new Error(
     `${message}\n\n` +
+    `Resource context: ${details.resourceKind || "unknown"}\n` +
     `Backend URL: ${details.backendUrl}\n` +
     `Python path attempted: ${details.pythonPath} (exists: ${details.pythonExists})\n` +
     `Backend directory attempted: ${details.backendDir} (exists: ${details.backendDirExists})\n` +
@@ -463,6 +466,60 @@ function createStartupError(message, details, exitInfo = {}) {
     `Backend exit signal: ${exitInfo.signal ?? "n/a"}\n` +
     `Electron logs: ${details.logPath}`,
   );
+}
+
+
+function isLikelyInstalledAppPath(targetPath) {
+  const normalized = targetPath.replace(/\\/g, "/");
+  if (process.platform === "darwin") return normalized.startsWith("/Applications/DepthLens Pro.app/") || normalized.includes("/Applications/DepthLens Pro.app/");
+  if (process.platform === "win32") return /\/program files( \(arm\))?\/depthlens pro\//i.test(normalized) || /\/appdata\/local\/programs\/depthlens pro\//i.test(normalized);
+  if (process.platform === "linux") return normalized.startsWith("/opt/DepthLens Pro/") || normalized.startsWith("/usr/lib/depthlens-pro/") || normalized.includes("/.local/share/applications/");
+  return false;
+}
+
+function missingResourceEntries(details) {
+  const entries = [];
+  if (path.isAbsolute(details.pythonPath) && !details.pythonExists) entries.push(["platform Python executable", details.pythonPath]);
+  if (!details.backendDirExists) entries.push(["backend/", details.backendDir]);
+  if (!details.backendAppExists) entries.push(["backend/app.py", details.backendApp]);
+  if (!details.frontendDirExists) entries.push(["frontend/", details.frontendDir]);
+  if (!details.frontendIndexExists) entries.push(["frontend/index.html", details.frontendIndex]);
+  if (app.isPackaged || details.modelsDirExists === false) {
+    if (!details.modelsDirExists) entries.push(["models/", details.modelsDir]);
+    if (!details.onnxDirExists) entries.push(["models/onnx/", details.onnxDir]);
+  }
+  return entries;
+}
+
+function createMissingResourcesError(details) {
+  const missing = missingResourceEntries(details);
+  const missingText = missing.map(([label, target]) => `- ${label}: ${target}`).join("\n") || "- Unknown required resource";
+  const context = app.isPackaged ? "packaged app resources" : "repo-root development resources";
+  const remediation = app.isPackaged
+    ? [
+        "Rebuild with the supported root native build script so packaged resources are verified after electron-builder finishes:",
+        "  macOS ARM: scripts/build-native-macos.sh",
+        "  Windows ARM: .\\scripts\\build-native-windows.ps1",
+        "  Linux ARM: scripts/build-native-linux.sh",
+        isLikelyInstalledAppPath(details.cwd)
+          ? "This app appears to be running from an installed location. You may be launching a stale installed copy; replace it with the newly built artifact before launching again."
+          : "If you installed the app previously, remove or replace the stale installed copy before launching again.",
+      ].join("\n")
+    : [
+        "Run setup from the repository root before launching development mode:",
+        "  macOS/Linux: npm run setup",
+        "  Windows: npm run setup:win",
+        "Then verify with: cd electron-app && npm run verify:resources:native",
+      ].join("\n");
+  return createStartupError(`Missing required ${context}:\n${missingText}\n\n${remediation}`, details);
+}
+
+function dependencyFailureHint() {
+  const output = backendOutputExcerpt();
+  if (/ModuleNotFoundError|ImportError|No module named/i.test(output)) {
+    return `\n\nBackend dependency/import failure detected in backend output. Re-run setup and pip check for the packaged venv. Recent backend output:\n${output}`;
+  }
+  return `\n\nRecent backend output:\n${output}`;
 }
 
 function waitForBackendReady(url, details, { timeoutMs = 45_000, intervalMs = 500 } = {}) {
@@ -489,11 +546,11 @@ function waitForBackendReady(url, details, { timeoutMs = 45_000, intervalMs = 50
         return;
       }
       if (backendProcess?.exitCode !== null && backendProcess?.exitCode !== undefined) {
-        finish(reject, createStartupError(`Backend process exited before /live became available.`, details, { code: backendProcess.exitCode, signal: backendProcess.signalCode }));
+        finish(reject, createStartupError(`Backend process exited before /live became available.${dependencyFailureHint()}`, details, { code: backendProcess.exitCode, signal: backendProcess.signalCode }));
         return;
       }
       if (Date.now() - start >= timeoutMs) {
-        finish(reject, createStartupError(`Backend did not become live within ${Math.round(timeoutMs / 1000)}s at ${url}`, details, { code: backendProcess?.exitCode, signal: backendProcess?.signalCode }));
+        finish(reject, createStartupError(`Backend did not become live within ${Math.round(timeoutMs / 1000)}s at ${url}.${dependencyFailureHint()}`, details, { code: backendProcess?.exitCode, signal: backendProcess?.signalCode }));
         return;
       }
       timer = setTimeout(poll, intervalMs);
@@ -554,15 +611,8 @@ async function startBackend() {
     }
   }
 
-  if (path.isAbsolute(pythonPath) && !fs.existsSync(pythonPath)) {
-    throw createStartupError(
-      "Python was not found. Create the repo-root virtual environment and install backend requirements before launching.",
-      details,
-    );
-  }
-
-  if (!details.backendDirExists || !details.backendAppExists || !details.frontendDirExists || !details.frontendIndexExists || (app.isPackaged && !details.modelsDirExists)) {
-    throw createStartupError("Required app resources were not found. Run npm run verify:resources before packaging and ensure the repo-root venv and models directory exist.", details);
+  if (missingResourceEntries(details).length > 0) {
+    throw createMissingResourcesError(details);
   }
 
   args[args.indexOf("--port") + 1] = String(BACKEND_PORT);
