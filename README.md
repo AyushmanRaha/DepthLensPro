@@ -63,6 +63,7 @@ The repository demonstrates how to ship an AI-assisted desktop tool without hidi
 - Device-aware PyTorch inference with CPU fallback and runtime discovery for CUDA, MPS, and XPU where the local PyTorch installation supports them.
 - Optional ONNX Runtime path for exported `.onnx` graphs, with diagnostics that explain missing, invalid, or provider-incompatible weights instead of breaking PyTorch inference.
 - Health, readiness, cache, ONNX, benchmark, and model endpoints designed for desktop startup checks and developer debugging.
+- Real-Time Webcam Depth MVP samples browser/Electron camera frames, sends capped-FPS JPEG uploads to the local FastAPI `/estimate` endpoint, and previews live depth maps without any frames leaving localhost. Start with MiDaS Small for the smoothest first demo.
 
 ## Tech Stack
 
