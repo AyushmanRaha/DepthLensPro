@@ -500,6 +500,21 @@ text-shadow:
   backdrop-filter: blur(18px);
   border-bottom: 1px solid var(--border);
   transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+  -webkit-app-region: no-drag;
+}
+
+.window-drag-strip {
+  display: none;
+}
+
+body.macos .window-drag-strip {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 96px;
+  right: 96px;
+  height: 12px;
+  z-index: 0;
   -webkit-app-region: drag;
 }
 
@@ -516,6 +531,9 @@ text-shadow:
 }
 
 .header-inner {
+  position: relative;
+  z-index: 1;
+  -webkit-app-region: no-drag;
   max-width: 1440px; margin: 0 auto;
   padding: 0 clamp(0.75rem, 2.6vw, 1.5rem);
   height: clamp(54px, 4.8vw, 60px);
