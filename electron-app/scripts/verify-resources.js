@@ -2,81 +2,191 @@
 const fs = require("fs");
 const path = require("path");
 
-const args = process.argv.slice(2);
-let root = path.resolve(path.join(__dirname, "..", ".."));
-let mode = "basic";
-let onnxMode = "optional"; // off | optional | required | require-all
-for (let i = 0; i < args.length; i += 1) {
-  const arg = args[i];
-  if (arg === "--mode") mode = args[++i] || mode;
-  else if (arg === "--onnx") onnxMode = args[++i] || onnxMode;
-  else if (!arg.startsWith("--")) root = path.resolve(arg);
+const DEFAULT_ROOT = path.resolve(path.join(__dirname, "..", ".."));
+const VALID_ROOT_KINDS = new Set(["repo", "packaged"]);
+const VALID_MODES = new Set(["basic", "native"]);
+const VALID_ONNX_MODES = new Set(["off", "optional", "required", "require-all"]);
+
+function parseArgs(argv = process.argv.slice(2)) {
+  const options = {
+    root: DEFAULT_ROOT,
+    rootKind: "repo",
+    mode: "basic",
+    onnxMode: "optional",
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--root-kind") options.rootKind = argv[++i] || options.rootKind;
+    else if (arg === "--mode") options.mode = argv[++i] || options.mode;
+    else if (arg === "--onnx") options.onnxMode = argv[++i] || options.onnxMode;
+    else if (arg === "--root") options.root = path.resolve(argv[++i] || options.root);
+    else if (arg === "--help" || arg === "-h") options.help = true;
+    else if (!arg.startsWith("--")) options.root = path.resolve(arg);
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (!VALID_ROOT_KINDS.has(options.rootKind)) throw new Error(`Invalid --root-kind ${options.rootKind}; expected repo or packaged.`);
+  if (!VALID_MODES.has(options.mode)) throw new Error(`Invalid --mode ${options.mode}; expected basic or native.`);
+  if (!VALID_ONNX_MODES.has(options.onnxMode)) throw new Error(`Invalid --onnx ${options.onnxMode}; expected off, optional, required, or require-all.`);
+  return options;
 }
 
-const checks = [];
-const infos = [];
-function check(rel, required = true, predicate = fs.existsSync) {
-  const full = path.join(root, rel);
-  const ok = predicate(full);
-  checks.push({ rel, full, ok, required });
-  return ok;
-}
-function fileSize(rel) {
-  const full = path.join(root, rel);
-  try { return fs.statSync(full).size; } catch { return null; }
+function usage() {
+  return [
+    "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--onnx off|optional|required|require-all] [resource-root]",
+    "",
+    "Examples:",
+    "  node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
+    "  node scripts/verify-resources.js --root-kind packaged --mode native --onnx optional 'dist/mac-arm64/DepthLens Pro.app/Contents/Resources'",
+  ].join("\n");
 }
 
-check("backend");
-check(path.join("backend", "app.py"));
-check("frontend");
-check(path.join("frontend", "index.html"));
-
-const posixPython = [path.join("venv", "bin", "python3"), path.join("venv", "bin", "python")];
-const winPython = [path.join("venv", "Scripts", "python.exe")];
-const platformCandidates = process.platform === "win32" ? winPython : posixPython;
-const otherCandidates = process.platform === "win32" ? posixPython : winPython;
-const pythonOk = [...platformCandidates, ...otherCandidates].some((rel) => fs.existsSync(path.join(root, rel)));
-checks.push({ rel: `${platformCandidates.join(" or ")} (platform Python)`, full: root, ok: pythonOk, required: true });
-
-const expectsOnnxDir = onnxMode !== "off" || mode === "native";
-check("models", mode === "native" || expectsOnnxDir);
-check(path.join("models", "onnx"), onnxMode === "required" || onnxMode === "require-all");
-
-const onnxFiles = [
-  { rel: path.join("models", "onnx", "midas_small.onnx"), required: onnxMode === "required" || onnxMode === "require-all" },
-  { rel: path.join("models", "onnx", "dpt_hybrid.onnx"), required: onnxMode === "require-all" },
-  { rel: path.join("models", "onnx", "dpt_large.onnx"), required: onnxMode === "require-all" },
-];
-for (const item of onnxFiles) {
-  const full = path.join(root, item.rel);
-  const exists = fs.existsSync(full);
-  const size = exists ? fs.statSync(full).size : 0;
-  infos.push({ rel: item.rel, exists, size });
-  if (item.required) checks.push({ rel: item.rel, full, ok: exists && size > 0, required: true });
+function pathExists(targetPath) {
+  try { return fs.existsSync(targetPath); } catch (_) { return false; }
 }
 
-for (const check of checks) {
-  const severity = check.required ? (check.ok ? "✓" : "✗") : (check.ok ? "✓" : "!");
-  console.log(`${severity} ${check.rel}${check.ok ? "" : ` missing under ${check.full}`}${check.required ? "" : " (optional)"}`);
-}
-console.log("\nONNX resource summary:");
-for (const info of infos) console.log(`${info.exists ? "✓" : "!"} ${info.rel} ${info.exists ? `${info.size} bytes` : "missing (optional unless --onnx requires it)"}`);
-
-const failed = checks.filter((check) => check.required && !check.ok);
-if (failed.length) {
-  console.error(`\nDepthLens resources are incomplete under: ${root}`);
-  console.error("Run the root setup script before packaging. Use --onnx required for MiDaS Small or --onnx require-all for every ONNX model.");
-  process.exit(1);
+function isFile(targetPath) {
+  try { return fs.statSync(targetPath).isFile(); } catch (_) { return false; }
 }
 
-if (mode === "native") {
-  const packagedOnnxDir = path.join(root, "models", "onnx");
-  if (!fs.existsSync(packagedOnnxDir) || !fs.statSync(packagedOnnxDir).isDirectory()) {
-    console.error(
-      "models/onnx directory is missing from packaged resources. " +
-        "Ensure models/onnx/.gitkeep is committed and the extraResources filter includes **/.*"
-    );
+function isDirectory(targetPath) {
+  try { return fs.statSync(targetPath).isDirectory(); } catch (_) { return false; }
+}
+
+function pythonCandidatesForPlatform(platform = process.platform) {
+  const posixPython = [path.join("venv", "bin", "python3"), path.join("venv", "bin", "python")];
+  const winPython = [path.join("venv", "Scripts", "python.exe"), path.join("venv", "Scripts", "python3.exe")];
+  return platform === "win32" ? winPython : posixPython;
+}
+
+function verifyResourceRoot(options = {}) {
+  const root = path.resolve(options.root || DEFAULT_ROOT);
+  const rootKind = options.rootKind || "repo";
+  const mode = options.mode || "basic";
+  const onnxMode = options.onnxMode || "optional";
+  const platform = options.platform || process.platform;
+  const checks = [];
+  const infos = [];
+
+  function addCheck(rel, required = true, predicate = pathExists, label = rel) {
+    const full = path.join(root, rel);
+    const ok = predicate(full);
+    checks.push({ rel, label, full, ok, required });
+    return ok;
+  }
+
+  addCheck("backend", true, isDirectory);
+  addCheck(path.join("backend", "app.py"), true, isFile);
+  addCheck("frontend", true, isDirectory);
+  addCheck(path.join("frontend", "index.html"), true, isFile);
+
+  const platformPython = pythonCandidatesForPlatform(platform);
+  const fallbackPython = platform === "win32" ? pythonCandidatesForPlatform("darwin") : pythonCandidatesForPlatform("win32");
+  const pythonOk = [...platformPython, ...fallbackPython].some((rel) => isFile(path.join(root, rel)) || pathExists(path.join(root, rel)));
+  checks.push({
+    rel: platformPython.join(" or "),
+    label: `${platformPython.join(" or ")} (platform Python)`,
+    full: root,
+    ok: pythonOk,
+    required: true,
+  });
+
+  const requiresModelDirs = mode === "native" || onnxMode !== "off";
+  addCheck("models", requiresModelDirs, isDirectory);
+  addCheck(path.join("models", "onnx"), requiresModelDirs, isDirectory);
+
+  const onnxFiles = [
+    { rel: path.join("models", "onnx", "midas_small.onnx"), required: onnxMode === "required" || onnxMode === "require-all" },
+    { rel: path.join("models", "onnx", "dpt_hybrid.onnx"), required: onnxMode === "require-all" },
+    { rel: path.join("models", "onnx", "dpt_large.onnx"), required: onnxMode === "require-all" },
+  ];
+  for (const item of onnxFiles) {
+    const full = path.join(root, item.rel);
+    const exists = isFile(full);
+    const size = exists ? fs.statSync(full).size : 0;
+    infos.push({ rel: item.rel, exists, size, required: item.required });
+    if (item.required) checks.push({ rel: item.rel, label: item.rel, full, ok: exists && size > 0, required: true });
+  }
+
+  const failed = checks.filter((check) => check.required && !check.ok);
+  return { root, rootKind, mode, onnxMode, platform, checks, infos, failed, ok: failed.length === 0 };
+}
+
+function remediation(result) {
+  if (result.rootKind === "packaged") {
+    return [
+      "Packaged app resources are incomplete. Rebuild with the supported root native build script:",
+      "  macOS ARM:   scripts/build-native-macos.sh",
+      "  Windows ARM: .\\scripts\\build-native-windows.ps1",
+      "  Linux ARM:   scripts/build-native-linux.sh",
+      "If this path is an installed app, replace the stale installed copy with the newly built artifact before launching it.",
+    ].join("\n");
+  }
+  return [
+    "Repo-root resources are incomplete. Run setup before packaging:",
+    "  macOS/Linux: npm run setup",
+    "  Windows:     npm run setup:win",
+    "Then rebuild with the supported native build script. ONNX binaries remain optional unless --onnx required or --onnx require-all is used.",
+  ].join("\n");
+}
+
+function formatResult(result) {
+  const lines = [];
+  lines.push(`DepthLens resource verification (${result.rootKind}, mode=${result.mode}, onnx=${result.onnxMode})`);
+  lines.push(`Root: ${result.root}`);
+  lines.push("");
+  for (const check of result.checks) {
+    const severity = check.required ? (check.ok ? "✓" : "✗") : (check.ok ? "✓" : "!");
+    const optional = check.required ? "" : " (optional)";
+    const missing = check.ok ? "" : ` missing under ${check.full}`;
+    lines.push(`${severity} ${check.label}${missing}${optional}`);
+  }
+  lines.push("\nONNX resource summary:");
+  for (const info of result.infos) {
+    const required = info.required ? "required" : "optional";
+    lines.push(`${info.exists ? "✓" : info.required ? "✗" : "!"} ${info.rel} ${info.exists ? `${info.size} bytes` : `missing (${required})`}`);
+  }
+  if (!result.ok) {
+    lines.push("");
+    lines.push(`DepthLens ${result.rootKind} resources are incomplete under: ${result.root}`);
+    lines.push(remediation(result));
+  } else {
+    lines.push("");
+    lines.push(`DepthLens resources verified under: ${result.root} (root-kind=${result.rootKind}, mode=${result.mode}, onnx=${result.onnxMode})`);
+  }
+  return lines.join("\n");
+}
+
+function main() {
+  let options;
+  try {
+    options = parseArgs();
+  } catch (err) {
+    console.error(err.message);
+    console.error(usage());
+    process.exit(2);
+  }
+  if (options.help) {
+    console.log(usage());
+    return;
+  }
+  const result = verifyResourceRoot(options);
+  const output = formatResult(result);
+  if (result.ok) console.log(output);
+  else {
+    console.error(output);
     process.exit(1);
   }
 }
-console.log(`\nDepthLens resources verified under: ${root} (mode=${mode}, onnx=${onnxMode})`);
+
+if (require.main === module) main();
+
+module.exports = {
+  DEFAULT_ROOT,
+  parseArgs,
+  pythonCandidatesForPlatform,
+  verifyResourceRoot,
+  formatResult,
+  remediation,
+};

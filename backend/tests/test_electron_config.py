@@ -12,9 +12,12 @@ README = (ROOT / "README.md").read_text()
 
 def test_package_builds_only_arm_desktop_targets() -> None:
     scripts = PACKAGE["scripts"]
-    assert "--arm64" in scripts["build:mac:arm64"]
-    assert "--arm64" in scripts["build:win:arm64"]
-    assert "--arm64" in scripts["build:linux:arm64"]
+    assert "--arm64" in scripts["build:mac:arm64:raw"]
+    assert "--arm64" in scripts["build:win:arm64:raw"]
+    assert "--arm64" in scripts["build:linux:arm64:raw"]
+    assert "verify:resources:native" in scripts["build:mac:arm64"]
+    assert "verify:resources:native" in scripts["build:win:arm64"]
+    assert "verify:resources:native" in scripts["build:linux:arm64"]
     for name in ("build:mac:x64", "build:mac:universal", "build:win:x64", "build:linux:x64"):
         assert "unsupported-arch.js" in scripts[name]
     assert PACKAGE["build"]["mac"]["target"][0]["arch"] == ["arm64"]
@@ -29,6 +32,7 @@ def test_readme_platform_table_matches_package_scripts() -> None:
     assert "Intel Mac / macOS x64" in README
     assert "npm run build:mac" in README
     assert "dist/mac-arm64/DepthLens Pro.app" in README
+    assert "verify-packaged-resources.js" in README
 
 
 def test_duplicate_app_scan_flags_stale_dist_mac(tmp_path: Path) -> None:
@@ -79,3 +83,10 @@ def test_backend_spawn_keeps_shell_disabled_and_args_array() -> None:
     assert "spawn(pythonPath, args" in main
     assert "shell: false" in main
     assert "argument array" in main
+
+
+def test_packaged_startup_requires_models_and_onnx() -> None:
+    main = (ROOT / "electron-app" / "main.js").read_text()
+    assert '["models/", details.modelsDir]' in main
+    assert '["models/onnx/", details.onnxDir]' in main
+    assert "stale installed copy" in main
