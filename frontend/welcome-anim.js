@@ -1,434 +1,567 @@
 /**
- * DepthLens Pro — Welcome Screen Animation v5.0
- * Liquid metal / glass drops → merge → morph into logo
- * Canvas-based, 60fps, theme-aware, self-contained.
+ * DepthLens Pro — Welcome Screen Animation v6.0
+ * Depth Field Calibration: technical grid → scanner sweep → depth contours → crisp logo.
+ * Canvas-based, theme-aware, reduced-motion friendly, and dependency-free.
  */
 (function initWelcomeAnimation() {
   "use strict";
 
-  const canvas = document.getElementById("logoCanvas");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
+  const logoCanvas = document.getElementById("logoCanvas");
+  const bgCanvas = document.getElementById("welcomeBgCanvas");
+  if (!logoCanvas || !bgCanvas) return;
+
+  const logoCtx = logoCanvas.getContext("2d");
+  const bgCtx = bgCanvas.getContext("2d");
+  const stage = logoCanvas.parentElement;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  const DURATION = 2100;
+  const PHASE_GRID_END = 400;
+  const PHASE_SCAN_START = 400;
+  const PHASE_SCAN_END = 1100;
+  const PHASE_RESOLVE_START = 1100;
+  const PHASE_RESOLVE_END = 1700;
+  const PHASE_POLISH_START = 1700;
+  const PHASE_POLISH_END = 2100;
+
+  let dpr = 1;
+  let bgW = 0;
+  let bgH = 0;
+  let logoW = 0;
+  let logoH = 0;
+  let logoMetrics = null;
+  let pointCloud = [];
+  let contourLines = [];
+  let startTime = 0;
+  let rafId = 0;
+  let done = false;
+  let hasReducedMotion = reduceMotion.matches;
 
   function isDark() {
     return document.documentElement.getAttribute("data-theme") !== "light";
   }
 
-  /* ── Canvas resize ─────────────────────────────────── */
-  const stage = canvas.parentElement;
-  function resizeCanvas() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width  = stage.clientWidth  * dpr;
-    canvas.height = stage.clientHeight * dpr;
+  function getPalette() {
+    if (isDark()) {
+      return {
+        bgTop: "#06101c",
+        bgBottom: "#091421",
+        grid: "rgba(142, 190, 224, 0.075)",
+        gridMajor: "rgba(128, 211, 255, 0.13)",
+        point: "rgba(138, 218, 255, 0.34)",
+        pointDim: "rgba(138, 218, 255, 0.12)",
+        scan: "rgba(51, 214, 255, 0.88)",
+        scanSoft: "rgba(51, 214, 255, 0.16)",
+        contour: "rgba(108, 219, 255, 0.54)",
+        contourDim: "rgba(121, 174, 215, 0.18)",
+        textTop: "#ffffff",
+        textMid: "#e8f6ff",
+        textBottom: "#aacce8",
+        proTop: "#6cf2ff",
+        proMid: "#00c8ff",
+        proBottom: "#167db8",
+        shadow: "rgba(0, 18, 32, 0.42)",
+        sweep: "rgba(255, 255, 255, 0.24)",
+      };
+    }
+
+    return {
+      bgTop: "#f5f8fc",
+      bgBottom: "#eaf1f8",
+      grid: "rgba(19, 74, 122, 0.075)",
+      gridMajor: "rgba(0, 112, 204, 0.12)",
+      point: "rgba(0, 112, 204, 0.30)",
+      pointDim: "rgba(0, 80, 150, 0.10)",
+      scan: "rgba(0, 102, 204, 0.82)",
+      scanSoft: "rgba(0, 112, 204, 0.13)",
+      contour: "rgba(0, 112, 204, 0.45)",
+      contourDim: "rgba(19, 74, 122, 0.16)",
+      textTop: "#06192c",
+      textMid: "#0d2744",
+      textBottom: "#1f466b",
+      proTop: "#0094eb",
+      proMid: "#0070cc",
+      proBottom: "#004f9e",
+      shadow: "rgba(0, 45, 95, 0.14)",
+      sweep: "rgba(255, 255, 255, 0.55)",
+    };
+  }
+
+  function easeOutCubic(t) {
+    t = clamp01(t);
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function easeInOutCubic(t) {
+    t = clamp01(t);
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function clamp01(value) {
+    return Math.max(0, Math.min(1, value));
+  }
+
+  function seededRandom(seed) {
+    let s = seed >>> 0;
+    return function next() {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+
+  function resizeCanvas(canvas, ctx, width, height) {
+    canvas.width = Math.max(1, Math.floor(width * dpr));
+    canvas.height = Math.max(1, Math.floor(height * dpr));
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  resizeCanvas();
-
-  /* ── Easing ─────────────────────────────────────────── */
-  function easeInOut(t)  { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
-  function easeOutElastic(t) {
-    if (t===0||t===1) return t;
-    return Math.pow(2,-10*t)*Math.sin((t*10-0.75)*(2*Math.PI/3))+1;
-  }
-  function easeOutCubic(t) { return 1-Math.pow(1-t,3); }
-  function easeInCubic(t)  { return t*t*t; }
-  function lerp(a,b,t)     { return a+(b-a)*t; }
-
-  /* ── Dimensions helpers ─────────────────────────────── */
-  const W = () => stage.clientWidth;
-  const H = () => stage.clientHeight;
-
-  /* ── Drop data ──────────────────────────────────────── */
-  function makeDrops() {
-    const w=W(), h=H(), cx=w/2, cy=h/2;
-    const count = 14 + Math.floor(Math.random()*6);
-    return Array.from({length:count}, (_,i) => {
-      const angle = (i/count)*Math.PI*2;
-      const radius = 0.32*w + Math.random()*0.14*w;
-      return {
-        sx: cx + Math.cos(angle)*radius,
-        sy: cy + Math.sin(angle)*radius + (Math.random()-0.5)*h*0.45,
-        ex: cx + (Math.random()-0.5)*18,
-        ey: cy + (Math.random()-0.5)*12,
-        r: 4 + Math.random()*9,
-        phase: Math.random()*Math.PI*2,
-        speed: 0.55 + Math.random()*0.9,
-        hue: 185 + Math.random()*70,
-      };
-    });
-  }
-  const drops = makeDrops();
-
-  /* ── Logo pixel sampler ─────────────────────────────── */
-  let logoPixels = null;
-  function buildLogoPixels() {
-    const w=W(), h=H();
-    const tc = document.createElement("canvas");
-    tc.width=w; tc.height=h;
-    const t2 = tc.getContext("2d");
-    const fontSize = Math.min(h*0.72, w*0.125);
-    t2.font = `700 ${fontSize}px Rajdhani, sans-serif`;
-    t2.textBaseline = "middle";
-    t2.textAlign    = "left";
-    const mMain = t2.measureText("DepthLens");
-    const mPro  = t2.measureText("Pro");
-    const totalW = mMain.width + mPro.width;
-    const sx = (w-totalW)/2, cy = h/2;
-    t2.fillStyle = "#dff0ff";
-    t2.fillText("DepthLens", sx, cy);
-    t2.fillStyle = "#00c8ff";
-    t2.fillText("Pro", sx+mMain.width, cy);
-    const data = t2.getImageData(0,0,w,h).data;
-    const pts  = [];
-    const step = 3;
-    for (let y=0; y<h; y+=step) {
-      for (let x=0; x<w; x+=step) {
-        const idx=(y*w+x)*4;
-        if (data[idx+3]>80) pts.push({x,y,r:data[idx],g:data[idx+1],b:data[idx+2]});
-      }
-    }
-    logoPixels = pts;
-  }
-
-  /* ── Particle pool ──────────────────────────────────── */
-  let particles = [];
-  function buildParticles() {
-    if (!logoPixels||!logoPixels.length) return;
-    const cx=W()/2, cy=H()/2;
-    const count = Math.min(logoPixels.length, 1400);
-    const step  = Math.floor(logoPixels.length/count);
-    particles = Array.from({length:count}, (_,i) => {
-      const tgt = logoPixels[i*step];
-      return {
-        sx: cx+(Math.random()-0.5)*44,
-        sy: cy+(Math.random()-0.5)*20,
-        tx: tgt.x, ty: tgt.y,
-        r: tgt.r, g: tgt.g, b: tgt.b,
-        delay: Math.random()*0.38,
-        size: 1.1+Math.random()*0.9,
-      };
-    });
-  }
-
-  /* ── Metallic blob draw ─────────────────────────────── */
-  function drawBlob(ctx, x, y, r, t, hue, alpha) {
-    const wobble = Math.sin(t*3.5+hue)*r*0.22;
-    const rw = r+wobble;
-    const dark = isDark();
-    const g = ctx.createRadialGradient(x-rw*0.3,y-rw*0.35,rw*0.05, x,y,rw);
-    if (dark) {
-      g.addColorStop(0,   `hsla(${hue},100%,90%,${alpha})`);
-      g.addColorStop(0.35,`hsla(${hue}, 90%,62%,${alpha*0.9})`);
-      g.addColorStop(0.7, `hsla(${hue}, 80%,38%,${alpha*0.72})`);
-      g.addColorStop(1,   `hsla(${hue}, 70%,16%,${alpha*0.4})`);
-    } else {
-      g.addColorStop(0,   `hsla(${hue}, 90%,82%,${alpha})`);
-      g.addColorStop(0.35,`hsla(${hue}, 80%,52%,${alpha*0.9})`);
-      g.addColorStop(0.7, `hsla(${hue}, 70%,30%,${alpha*0.72})`);
-      g.addColorStop(1,   `hsla(${hue}, 60%,12%,${alpha*0.4})`);
-    }
-    ctx.save();
-    ctx.beginPath();
-    const pts=6;
-    for (let i=0; i<=pts; i++) {
-      const a=(i/pts)*Math.PI*2;
-      const wr=rw*(1+0.18*Math.sin(t*2+i*1.1+hue));
-      const px=x+Math.cos(a)*wr, py=y+Math.sin(a)*wr;
-      if (i===0) { ctx.moveTo(px,py); continue; }
-      const prev=((i-1)/pts)*Math.PI*2;
-      const cr=rw*(1+0.18*Math.sin(t*2+(i-0.5)*1.1+hue));
-      ctx.quadraticCurveTo(
-        x+Math.cos((prev+a)/2)*cr*1.15,
-        y+Math.sin((prev+a)/2)*cr*1.15,
-        px, py
-      );
-    }
-    ctx.closePath();
-    ctx.fillStyle = g;
-    ctx.fill();
-    /* specular */
-    ctx.beginPath();
-    ctx.arc(x-rw*0.28, y-rw*0.32, rw*0.22, 0, Math.PI*2);
-    ctx.fillStyle = `hsla(${hue},80%,96%,${alpha*0.52})`;
-    ctx.fill();
-    ctx.restore();
-  }
-
-  /* ── Welcome background canvas (vector lines) ───────── */
-  const bgCanvas = document.getElementById("welcomeBgCanvas");
-  let   bgCtx    = null;
-  if (bgCanvas) {
-    bgCtx = bgCanvas.getContext("2d");
-    resizeBg(); drawBg();
   }
 
   function resizeBg() {
-    if (!bgCanvas) return;
-    const dpr = Math.min(window.devicePixelRatio||1,2);
-    bgCanvas.width  = window.innerWidth  * dpr;
-    bgCanvas.height = window.innerHeight * dpr;
-    bgCtx.setTransform(dpr,0,0,dpr,0,0);
+    bgW = window.innerWidth || document.documentElement.clientWidth || 1;
+    bgH = window.innerHeight || document.documentElement.clientHeight || 1;
+    resizeCanvas(bgCanvas, bgCtx, bgW, bgH);
+    buildPointCloud();
   }
 
-  function drawBg() {
-    if (!bgCanvas||!bgCtx) return;
-    const w=window.innerWidth, h=window.innerHeight;
-    bgCtx.clearRect(0,0,w,h);
-    const dark = isDark();
+  function resizeLogo() {
+    const rect = stage.getBoundingClientRect();
+    logoW = Math.max(1, rect.width || stage.clientWidth || 1);
+    logoH = Math.max(1, rect.height || stage.clientHeight || 1);
+    resizeCanvas(logoCanvas, logoCtx, logoW, logoH);
+    buildLogoMetrics();
+    buildContourLines();
+  }
 
-    /* ── theme-dependent colors — clearly visible both modes ── */
-    const cGrid   = dark ? "rgba(0,200,255,0.13)"  : "rgba(0,90,180,0.14)";
-    const cGridFn = dark ? "rgba(0,200,255,0.055)" : "rgba(0,90,180,0.065)";
-    const cDiag   = dark ? "rgba(123,92,248,0.09)" : "rgba(80,50,200,0.09)";
-    const cDot    = dark ? "rgba(0,200,255,0.30)"  : "rgba(0,90,180,0.32)";
-    const cConn   = dark ? "rgba(0,200,255,0.10)"  : "rgba(0,90,180,0.12)";
-    const cNode   = dark ? "rgba(0,200,255,0.12)"  : "rgba(0,90,180,0.10)";
+  function resizeAll() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    resizeBg();
+    resizeLogo();
+  }
 
-    const gs = 56; /* grid spacing */
+  function buildLogoMetrics() {
+    const fontSize = Math.min(logoH * 0.70, logoW * 0.126);
+    logoCtx.font = `700 ${fontSize}px Rajdhani, Exo 2, sans-serif`;
+    logoCtx.textBaseline = "middle";
+    logoCtx.textAlign = "left";
 
-    /* fine grid */
-    bgCtx.lineWidth = 0.5;
-    bgCtx.strokeStyle = cGridFn;
-    for (let x=0;x<w;x+=gs/2){ bgCtx.beginPath();bgCtx.moveTo(x,0);bgCtx.lineTo(x,h);bgCtx.stroke(); }
-    for (let y=0;y<h;y+=gs/2){ bgCtx.beginPath();bgCtx.moveTo(0,y);bgCtx.lineTo(w,y);bgCtx.stroke(); }
+    const main = logoCtx.measureText("DepthLens");
+    const pro = logoCtx.measureText("Pro");
+    const totalWidth = main.width + pro.width;
+    const x = (logoW - totalWidth) / 2;
+    const y = logoH / 2 + fontSize * 0.02;
 
-    /* bold grid */
-    bgCtx.lineWidth = 0.9;
-    bgCtx.strokeStyle = cGrid;
-    for (let x=0;x<w;x+=gs){ bgCtx.beginPath();bgCtx.moveTo(x,0);bgCtx.lineTo(x,h);bgCtx.stroke(); }
-    for (let y=0;y<h;y+=gs){ bgCtx.beginPath();bgCtx.moveTo(0,y);bgCtx.lineTo(w,y);bgCtx.stroke(); }
+    logoMetrics = {
+      fontSize,
+      x,
+      y,
+      mainWidth: main.width,
+      proWidth: pro.width,
+      totalWidth,
+      textTop: y - fontSize * 0.46,
+      textBottom: y + fontSize * 0.38,
+    };
+  }
 
-    /* diagonal accents */
-    bgCtx.lineWidth = 0.75;
-    bgCtx.strokeStyle = cDiag;
-    const dsp = 200;
-    for (let d=-h; d<w+h; d+=dsp){
-      bgCtx.beginPath(); bgCtx.moveTo(d,0);   bgCtx.lineTo(d+h,h);   bgCtx.stroke();
-    }
-    for (let d=-h; d<w+h; d+=dsp*1.5){
-      bgCtx.beginPath(); bgCtx.moveTo(d+h,0); bgCtx.lineTo(d,h);     bgCtx.stroke();
-    }
+  function buildPointCloud() {
+    const rand = seededRandom(Math.floor(bgW * 17 + bgH * 31));
+    const count = Math.max(80, Math.min(160, Math.round((bgW * bgH) / 13000)));
+    pointCloud = Array.from({ length: count }, function makePoint(_, index) {
+      const depth = Math.pow(rand(), 1.45);
+      return {
+        x: rand() * bgW,
+        y: rand() * bgH,
+        z: depth,
+        r: lerp(0.55, 1.55, depth),
+        phase: rand() * Math.PI * 2,
+        drift: lerp(0.22, 0.85, rand()),
+        alpha: lerp(0.16, 0.46, depth) * (index % 7 === 0 ? 1.25 : 1),
+      };
+    });
+  }
 
-    /* intersection dots */
-    bgCtx.fillStyle = cDot;
-    for (let x=0;x<w;x+=gs){
-      for (let y=0;y<h;y+=gs){
-        if ((Math.floor(x/gs)+Math.floor(y/gs))%3===0){
-          bgCtx.beginPath(); bgCtx.arc(x,y,2,0,Math.PI*2); bgCtx.fill();
-        }
+  function buildContourLines() {
+    if (!logoMetrics) return;
+
+    const rand = seededRandom(Math.floor(logoW * 13 + logoH * 29));
+    const lines = [];
+    const count = 12;
+    const left = logoMetrics.x - logoMetrics.fontSize * 0.22;
+    const right = logoMetrics.x + logoMetrics.totalWidth + logoMetrics.fontSize * 0.18;
+    const width = right - left;
+    const centerY = logoH / 2;
+    const band = logoMetrics.fontSize * 0.74;
+
+    for (let i = 0; i < count; i += 1) {
+      const yBase = centerY - band / 2 + (i / (count - 1)) * band;
+      const amp = logoMetrics.fontSize * lerp(0.035, 0.090, rand());
+      const freq = lerp(1.4, 2.8, rand());
+      const phase = rand() * Math.PI * 2;
+      const points = [];
+      const segments = 64;
+
+      for (let j = 0; j <= segments; j += 1) {
+        const u = j / segments;
+        const edgeFalloff = Math.sin(Math.PI * u);
+        const x = left + width * u;
+        const wave = Math.sin(u * Math.PI * 2 * freq + phase);
+        const micro = Math.sin(u * Math.PI * 6 + phase * 0.7) * 0.35;
+        const y = yBase + (wave + micro) * amp * edgeFalloff;
+        points.push({ x, y });
       }
+
+      lines.push({
+        points,
+        alpha: lerp(0.35, 0.82, rand()),
+        offset: i / count,
+        width: i % 4 === 0 ? 1.15 : 0.85,
+      });
     }
 
-    /* circuit connector lines (two clusters) */
-    bgCtx.strokeStyle = cConn;
-    bgCtx.lineWidth = 1.2;
-    const segs = [
-      [0,0,3,0],[0,0,0,2],[3,0,3,2],[0,2,3,2],
-      [6,1,9,1],[6,1,6,4],[9,1,9,3],[6,4,9,4],
-      [12,0,15,0],[12,0,12,3],[15,0,15,2],[12,3,15,3],
-      [2,5,5,5],[2,5,2,8],[5,5,5,8],[2,8,5,8],
-      [8,4,11,4],[8,4,8,7],[11,4,11,6],
-    ];
-    const drawSegs = (ox,oy) => {
-      segs.forEach(([x1,y1,x2,y2])=>{
-        bgCtx.beginPath();
-        bgCtx.moveTo(ox+x1*gs, oy+y1*gs);
-        bgCtx.lineTo(ox+x2*gs, oy+y2*gs);
-        bgCtx.stroke();
-      });
-    };
-    drawSegs(gs*2, gs*2);
-    drawSegs(w-gs*13, h-gs*10);
-
-    /* node squares at connector junctions */
-    bgCtx.fillStyle = cNode;
-    const nodeJcts = [[0,0],[3,0],[0,2],[3,2],[6,1],[9,1],[6,4],[9,3]];
-    const drawNodes = (ox,oy) => {
-      nodeJcts.forEach(([x,y])=>{
-        const nx=ox+x*gs, ny=oy+y*gs;
-        bgCtx.beginPath();
-        bgCtx.rect(nx-4, ny-4, 8, 8);
-        bgCtx.fill();
-      });
-    };
-    drawNodes(gs*2, gs*2);
-    drawNodes(w-gs*13, h-gs*10);
+    contourLines = lines;
   }
 
-  /* ── Final static logo draw ─────────────────────────── */
+  function drawBackground(time, progress) {
+    const palette = getPalette();
+    const gridAlpha = easeOutCubic(Math.min(progress / (PHASE_GRID_END / DURATION), 1));
+    const drift = hasReducedMotion ? 0 : time * 0.004;
+    const bgGradient = bgCtx.createLinearGradient(0, 0, 0, bgH);
+    bgGradient.addColorStop(0, palette.bgTop);
+    bgGradient.addColorStop(1, palette.bgBottom);
+
+    bgCtx.clearRect(0, 0, bgW, bgH);
+    bgCtx.fillStyle = bgGradient;
+    bgCtx.fillRect(0, 0, bgW, bgH);
+
+    bgCtx.save();
+    bgCtx.globalAlpha = 0.72 * gridAlpha;
+    drawGrid(palette, drift);
+    bgCtx.restore();
+
+    drawPointCloud(time, lerp(0.36, 1, gridAlpha));
+  }
+
+  function drawGrid(palette, drift) {
+    const fine = 36;
+    const majorEvery = 4;
+    const offsetX = (drift * 3) % fine;
+    const offsetY = (drift * 2) % fine;
+
+    for (let x = -fine + offsetX; x <= bgW + fine; x += fine) {
+      const column = Math.round((x - offsetX) / fine);
+      bgCtx.beginPath();
+      bgCtx.moveTo(x, 0);
+      bgCtx.lineTo(x, bgH);
+      bgCtx.lineWidth = column % majorEvery === 0 ? 0.9 : 0.55;
+      bgCtx.strokeStyle = column % majorEvery === 0 ? palette.gridMajor : palette.grid;
+      bgCtx.stroke();
+    }
+
+    for (let y = -fine + offsetY; y <= bgH + fine; y += fine) {
+      const row = Math.round((y - offsetY) / fine);
+      bgCtx.beginPath();
+      bgCtx.moveTo(0, y);
+      bgCtx.lineTo(bgW, y);
+      bgCtx.lineWidth = row % majorEvery === 0 ? 0.9 : 0.55;
+      bgCtx.strokeStyle = row % majorEvery === 0 ? palette.gridMajor : palette.grid;
+      bgCtx.stroke();
+    }
+
+    const cx = bgW / 2;
+    const cy = bgH / 2;
+    bgCtx.strokeStyle = palette.gridMajor;
+    bgCtx.lineWidth = 1;
+    bgCtx.globalAlpha *= 0.55;
+    bgCtx.beginPath();
+    bgCtx.moveTo(cx - 28, cy);
+    bgCtx.lineTo(cx + 28, cy);
+    bgCtx.moveTo(cx, cy - 28);
+    bgCtx.lineTo(cx, cy + 28);
+    bgCtx.stroke();
+  }
+
+  function drawPointCloud(time, alpha) {
+    const palette = getPalette();
+    bgCtx.save();
+    pointCloud.forEach(function drawPoint(point) {
+      const driftX = hasReducedMotion ? 0 : Math.cos(time * 0.00016 * point.drift + point.phase) * point.z * 7;
+      const driftY = hasReducedMotion ? 0 : Math.sin(time * 0.00013 * point.drift + point.phase) * point.z * 5;
+      const opacity = point.alpha * alpha;
+      bgCtx.beginPath();
+      bgCtx.arc(point.x + driftX, point.y + driftY, point.r, 0, Math.PI * 2);
+      bgCtx.fillStyle = point.z > 0.54 ? palette.point : palette.pointDim;
+      bgCtx.globalAlpha = opacity;
+      bgCtx.fill();
+    });
+    bgCtx.restore();
+  }
+
+  function drawLogoFrame(elapsed, time) {
+    const palette = getPalette();
+    const scanT = clamp01((elapsed - PHASE_SCAN_START) / (PHASE_SCAN_END - PHASE_SCAN_START));
+    const resolveT = clamp01((elapsed - PHASE_RESOLVE_START) / (PHASE_RESOLVE_END - PHASE_RESOLVE_START));
+    const polishT = clamp01((elapsed - PHASE_POLISH_START) / (PHASE_POLISH_END - PHASE_POLISH_START));
+    const logoAlpha = easeOutCubic(resolveT);
+    const contourAlpha = elapsed < PHASE_SCAN_START ? 0 : 1 - easeInOutCubic(resolveT);
+    const sweepProgress = easeInOutCubic(polishT);
+    const scanPosition = scanT;
+
+    logoCtx.clearRect(0, 0, logoW, logoH);
+
+    if (elapsed >= PHASE_SCAN_START && elapsed <= PHASE_RESOLVE_END) {
+      drawContours(contourAlpha, scanPosition, time);
+    }
+
+    if (elapsed >= PHASE_SCAN_START && elapsed <= PHASE_SCAN_END) {
+      drawScanBeam(scanPosition);
+    }
+
+    if (logoAlpha > 0) {
+      drawLogo(logoAlpha, sweepProgress, false);
+    } else if (elapsed > PHASE_SCAN_START) {
+      drawCalibrationTicks(palette, scanT * 0.55);
+    }
+  }
+
+  function drawScanBeam(progress) {
+    if (!logoMetrics) return;
+    const palette = getPalette();
+    const left = logoMetrics.x - logoMetrics.fontSize * 0.55;
+    const right = logoMetrics.x + logoMetrics.totalWidth + logoMetrics.fontSize * 0.55;
+    const x = lerp(left, right, easeInOutCubic(progress));
+    const top = logoMetrics.textTop - logoMetrics.fontSize * 0.18;
+    const bottom = logoMetrics.textBottom + logoMetrics.fontSize * 0.20;
+
+    logoCtx.save();
+    logoCtx.globalCompositeOperation = "lighter";
+
+    const trail = logoCtx.createLinearGradient(x - 78, 0, x + 20, 0);
+    trail.addColorStop(0, "rgba(0, 0, 0, 0)");
+    trail.addColorStop(0.70, palette.scanSoft);
+    trail.addColorStop(1, palette.scan);
+    logoCtx.fillStyle = trail;
+    logoCtx.fillRect(x - 78, top, 98, bottom - top);
+
+    logoCtx.strokeStyle = palette.scan;
+    logoCtx.lineWidth = 1.25;
+    logoCtx.beginPath();
+    logoCtx.moveTo(x, top);
+    logoCtx.lineTo(x + logoMetrics.fontSize * 0.10, bottom);
+    logoCtx.stroke();
+
+    logoCtx.globalAlpha = 0.28;
+    logoCtx.lineWidth = 5;
+    logoCtx.strokeStyle = palette.scanSoft;
+    logoCtx.beginPath();
+    logoCtx.moveTo(x - 2, top);
+    logoCtx.lineTo(x + logoMetrics.fontSize * 0.10 - 2, bottom);
+    logoCtx.stroke();
+    logoCtx.restore();
+  }
+
+  function drawContours(alpha, scanPosition, time) {
+    if (!logoMetrics) return;
+    const palette = getPalette();
+    const revealX = lerp(
+      logoMetrics.x - logoMetrics.fontSize * 0.5,
+      logoMetrics.x + logoMetrics.totalWidth + logoMetrics.fontSize * 0.5,
+      easeInOutCubic(scanPosition)
+    );
+
+    logoCtx.save();
+    logoCtx.lineCap = "round";
+    logoCtx.lineJoin = "round";
+    logoCtx.beginPath();
+    logoCtx.rect(
+      logoMetrics.x - logoMetrics.fontSize * 0.60,
+      logoMetrics.textTop - logoMetrics.fontSize * 0.24,
+      Math.max(0, revealX - (logoMetrics.x - logoMetrics.fontSize * 0.60)),
+      logoMetrics.fontSize * 1.15
+    );
+    logoCtx.clip();
+
+    contourLines.forEach(function drawLine(line, index) {
+      const localAlpha = alpha * line.alpha * (0.78 + 0.22 * Math.sin(time * 0.0012 + index));
+      logoCtx.globalAlpha = localAlpha;
+      logoCtx.strokeStyle = index % 3 === 0 ? palette.contour : palette.contourDim;
+      logoCtx.lineWidth = line.width;
+      logoCtx.beginPath();
+      line.points.forEach(function drawPoint(point, pointIndex) {
+        if (pointIndex === 0) logoCtx.moveTo(point.x, point.y);
+        else logoCtx.lineTo(point.x, point.y);
+      });
+      logoCtx.stroke();
+    });
+
+    drawCalibrationTicks(palette, alpha * 0.55);
+    logoCtx.restore();
+  }
+
+  function drawCalibrationTicks(palette, alpha) {
+    if (!logoMetrics || alpha <= 0) return;
+    const pad = logoMetrics.fontSize * 0.32;
+    const left = logoMetrics.x - pad;
+    const right = logoMetrics.x + logoMetrics.totalWidth + pad;
+    const top = logoMetrics.textTop - pad * 0.55;
+    const bottom = logoMetrics.textBottom + pad * 0.55;
+    const tick = Math.max(10, logoMetrics.fontSize * 0.11);
+
+    logoCtx.save();
+    logoCtx.globalAlpha = alpha;
+    logoCtx.strokeStyle = palette.gridMajor;
+    logoCtx.lineWidth = 1;
+    [[left, top, 1, 1], [right, top, -1, 1], [left, bottom, 1, -1], [right, bottom, -1, -1]].forEach(
+      function corner(c) {
+        const x = c[0];
+        const y = c[1];
+        logoCtx.beginPath();
+        logoCtx.moveTo(x, y + tick * c[3]);
+        logoCtx.lineTo(x, y);
+        logoCtx.lineTo(x + tick * c[2], y);
+        logoCtx.stroke();
+      }
+    );
+    logoCtx.restore();
+  }
+
+  function drawLogo(alpha, sweepProgress, finalState) {
+    if (!logoMetrics) return;
+    const palette = getPalette();
+    const x = logoMetrics.x;
+    const y = logoMetrics.y;
+    const fontSize = logoMetrics.fontSize;
+    const mainX = x;
+    const proX = x + logoMetrics.mainWidth;
+    const revealWidth = finalState ? logoMetrics.totalWidth : logoMetrics.totalWidth * easeOutCubic(alpha);
+
+    logoCtx.save();
+    logoCtx.font = `700 ${fontSize}px Rajdhani, Exo 2, sans-serif`;
+    logoCtx.textBaseline = "middle";
+    logoCtx.textAlign = "left";
+    logoCtx.globalAlpha = clamp01(alpha);
+    logoCtx.shadowColor = palette.shadow;
+    logoCtx.shadowBlur = isDark() ? 10 : 5;
+    logoCtx.shadowOffsetY = isDark() ? 2 : 1;
+
+    logoCtx.beginPath();
+    logoCtx.rect(x - 4, 0, revealWidth + 8, logoH);
+    logoCtx.clip();
+
+    const mainGradient = logoCtx.createLinearGradient(0, y - fontSize * 0.48, 0, y + fontSize * 0.42);
+    mainGradient.addColorStop(0, palette.textTop);
+    mainGradient.addColorStop(0.52, palette.textMid);
+    mainGradient.addColorStop(1, palette.textBottom);
+    logoCtx.fillStyle = mainGradient;
+    logoCtx.fillText("DepthLens", mainX, y);
+
+    const proGradient = logoCtx.createLinearGradient(0, y - fontSize * 0.48, 0, y + fontSize * 0.42);
+    proGradient.addColorStop(0, palette.proTop);
+    proGradient.addColorStop(0.52, palette.proMid);
+    proGradient.addColorStop(1, palette.proBottom);
+    logoCtx.fillStyle = proGradient;
+    logoCtx.fillText("Pro", proX, y);
+
+    if (sweepProgress > 0 && sweepProgress < 1) {
+      logoCtx.shadowBlur = 0;
+      logoCtx.globalCompositeOperation = "source-atop";
+      const sweepX = lerp(x - fontSize * 0.9, x + logoMetrics.totalWidth + fontSize * 0.9, sweepProgress);
+      const sweep = logoCtx.createLinearGradient(sweepX - 45, 0, sweepX + 45, 0);
+      sweep.addColorStop(0, "rgba(255, 255, 255, 0)");
+      sweep.addColorStop(0.5, palette.sweep);
+      sweep.addColorStop(1, "rgba(255, 255, 255, 0)");
+      logoCtx.fillStyle = sweep;
+      logoCtx.fillRect(x - 10, logoMetrics.textTop - 10, logoMetrics.totalWidth + 20, fontSize);
+    }
+
+    logoCtx.restore();
+
+    logoCanvas.style.filter = isDark()
+      ? "drop-shadow(0 10px 26px rgba(0, 0, 0, 0.28))"
+      : "drop-shadow(0 8px 18px rgba(0, 54, 110, 0.10))";
+  }
+
   function drawFinalLogo() {
-    const w=W(), h=H();
-    ctx.clearRect(0,0,w,h);
-    const fontSize = Math.min(h*0.72, w*0.125);
-    ctx.font = `700 ${fontSize}px Rajdhani, sans-serif`;
-    ctx.textBaseline="middle"; ctx.textAlign="left";
-    const mMain = ctx.measureText("DepthLens");
-    const mPro  = ctx.measureText("Pro");
-    const sx = (w-(mMain.width+mPro.width))/2, cy=h/2;
-    const dark = isDark();
-
-    const gm = ctx.createLinearGradient(sx, cy-fontSize/2, sx, cy+fontSize/2);
-    if (dark){
-      gm.addColorStop(0,"#ffffff"); gm.addColorStop(0.5,"#e8f6ff"); gm.addColorStop(1,"#a0c8e8");
-    } else {
-      gm.addColorStop(0,"#0a1e35"); gm.addColorStop(0.5,"#0d2744"); gm.addColorStop(1,"#1a3a5c");
-    }
-    ctx.fillStyle = gm;
-    ctx.fillText("DepthLens", sx, cy);
-
-    const gp = ctx.createLinearGradient(sx+mMain.width, cy-fontSize/2, sx+mMain.width, cy+fontSize/2);
-    if (dark){
-      gp.addColorStop(0,"#5deeff"); gp.addColorStop(0.5,"#00c8ff"); gp.addColorStop(1,"#007aaa");
-    } else {
-      gp.addColorStop(0,"#0088dd"); gp.addColorStop(0.5,"#0070cc"); gp.addColorStop(1,"#005599");
-    }
-    ctx.fillStyle = gp;
-    ctx.fillText("Pro", sx+mMain.width, cy);
-
-    canvas.style.filter = dark
-      ? "drop-shadow(0 0 14px rgba(0,200,255,0.38)) drop-shadow(0 0 36px rgba(0,200,255,0.16))"
-      : "drop-shadow(0 0 10px rgba(0,112,204,0.28)) drop-shadow(0 0 24px rgba(0,112,204,0.12))";
-    canvas.style.transition = "filter 0.8s ease";
+    logoCtx.clearRect(0, 0, logoW, logoH);
+    drawLogo(1, 1, true);
   }
 
-  /* ── Reveal CTA + theme toggle ───────────────────────── */
   function revealControls() {
-    const cta   = document.querySelector(".welcome-cta-wrap");
+    const cta = document.querySelector(".welcome-cta-wrap");
     const theme = document.querySelector(".theme-toggle-landing");
-    if (cta)   cta.classList.add("revealed");
+    if (cta) cta.classList.add("revealed");
     if (theme) theme.classList.add("revealed");
   }
 
-  /* ── Main render loop ───────────────────────────────── */
-  const T = { drop:1000, merge:800, morph:1200, total:3000 };
-  let startTime=null, rafId=null, done=false;
+  function render(timestamp) {
+    if (done || hasReducedMotion) return;
+    if (!startTime) startTime = timestamp;
 
-  function render(ts) {
-    if (done) return;
-    if (!startTime) {
-      startTime=ts;
-      buildLogoPixels();
-      buildParticles();
-    }
-    const el=ts-startTime, w=W(), h=H(), t=el/1000;
-    ctx.clearRect(0,0,w,h);
+    const elapsed = timestamp - startTime;
+    const progress = clamp01(elapsed / DURATION);
 
-    /* ── Phase 1 + 2: drops fall then merge (0 → 1800ms) ── */
-    if (el < T.drop+T.merge) {
-      const dropT  = Math.min(el/T.drop, 1);
-      const mergeT = el>T.drop ? Math.min((el-T.drop)/T.merge,1) : 0;
-      const mEase  = easeInOut(mergeT);
+    drawBackground(timestamp, progress);
+    drawLogoFrame(elapsed, timestamp);
 
-      drops.forEach(d=>{
-        const fe = easeOutElastic(Math.min(dropT*d.speed,1));
-        const px = lerp(lerp(d.sx,d.ex,fe), d.ex, mEase);
-        const py = lerp(lerp(d.sy,d.ey,fe), d.ey, mEase);
-        const rScale = mergeT<0.5 ? 1 : 1-easeInCubic(mergeT*2-1)*0.72;
-        const r = d.r * fe * rScale;
-        if (r>0.5) drawBlob(ctx, px,py, r, t+d.phase, d.hue, 0.82*fe);
-      });
-
-      if (mergeT>0.28){
-        const ma = easeOutCubic((mergeT-0.28)/0.72);
-        drawBlob(ctx, w/2,h/2, 30*easeOutCubic(mergeT), t, 190, ma*0.88);
-      }
+    if (elapsed >= DURATION) {
+      done = true;
+      drawBackground(timestamp, 1);
+      drawFinalLogo();
+      setTimeout(revealControls, 80);
+      return;
     }
 
-    /* ── Phase 3: morph into text (1800ms → 3000ms) ─────── */
-    else {
-      const morphT  = Math.min((el-(T.drop+T.merge))/T.morph, 1);
-      const morphE  = easeOutCubic(morphT);
-      const solidT  = morphT>0.68 ? Math.min((morphT-0.68)/0.32,1) : 0;
-
-      /* particles stream to text positions */
-      particles.forEach(p=>{
-        const pt = Math.max(0, Math.min((morphT-p.delay)/(1-p.delay),1));
-        const pe = easeOutCubic(pt);
-        const px = lerp(p.sx,p.tx,pe);
-        const py = lerp(p.sy,p.ty,pe);
-        const fr = lerp(0,   p.r, solidT);
-        const fg = lerp(200, p.g, solidT);
-        const fb = lerp(255, p.b, solidT);
-        const alpha = pt>0.05 ? Math.min(pt*3,0.9) : 0;
-        const shimmer = 0.72+0.28*Math.sin(t*7+p.tx*0.018);
-        ctx.beginPath();
-        ctx.arc(px, py, p.size*(0.55+pe*0.45), 0, Math.PI*2);
-        ctx.fillStyle = `rgba(${Math.round(fr*shimmer)},${Math.round(fg*shimmer)},${Math.round(fb)},${alpha})`;
-        ctx.fill();
-      });
-
-      /* center blob fades as text forms */
-      if (morphT<0.42){
-        drawBlob(ctx, w/2,h/2, 24*(1-morphT/0.42), t, 190, (1-morphT/0.42)*0.65);
-      }
-
-      /* clean text fades in over particles */
-      if (morphT>0.72) {
-        const ta = easeOutCubic((morphT-0.72)/0.28);
-        ctx.save();
-        ctx.globalAlpha = ta;
-        const fontSize = Math.min(h*0.72, w*0.125);
-        ctx.font=`700 ${fontSize}px Rajdhani, sans-serif`;
-        ctx.textBaseline="middle"; ctx.textAlign="left";
-        const mMain=ctx.measureText("DepthLens");
-        const mPro =ctx.measureText("Pro");
-        const sx=(w-(mMain.width+mPro.width))/2, cy=h/2;
-        const dark=isDark();
-
-        const gm=ctx.createLinearGradient(sx,cy-fontSize/2,sx,cy+fontSize/2);
-        if (dark){
-          gm.addColorStop(0,"#ffffff"); gm.addColorStop(0.5,"#e8f6ff"); gm.addColorStop(1,"#a0c8e8");
-        } else {
-          gm.addColorStop(0,"#0a1e35"); gm.addColorStop(0.5,"#0d2744"); gm.addColorStop(1,"#1a3a5c");
-        }
-        ctx.fillStyle=gm; ctx.fillText("DepthLens",sx,cy);
-
-        const gp=ctx.createLinearGradient(sx+mMain.width,cy-fontSize/2,sx+mMain.width,cy+fontSize/2);
-        if (dark){
-          gp.addColorStop(0,"#5deeff"); gp.addColorStop(0.5,"#00c8ff"); gp.addColorStop(1,"#007aaa");
-        } else {
-          gp.addColorStop(0,"#0088dd"); gp.addColorStop(0.5,"#0070cc"); gp.addColorStop(1,"#005599");
-        }
-        ctx.fillStyle=gp; ctx.fillText("Pro",sx+mMain.width,cy);
-
-        /* light-sweep shimmer */
-        const sw=((t*0.55)%2)*((w+(mMain.width+mPro.width))+120)-60;
-        const sg=ctx.createLinearGradient(sw-70,0,sw+70,0);
-        sg.addColorStop(0,"rgba(255,255,255,0)");
-        sg.addColorStop(0.5,`rgba(255,255,255,${0.20*ta})`);
-        sg.addColorStop(1,"rgba(255,255,255,0)");
-        ctx.fillStyle=sg;
-        ctx.fillText("DepthLens",sx,cy);
-        ctx.fillText("Pro",sx+mMain.width,cy);
-        ctx.restore();
-      }
-
-      if (morphT>=1 && !done) {
-        done=true;
-        cancelAnimationFrame(rafId);
-        drawFinalLogo();
-        setTimeout(revealControls, 100);
-        return;
-      }
-    }
-
-    rafId=requestAnimationFrame(render);
+    rafId = requestAnimationFrame(render);
   }
 
-  /* ── Theme-change listener ───────────────────────────── */
-  document.addEventListener("depthlens-theme-changed", ()=>{
-    resizeBg(); drawBg();
-    if (done) drawFinalLogo();
-  });
+  function drawReducedMotionState() {
+    done = true;
+    drawBackground(0, 1);
+    drawFinalLogo();
+    setTimeout(revealControls, 40);
+  }
 
-  /* ── Resize ─────────────────────────────────────────── */
-  window.addEventListener("resize",()=>{
-    resizeCanvas();
-    resizeBg(); drawBg();
-    if (done){ buildLogoPixels(); buildParticles(); drawFinalLogo(); }
-  });
+  function handleThemeChange() {
+    drawBackground(performance.now(), done || hasReducedMotion ? 1 : clamp01(((performance.now() - startTime) || 0) / DURATION));
+    if (done || hasReducedMotion) drawFinalLogo();
+  }
 
-  /* ── Start ───────────────────────────────────────────── */
-  requestAnimationFrame(render);
+  function handleResize() {
+    resizeAll();
+    if (done || hasReducedMotion) {
+      drawBackground(0, 1);
+      drawFinalLogo();
+    }
+  }
 
+  function handleMotionPreferenceChange(event) {
+    hasReducedMotion = event.matches;
+    if (hasReducedMotion) {
+      if (rafId) cancelAnimationFrame(rafId);
+      drawReducedMotionState();
+    } else if (!done) {
+      startTime = 0;
+      rafId = requestAnimationFrame(render);
+    }
+  }
+
+  resizeAll();
+
+  document.addEventListener("depthlens-theme-changed", handleThemeChange);
+  window.addEventListener("resize", handleResize);
+
+  if (typeof reduceMotion.addEventListener === "function") {
+    reduceMotion.addEventListener("change", handleMotionPreferenceChange);
+  } else if (typeof reduceMotion.addListener === "function") {
+    reduceMotion.addListener(handleMotionPreferenceChange);
+  }
+
+  if (hasReducedMotion) {
+    drawReducedMotionState();
+  } else {
+    rafId = requestAnimationFrame(render);
+  }
 })();
