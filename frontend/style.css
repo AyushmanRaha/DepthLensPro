@@ -502,6 +502,19 @@ text-shadow:
   transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
   -webkit-app-region: drag;
 }
+
+/* Make header controls clickable inside Electron's draggable header. */
+.site-header .header-nav-shell,
+.site-header .header-nav,
+.site-header .header-nav *,
+.site-header .nav-btn,
+.site-header .theme-toggle-header,
+.site-header .theme-toggle-header *,
+.site-header .engine-status-host,
+.site-header .engine-status-host * {
+  -webkit-app-region: no-drag !important;
+}
+
 .header-inner {
   max-width: 1440px; margin: 0 auto;
   padding: 0 clamp(0.75rem, 2.6vw, 1.5rem);
@@ -1116,6 +1129,7 @@ text-shadow:
 .site-header button {
   -webkit-app-region: no-drag;
 }
+
 body.macos .header-inner { padding-left: calc(78px + 0.5rem); }
 @media (display-mode: fullscreen) { body.macos .header-inner { padding-left:1.5rem; } }
 

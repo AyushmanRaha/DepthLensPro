@@ -2274,28 +2274,44 @@ function initGuideAccordion() {
 // PANEL NAVIGATION
 // ══════════════════════════════════════════════════════════════
 function switchPanel(name) {
-  const targetId = `panel-${name}`;
-  const targetPanel = el.panels.find?.(p => p.id === targetId) || document.getElementById(targetId);
-  if (!targetPanel) return;
+  const panelName = String(name || "").trim();
+  if (!panelName) return false;
 
-  el.navBtns.forEach(b => b.classList.toggle("active", b.dataset.panel === name));
+  const targetId = `panel-${panelName}`;
+  const targetPanel = document.getElementById(targetId);
 
-  el.panels.forEach(p => {
-    const isActive = p.id === targetId;
-    p.hidden = !isActive;
-    p.classList.toggle("active", isActive);
+  if (!targetPanel) {
+    console.warn(`[DepthLens] Cannot switch panel: missing #${targetId}`);
+    return false;
+  }
+
+  const navBtns = $$(".nav-btn[data-panel]");
+  const panels = $$(".panel");
+
+  navBtns.forEach(btn => {
+    const isActive = btn.dataset.panel === panelName;
+    btn.classList.toggle("active", isActive);
+    btn.setAttribute("aria-current", isActive ? "page" : "false");
   });
 
-  const activeBtn = el.navBtns.find?.(b => b.dataset.panel === name) || $(`.nav-btn[data-panel="${cssEscapeValue(name)}"]`);
+  panels.forEach(panel => {
+    const isActive = panel.id === targetId;
+    panel.hidden = !isActive;
+    panel.classList.toggle("active", isActive);
+  });
+
+  const activeBtn = navBtns.find(btn => btn.dataset.panel === panelName);
   activeBtn?.scrollIntoView({
     block: "nearest",
     inline: "center",
     behavior: prefersReducedMotion() ? "auto" : "smooth",
   });
 
-  if (name === "guide") refreshOpenGuideHeights();
+  if (panelName === "guide") {
+    refreshOpenGuideHeights();
+  }
 
-  if (name === "reconstruct") {
+  if (panelName === "reconstruct") {
     syncReconstructControls();
     resizePointCloudCanvas();
     drawPointCloudFrame();
@@ -2303,11 +2319,38 @@ function switchPanel(name) {
   } else {
     stopPointCloudViewer();
   }
+
+  return true;
 }
-el.navBtns.forEach(b => b.addEventListener("click", event => {
-  const panelName = event.currentTarget?.dataset?.panel;
-  if (panelName) switchPanel(panelName);
-}));
+
+function bindPanelNavigation() {
+  const nav = document.querySelector(".header-nav");
+  if (!nav || nav.dataset.panelNavBound === "true") return;
+
+  nav.dataset.panelNavBound = "true";
+
+  nav.addEventListener("click", event => {
+    const btn = event.target.closest?.(".nav-btn[data-panel]");
+    if (!btn || !nav.contains(btn)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    switchPanel(btn.dataset.panel);
+  });
+
+  nav.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+
+    const btn = event.target.closest?.(".nav-btn[data-panel]");
+    if (!btn || !nav.contains(btn)) return;
+
+    event.preventDefault();
+    switchPanel(btn.dataset.panel);
+  });
+}
+
+bindPanelNavigation();
 
 // ══════════════════════════════════════════════════════════════
 // GROUND TRUTH MODE
