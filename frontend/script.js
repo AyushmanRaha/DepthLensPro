@@ -171,6 +171,17 @@ const state = {
   timing: { workspace: {}, compare: {} },
   compareView: { metricKey: "latency_ms", open: true, results: [] },
   initializingBackend: true,
+  engineStatus: {
+  cls: "connecting",
+  label: "Starting engine…",
+  sub: DEFAULT_API_BASE_URL,
+  deviceText: "",
+  live: null,
+  readiness: null,
+  health: null,
+  lastUpdatedAt: null,
+  panelOpen: false,
+  },
   gtMode: false,
   gtFile: null,
   webcam: {
@@ -218,12 +229,28 @@ const el = {
   themeToggleBtn:     $("#themeToggleBtn"),
 
   // Header
+  engineStatusHost:        $("#engineStatusHost"),
+  engineStatusButton:      $("#engineStatusButton"),
+  engineStatusPanel:       $("#engineStatusPanel"),
+  engineStatusClose:       $("#engineStatusClose"),
+  engineStatusRefresh:     $("#engineStatusRefresh"),
+  engineStatusStateValue:  $("#engineStatusStateValue"),
+  engineStatusBackendUrl:  $("#engineStatusBackendUrl"),
+  engineStatusReadiness:   $("#engineStatusReadinessValue"),
+  engineStatusDiagnostics: $("#engineStatusDiagnosticsValue"),
+  engineStatusRuntime:     $("#engineStatusRuntimeValue"),
+  engineStatusCache:       $("#engineStatusCacheValue"),
+  engineStatusLoadedModels:$("#engineStatusLoadedModels"),
+  engineStatusSystem:      $("#engineStatusSystemValue"),
+  engineStatusModules:     $("#engineStatusModules"),
+  engineStatusUpdatedAt:   $("#engineStatusUpdatedAt"),
+
   statusDot:    $("#statusDot"),
   statusLabel:  $("#statusLabel"),
   statusSub:    $("#statusSub"),
   deviceBadge:  $("#deviceBadge"),
   navBtns:      $$(".nav-btn"),
-  panels:       $$(".panel"),
+  panels:       $$(".panel"), 
 
   // Device
   deviceInfoBanner: $("#deviceInfoBanner"),
@@ -756,11 +783,335 @@ function logEndpointTiming(label, started, ok, extra = "") {
 // SERVER HEALTH & DEVICE LIST
 // ══════════════════════════════════════════════════════════════
 function setStatus(cls, label, sub, deviceText) {
-  el.statusDot.className = `status-dot ${cls}`;
-  el.statusLabel.textContent = label;
-  el.statusSub.textContent = sub || "";
-  if (deviceText) { el.deviceBadge.textContent = deviceText; el.deviceBadge.hidden = false; }
-  else { el.deviceBadge.hidden = true; }
+  const safeCls = ["online", "offline", "connecting"].includes(cls) ? cls : "offline";
+
+  state.engineStatus.cls = safeCls;
+  state.engineStatus.label = label || "Depth Engine";
+  state.engineStatus.sub = sub || "";
+  state.engineStatus.deviceText = deviceText || "";
+  state.engineStatus.lastUpdatedAt = new Date();
+
+  if (el.statusDot) el.statusDot.className = `status-dot ${safeCls}`;
+
+  if (el.engineStatusButton) {
+    el.engineStatusButton.classList.remove("online", "offline", "connecting");
+    el.engineStatusButton.classList.add(safeCls);
+    el.engineStatusButton.setAttribute(
+      "aria-label",
+      `${state.engineStatus.label}. ${state.engineStatus.sub || ""}`.trim()
+    );
+    el.engineStatusButton.title = `${state.engineStatus.label}${state.engineStatus.sub ? ` — ${state.engineStatus.sub}` : ""}`;
+  }
+
+  if (el.engineStatusPanel) {
+    el.engineStatusPanel.classList.remove("online", "offline", "connecting");
+    el.engineStatusPanel.classList.add(safeCls);
+  }
+
+  if (el.statusLabel) el.statusLabel.textContent = state.engineStatus.label;
+  if (el.statusSub) el.statusSub.textContent = state.engineStatus.sub;
+
+  if (el.deviceBadge) {
+    if (deviceText) {
+      el.deviceBadge.textContent = deviceText;
+      el.deviceBadge.hidden = false;
+    } else {
+      el.deviceBadge.hidden = true;
+    }
+  }
+
+  renderEngineStatusPanel();
+}
+
+function formatEngineTime(date) {
+  if (!date) return "Not updated yet";
+  try {
+    return `Updated ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+  } catch {
+    return "Updated just now";
+  }
+}
+
+function formatEngineBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "n/a";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = n;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function engineStatusStateText() {
+  const { cls, live } = state.engineStatus;
+  if (cls === "online") {
+    if (live?.busy) return "Backend live · busy";
+    if (inferenceReady) return "Backend live · inference ready";
+    return "Backend live · checking inference";
+  }
+  if (cls === "connecting") return "Connecting to local backend";
+  return "Backend unavailable";
+}
+
+function engineReadinessText() {
+  const readiness = state.engineStatus.readiness || readinessDetails || state.engineStatus.health?.readiness;
+
+  if (inferenceReady) return "Ready for inference";
+  if (readiness?.required) return readinessSummary(readiness);
+  if (state.engineStatus.cls === "offline") return "Readiness unavailable";
+  return "Checking runtime dependencies…";
+}
+
+function engineDiagnosticsText() {
+  const health = state.engineStatus.health;
+  if (!health) {
+    return backendOnline ? "Waiting for /health" : "Diagnostics unavailable";
+  }
+
+  const status = health.diagnostics_status || health.status || "unknown";
+  const accel = health.acceleration_ok === false ? "accelerator degraded" : "accelerator OK";
+  return `${status} · ${accel}`;
+}
+
+function engineRuntimeText() {
+  const health = state.engineStatus.health;
+  const readiness = state.engineStatus.readiness || readinessDetails || health?.readiness;
+  const torchVersion =
+    health?.torch_version ||
+    readiness?.required?.torch?.version ||
+    readiness?.torch_runtime?.torch_version;
+
+  if (torchVersion) return `PyTorch ${torchVersion}`;
+  if (readiness?.torch_runtime?.python_version) {
+    return `Python ${readiness.torch_runtime.python_version}`;
+  }
+  return "Runtime not reported yet";
+}
+
+function engineCacheText() {
+  const cache = state.cacheMetrics;
+  if (!cache) return "No metrics yet";
+
+  return `${cache.backend} · ${cache.keyspaceSize} entries · ${cache.totalHits} hits`;
+}
+
+function engineLoadedModelsText() {
+  const loaded = state.engineStatus.health?.loaded_models;
+  if (!Array.isArray(loaded) || !loaded.length) return "None reported";
+  return loaded.join(", ");
+}
+
+function engineSystemText() {
+  const health = state.engineStatus.health;
+  const system = health?.system;
+  const telemetry = health?.telemetry;
+
+  if (!system && !telemetry) return "Waiting for diagnostics…";
+
+  const parts = [];
+  if (system?.os) parts.push(system.os);
+  if (system?.machine) parts.push(system.machine);
+  if (system?.cpu) parts.push(`CPU: ${system.cpu}`);
+
+  const memory = telemetry?.memory;
+  if (memory?.pressure_percent !== undefined && memory?.pressure_percent !== null) {
+    parts.push(`Memory pressure: ${memory.pressure_percent}%`);
+  }
+
+  const disk = telemetry?.disk;
+  if (disk?.usage_percent !== undefined && disk?.usage_percent !== null) {
+    parts.push(`Disk usage: ${disk.usage_percent}%`);
+  }
+
+  return parts.length ? parts.join(" · ") : "Diagnostics returned no system summary";
+}
+
+function engineModulePillsHtml() {
+  const readiness = state.engineStatus.readiness || readinessDetails || state.engineStatus.health?.readiness;
+  const required = readiness?.required || {};
+
+  const entries = Object.entries(required);
+  if (!entries.length) {
+    return `<span class="engine-module-pill muted">Waiting for readiness check</span>`;
+  }
+
+  return entries.map(([name, info]) => {
+    const ok = Boolean(info?.available);
+    const label = `${name}: ${ok ? "ok" : (info?.status || "missing")}`;
+    return `<span class="engine-module-pill ${ok ? "" : "bad"}">${esc(label)}</span>`;
+  }).join("");
+}
+
+function renderEngineStatusPanel() {
+  if (!el.engineStatusPanel) return;
+
+  const api = API || DEFAULT_API_BASE_URL;
+
+  if (el.engineStatusStateValue) {
+    el.engineStatusStateValue.textContent = engineStatusStateText();
+  }
+
+  if (el.engineStatusBackendUrl) {
+    el.engineStatusBackendUrl.textContent = api;
+  }
+
+  if (el.engineStatusReadiness) {
+    el.engineStatusReadiness.textContent = engineReadinessText();
+  }
+
+  if (el.engineStatusDiagnostics) {
+    el.engineStatusDiagnostics.textContent = engineDiagnosticsText();
+  }
+
+  if (el.engineStatusRuntime) {
+    el.engineStatusRuntime.textContent = engineRuntimeText();
+  }
+
+  if (el.engineStatusCache) {
+    el.engineStatusCache.textContent = engineCacheText();
+  }
+
+  if (el.engineStatusLoadedModels) {
+    el.engineStatusLoadedModels.textContent = engineLoadedModelsText();
+  }
+
+  if (el.engineStatusSystem) {
+    el.engineStatusSystem.textContent = engineSystemText();
+  }
+
+  if (el.engineStatusModules) {
+    el.engineStatusModules.innerHTML = engineModulePillsHtml();
+  }
+
+  if (el.engineStatusUpdatedAt) {
+    el.engineStatusUpdatedAt.textContent = formatEngineTime(state.engineStatus.lastUpdatedAt);
+  }
+}
+
+function setEngineStatusPanelOpen(open) {
+  state.engineStatus.panelOpen = Boolean(open);
+
+  if (!el.engineStatusPanel || !el.engineStatusButton) return;
+
+  if (open) {
+    renderEngineStatusPanel();
+    el.engineStatusPanel.hidden = false;
+    el.engineStatusButton.setAttribute("aria-expanded", "true");
+
+    requestAnimationFrame(() => {
+      el.engineStatusPanel.classList.add("open");
+    });
+  } else {
+    el.engineStatusButton.setAttribute("aria-expanded", "false");
+    el.engineStatusPanel.classList.remove("open");
+
+    window.setTimeout(() => {
+      if (!state.engineStatus.panelOpen) {
+        el.engineStatusPanel.hidden = true;
+      }
+    }, 260);
+  }
+}
+
+function applyPointerPhysics(target, event, options = {}) {
+  if (!target) return;
+
+  const rect = target.getBoundingClientRect();
+  const px = (event.clientX - rect.left) / rect.width;
+  const py = (event.clientY - rect.top) / rect.height;
+
+  const strength = options.strength || 8;
+  const tiltY = (px - 0.5) * strength;
+  const tiltX = (0.5 - py) * strength;
+
+  if (options.panel) {
+    target.style.setProperty("--panel-tilt-x", `${tiltX.toFixed(2)}deg`);
+    target.style.setProperty("--panel-tilt-y", `${tiltY.toFixed(2)}deg`);
+    target.style.setProperty("--panel-mx", `${(px * 100).toFixed(1)}%`);
+    target.style.setProperty("--panel-my", `${(py * 100).toFixed(1)}%`);
+  } else {
+    target.style.setProperty("--orb-tilt-x", `${tiltX.toFixed(2)}deg`);
+    target.style.setProperty("--orb-tilt-y", `${tiltY.toFixed(2)}deg`);
+  }
+}
+
+function resetPointerPhysics(target, options = {}) {
+  if (!target) return;
+
+  if (options.panel) {
+    target.style.setProperty("--panel-tilt-x", "0deg");
+    target.style.setProperty("--panel-tilt-y", "0deg");
+    target.style.setProperty("--panel-mx", "50%");
+    target.style.setProperty("--panel-my", "20%");
+  } else {
+    target.style.setProperty("--orb-tilt-x", "0deg");
+    target.style.setProperty("--orb-tilt-y", "0deg");
+  }
+}
+
+function initEngineStatusPanel() {
+  el.engineStatusButton?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setEngineStatusPanelOpen(!state.engineStatus.panelOpen);
+  });
+
+  el.engineStatusClose?.addEventListener("click", () => {
+    setEngineStatusPanelOpen(false);
+  });
+
+  el.engineStatusRefresh?.addEventListener("click", async () => {
+    el.engineStatusRefresh.disabled = true;
+    el.engineStatusRefresh.textContent = "Checking…";
+
+    try {
+      const live = await checkLive({ quiet: true });
+      if (live) {
+        await checkReadiness({ quiet: true });
+        await checkDiagnostics({ quiet: true });
+        await loadCacheMetrics();
+      }
+      renderEngineStatusPanel();
+    } finally {
+      el.engineStatusRefresh.disabled = false;
+      el.engineStatusRefresh.textContent = "Refresh";
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!state.engineStatus.panelOpen) return;
+    if (el.engineStatusHost?.contains(event.target)) return;
+    if (el.engineStatusPanel?.contains(event.target)) return;
+    setEngineStatusPanelOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.engineStatus.panelOpen) {
+      setEngineStatusPanelOpen(false);
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    if (state.engineStatus.panelOpen) renderEngineStatusPanel();
+  });
+
+  el.engineStatusButton?.addEventListener("mousemove", (event) => {
+    applyPointerPhysics(el.engineStatusButton, event, { strength: 10 });
+  });
+
+  el.engineStatusButton?.addEventListener("mouseleave", () => {
+    resetPointerPhysics(el.engineStatusButton);
+  });
+
+  el.engineStatusPanel?.addEventListener("mousemove", (event) => {
+    applyPointerPhysics(el.engineStatusPanel, event, { strength: 2.2, panel: true });
+  });
+
+  el.engineStatusPanel?.addEventListener("mouseleave", () => {
+    resetPointerPhysics(el.engineStatusPanel, { panel: true });
+  });
 }
 
 function classifyKinds(info = {}) {
@@ -824,6 +1175,8 @@ async function checkReadiness({ quiet = true } = {}) {
   try {
     const res = await apiFetch("/ready", { signal: timeoutSignal(5000) });
     const data = await res.json();
+    state.engineStatus.readiness = data;
+    state.engineStatus.live = data;
     readinessDetails = data;
     inferenceReady = Boolean(data.inference_ready);
     if (inferenceReady) {
@@ -842,6 +1195,7 @@ async function checkReadiness({ quiet = true } = {}) {
     logEndpointTiming("/ready", started, false, err.message);
     readinessDetails = null;
     inferenceReady = false;
+    state.engineStatus.readiness = null;
     setStatus("offline", "Depth Engine: Degraded", `Readiness check failed · ${err.message}`);
     if (!quiet) toastOnce(`Readiness check failed: ${err.message}`, "error", 6000);
     syncQueueControls();
@@ -893,6 +1247,9 @@ async function checkLive({ quiet = false, signal } = {}) {
     logEndpointTiming("/live", started, false, err.message);
     backendOnline = false;
     inferenceReady = false;
+    state.engineStatus.live = null;
+    state.engineStatus.readiness = null;
+    state.engineStatus.health = null;
     setStatus("offline","Depth Engine: Offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
     const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
     if (bannerText) bannerText.textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
@@ -911,6 +1268,7 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
   try {
     const res = await apiFetch("/health", { signal: anySignal([requestSignal, timeoutSignal(6000)]) });
     const data = await res.json();
+    state.engineStatus.health = data;
     applyCacheMetrics(data.cache_metrics);
     const devs = data.devices || state.devices || {};
     const primary = data.primary_device || state.primaryDevice || "cpu";
@@ -929,6 +1287,12 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
       setStatus("online","Depth Engine: Online",`Diagnostics degraded · ${err.message}`, deviceBadge(state.devices, state.primaryDevice));
       if (!quiet) toastOnce(`Diagnostics check failed: ${err.message}`, "warning", 5000);
     }
+    state.engineStatus.health = {
+    status: "degraded",
+    diagnostics_status: "degraded",
+    error: err.message,
+    };
+    renderEngineStatusPanel();
     return false;
   }
 }
@@ -2420,6 +2784,7 @@ async function init() {
     if (!runningInElectron) toastOnce("Browser/file mode detected — start the backend manually for inference.", "warning", 7000);
     initLatencyChart();
     initCompareControls();
+    initEngineStatusPanel();
     syncWebcamControls();
     updateWebcamTelemetry();
     switchPanel("main");

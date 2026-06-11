@@ -143,22 +143,112 @@
           </nav>
 
           <!-- Reports local inference engine availability. -->
-          <div
-            class="header-status"
-            id="engineStatus"
-            title="Local FastAPI inference engine status"
-          >
-            <span class="status-dot" id="statusDot"></span>
-            <div class="status-info">
-              <span class="status-label" id="statusLabel">Engine offline</span>
-              <span class="status-sub" id="statusSub"
-                >Starting FastAPI on 127.0.0.1:8765</span
-              >
-            </div>
-            <div class="device-badge" id="deviceBadge" hidden></div>
-          </div>
-        </div>
-      </header>
+<div class="engine-status-host" id="engineStatusHost">
+  <button
+    class="engine-status-orb connecting"
+    id="engineStatusButton"
+    type="button"
+    aria-label="Depth engine status"
+    aria-haspopup="dialog"
+    aria-expanded="false"
+    title="Depth engine status"
+  >
+    <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+  </button>
+
+  <section
+    class="engine-status-panel"
+    id="engineStatusPanel"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="statusLabel"
+    hidden
+  >
+    <div class="engine-status-panel-bg" aria-hidden="true"></div>
+
+    <div class="engine-status-panel-head">
+      <div>
+        <span class="engine-status-kicker">Depth Engine</span>
+        <h2 class="engine-status-title" id="statusLabel">Engine offline</h2>
+        <p class="engine-status-subtitle" id="statusSub">
+          Starting FastAPI on 127.0.0.1:8765
+        </p>
+      </div>
+
+      <button
+        class="engine-status-close"
+        id="engineStatusClose"
+        type="button"
+        aria-label="Close depth engine status"
+      >
+        ×
+      </button>
+    </div>
+
+    <div class="engine-status-summary">
+      <div class="engine-status-main-light" aria-hidden="true"></div>
+
+      <div>
+        <span class="engine-status-summary-label">Current state</span>
+        <strong id="engineStatusStateValue">Starting</strong>
+      </div>
+
+      <div class="device-badge engine-status-device-chip" id="deviceBadge" hidden></div>
+    </div>
+
+    <div class="engine-status-grid">
+      <article class="engine-status-item">
+        <span>Backend URL</span>
+        <strong id="engineStatusBackendUrl">127.0.0.1:8765</strong>
+      </article>
+
+      <article class="engine-status-item">
+        <span>Readiness</span>
+        <strong id="engineStatusReadinessValue">Checking…</strong>
+      </article>
+
+      <article class="engine-status-item">
+        <span>Diagnostics</span>
+        <strong id="engineStatusDiagnosticsValue">Waiting…</strong>
+      </article>
+
+      <article class="engine-status-item">
+        <span>Runtime</span>
+        <strong id="engineStatusRuntimeValue">Unknown</strong>
+      </article>
+
+      <article class="engine-status-item">
+        <span>Cache</span>
+        <strong id="engineStatusCacheValue">No metrics yet</strong>
+      </article>
+
+      <article class="engine-status-item">
+        <span>Loaded models</span>
+        <strong id="engineStatusLoadedModels">None reported</strong>
+      </article>
+    </div>
+
+    <div class="engine-status-section">
+      <div class="engine-status-section-title">System</div>
+      <div class="engine-status-code" id="engineStatusSystemValue">Waiting for diagnostics…</div>
+    </div>
+
+    <div class="engine-status-section">
+      <div class="engine-status-section-title">Runtime modules</div>
+      <div class="engine-status-modules" id="engineStatusModules">
+        <span class="engine-module-pill muted">Waiting for readiness check</span>
+      </div>
+    </div>
+
+    <div class="engine-status-footer">
+      <span id="engineStatusUpdatedAt">Not updated yet</span>
+
+      <button class="engine-status-refresh" id="engineStatusRefresh" type="button">
+        Refresh
+      </button>
+    </div>
+  </section>
+</div>
 
       <!-- ── Toasts ───────────────────────────────────────────────────── -->
       <div
