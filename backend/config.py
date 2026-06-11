@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     path keeps local tests importable before dependencies are installed.
     """
 
-    HOST: str = Field(default="0.0.0.0", description="Host interface for the ASGI server.")
+    HOST: str = Field(default="127.0.0.1", description="Host interface for the ASGI server.")
     PORT: int = Field(default=8765, ge=1, le=65535, description="ASGI server port.")
     LOG_LEVEL: LogLevel = Field(default="INFO", description="Backend logging level.")
     DEBUG: bool = Field(default=False, description="Enable FastAPI debug responses.")

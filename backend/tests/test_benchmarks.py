@@ -20,6 +20,7 @@ def _missing_diag(device: str = "cpu") -> dict[str, Any]:
 
 
 def test_ensure_onnx_weights_auto_exports_missing_model(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("DEPTHLENS_AUTO_EXPORT_ONNX", "true")
     calls: list[tuple[str, Path]] = []
 
     def fake_status(model: str, device: str = "auto") -> dict[str, Any]:
@@ -43,9 +44,19 @@ def test_ensure_onnx_weights_auto_exports_missing_model(monkeypatch: Any, tmp_pa
     assert calls == [("MiDaS_small", tmp_path)]
 
 
+def test_ensure_onnx_weights_is_disabled_by_default(monkeypatch: Any) -> None:
+    monkeypatch.delenv("DEPTHLENS_AUTO_EXPORT_ONNX", raising=False)
+
+    result = benchmarks._ensure_onnx_weights("MiDaS_small", _missing_diag("cpu"))
+
+    assert result["state"] == "missing_weights"
+    assert result["auto_export_enabled"] is False
+
+
 def test_ensure_onnx_weights_can_be_disabled(monkeypatch: Any) -> None:
     monkeypatch.setenv("DEPTHLENS_AUTO_EXPORT_ONNX", "false")
 
     result = benchmarks._ensure_onnx_weights("MiDaS_small", _missing_diag("cpu"))
 
     assert result["state"] == "missing_weights"
+    assert result["auto_export_enabled"] is False

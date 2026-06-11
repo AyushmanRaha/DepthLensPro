@@ -138,7 +138,9 @@ app = FastAPI(title="DepthLens Pro API", version="3.1.0", debug=settings.DEBUG, 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # Do not combine wildcard origins with credentialed CORS. The renderer and
+    # browser/file development flow do not send cookies or auth credentials.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -42,7 +42,7 @@ The project favors explicit runtime checks, small reviewable changes, ARM deskto
 - Alias-aware model input: the backend accepts common display-name, PyTorch-name, space, hyphen, and underscore variants, then normalizes them to lowercase canonical IDs internally.
 - PyTorch inference with ONNX Runtime acceleration when exported static `.onnx` graphs and compatible providers are available.
 - Single-image and batch inference, with batch requests capped at **10 images**.
-- Supported source uploads: any FastAPI `image/*` upload that OpenCV can decode, with a **20 MB** route limit.
+- Supported source uploads: FastAPI `image/*` uploads that OpenCV can decode, with a **20 MB** route limit; `/batch` rejects non-image items before inference.
 - Optional Ground Truth mode for one source image plus one GT depth file, with `.png`, `.tif`/`.tiff`, and `.npy` support.
 - Selective output generation for colorized and/or grayscale depth maps.
 - Colormap options: `inferno`, `plasma`, `viridis`, `magma`, `jet`, `hot`, `bone`, and `turbo`.
@@ -52,11 +52,12 @@ The project favors explicit runtime checks, small reviewable changes, ARM deskto
 ### System Architecture & Observability
 
 - FastAPI ASGI backend with separate route, live, inference, cache, benchmark, diagnostics, configuration, hardware, and model-registry modules.
-- Redis-backed response cache with in-memory fallback, plus a normalized-depth in-process cache keyed by image, model, device, and max dimension.
+- Redis-backed response cache with in-memory fallback, plus a lock-protected normalized-depth in-process cache keyed by image, model, device, and max dimension.
 - Versioned JSON cache serialization with schema version `2` and magic prefix `DLP2\0`; legacy pickle payloads using `DLP1\0` or raw pickle bytes return cache misses and are not deserialized.
 - Environment-backed configuration through process variables and optional `.env` values.
 - JSON structured logging for backend runtime logs.
 - Lightweight liveness, inference readiness, ONNX status, device inventory, health diagnostics, benchmark, cache, memory, disk, and acceleration telemetry endpoints.
+- Sanitized structured API error envelopes for dependency and inference failures; detailed exception text stays in backend logs.
 - Docker and Docker Compose support for backend-plus-Redis execution.
 
 ### Desktop Client
@@ -190,9 +191,9 @@ DepthLens Pro supports ARM desktop targets for native app packaging. Normal user
 
 | Status | Platform | Architecture | Notes |
 |---|---|---|---|
-| Supported | macOS Apple Silicon | `darwin arm64` | Build/open `electron-app/dist/mac-arm64/DepthLens Pro.app` or install the Apple Silicon DMG. |
-| Supported | Windows ARM | `win32 arm64` | Build with `npm run build:win:arm64`; x64 installers are not produced. |
-| Supported | Linux ARM | `linux arm64` / `aarch64` | Build with `npm run build:linux:arm64`; x64 AppImages are not produced. |
+| Supported | macOS Apple Silicon only | `darwin arm64` | Build/open `electron-app/dist/mac-arm64/DepthLens Pro.app` or install the Apple Silicon DMG. |
+| Supported | Windows ARM only | `win32 arm64` | Build with `npm run build:win:arm64`; x64 installers are not produced. |
+| Supported | Linux ARM only | `linux arm64` / `aarch64` | Build with `npm run build:linux:arm64`; x64 AppImages are not produced. |
 | Unsupported | Intel Mac / macOS x64 | `darwin x64` | Blocked at Electron startup before backend launch. |
 | Unsupported | macOS universal builds | `universal` | Unsupported because they can create duplicate or stale bundles. |
 | Unsupported | Windows x64 | `win32 x64` | Unsupported build scripts fail with a clear architecture message. |
@@ -648,7 +649,7 @@ This command builds and starts the API plus Redis services, and the expected out
 docker compose up --build
 ```
 
-The Compose file passes `HOST` (`str`, default `0.0.0.0`), `PORT` (`int`, default `8765`), `LOG_LEVEL` (`str`, default `INFO`), `REDIS_HOST` (`str`, default `redis` in Compose and `127.0.0.1` in local config), `REDIS_PORT` (`int`, default `6379`), `REDIS_DB` (`int`, default `0`), `REDIS_PASSWORD` (`str | None`, default empty/`None`), `REDIS_SOCKET_TIMEOUT_SECONDS` (`float`, default `1.5`), `REDIS_MAX_CONNECTIONS` (`int`, default `20`), and `CACHE_TTL_SECONDS` (`int`, default `3600`) into the backend container.
+The Compose file passes `HOST` (`str`, default `0.0.0.0` in Compose for container reachability; local backend config defaults to `127.0.0.1`), `PORT` (`int`, default `8765`), `LOG_LEVEL` (`str`, default `INFO`), `REDIS_HOST` (`str`, default `redis` in Compose and `127.0.0.1` in local config), `REDIS_PORT` (`int`, default `6379`), `REDIS_DB` (`int`, default `0`), `REDIS_PASSWORD` (`str | None`, default empty/`None`), `REDIS_SOCKET_TIMEOUT_SECONDS` (`float`, default `1.5`), `REDIS_MAX_CONNECTIONS` (`int`, default `20`), and `CACHE_TTL_SECONDS` (`int`, default `3600`) into the backend container. The backend also recognizes `DEPTHLENS_AUTO_EXPORT_ONNX` (`bool`, default `false`) if you intentionally want benchmark requests to export missing ONNX graphs.
 
 ---
 
@@ -665,9 +666,9 @@ All endpoints are served by the FastAPI app mounted from `backend.api.live` and 
 | `GET` | `/devices` | Returns cached device inventory, primary device, and whether the payload came from the device cache. |
 | `GET` | `/models` | Returns registry model specs with canonical IDs, display names, architecture, input size, PyTorch names, preprocessing, ONNX filenames, support flags, recommended device, and notes. |
 | `GET` | `/colormaps` | Returns the supported colormap names. |
-| `POST` | `/estimate` | Accepts one image upload and form fields for `model`, `colormap`, `device`, `metrics`, `outputs`, `max_dim`, and optional GT fields; returns depth outputs, metrics, model/device metadata, cache flags, and GT visualizations when supplied. |
-| `POST` | `/batch` | Accepts up to 10 image uploads with common form options and returns `results`, `errors`, `total`, `succeeded`, and `failed`. |
-| `GET` | `/benchmark` | Runs PyTorch versus ONNX Runtime benchmark matrices for `model`, `device`, and `iterations`. |
+| `POST` | `/estimate` | Accepts one image upload and form fields for `model`, `colormap`, `device`, `metrics`, `outputs`, `max_dim`, and optional GT fields; returns depth outputs, metrics, model/device metadata, cache flags, and GT visualizations when supplied. Generic inference failures return a sanitized `INFERENCE_FAILED` error envelope. |
+| `POST` | `/batch` | Accepts up to 10 image uploads with common form options and returns `results`, `errors`, `total`, `succeeded`, and `failed`; non-image items are rejected per file before inference. |
+| `GET` | `/benchmark` | Runs PyTorch versus ONNX Runtime benchmark matrices for `model`, `device`, and `iterations`. Missing ONNX weights are reported as unavailable unless `DEPTHLENS_AUTO_EXPORT_ONNX=true` explicitly enables request-time export. |
 | `GET` | `/api/benchmark` | Alias for `/benchmark`, used by the frontend Performance panel. |
 | `GET` | `/cache/metrics` | Returns live cache backend, Redis availability, hits, misses, keyspace, Redis failures, TTL, and memory limits. |
 | `DELETE` | `/cache` | Clears Redis keys and in-memory cache entries, then returns the number of cleared entries. |
@@ -1005,7 +1006,7 @@ Use the symptom, cause, and resolution entries below for common local issues. Ke
 
 **Symptom** → `/live` returns `ok`, but inference controls stay disabled. **Cause** → `/ready` found a missing required Python module such as `torch`, `cv2`, `PIL`, `fastapi`, `uvicorn`, or `numpy`. **Resolution** → Activate the repo-root virtual environment and run `python -m pip install -r backend/requirements.txt && python -m pip check`.
 
-**Symptom** → Performance Analysis reports ONNX unavailable while PyTorch inference works. **Cause** → ONNX Runtime cannot import, cannot use the requested provider, or cannot load a valid graph from the configured path. **Resolution** → Run `python backend/scripts/export_onnx.py --all`, then inspect `curl http://127.0.0.1:8765/onnx/status?device=auto`.
+**Symptom** → Performance Analysis reports ONNX unavailable while PyTorch inference works. **Cause** → ONNX Runtime cannot import, cannot use the requested provider, or cannot load a valid graph from the configured path; benchmarks do not export missing graphs unless `DEPTHLENS_AUTO_EXPORT_ONNX=true` is set. **Resolution** → Run `python backend/scripts/export_onnx.py --all`, then inspect `curl http://127.0.0.1:8765/onnx/status?device=auto`.
 
 **Symptom** → Redis errors appear in logs, but inference still works. **Cause** → Redis is optional and the cache service falls back to the in-memory cache after connection failures. **Resolution** → Use the app normally or configure Redis with `REDIS_URL` (`str | None`, default `None`) when a shared cache is required.
 
@@ -1040,8 +1041,10 @@ DepthLensPro keeps the desktop trust boundary narrow. The renderer cannot access
 - The preload bridge exposes only `getBackendUrl`, `getAppVersion`, `getPlatform`, `showSaveDialog`, `showOpenDialog`, `platform`, and `arch`.
 - Navigation is allowed only to `http://127.0.0.1:<backendPort>` and the exact frontend `file://` path loaded by Electron.
 - New windows are denied; `https:` and `mailto:` URLs open externally through Electron shell.
-- The backend binds to `127.0.0.1` in desktop mode.
+- The backend binds to `127.0.0.1` by default in local and desktop mode; Docker Compose overrides `HOST` to `0.0.0.0` only for container reachability.
+- CORS keeps wildcard origins for the browser/file development workflow but does not allow credentialed CORS.
 - Backend process cleanup only targets DepthLens-owned Uvicorn processes identified by metadata, command line, and project paths.
+- The API is intended for local/trusted deployments; broader auth/admin gating and benchmark API redesign remain deferred rather than partially implemented.
 
 To report a vulnerability, follow [`SECURITY.md`](SECURITY.md). Do not disclose security issues through public issue trackers.
 
@@ -1127,7 +1130,7 @@ This command checks ONNX runtime and path status for the automatic device select
 curl http://127.0.0.1:8765/onnx/status?device=auto
 ```
 
-If an ONNX file is missing, empty, invalid, or provider-incompatible, inference responses report metadata such as `engine_used`, `fallback_used`, `warnings`, `model_id`, `model_display_name`, and `device_used` instead of failing solely because ONNX is unavailable.
+If an ONNX file is missing, empty, invalid, or provider-incompatible, inference responses report metadata such as `engine_used`, `fallback_used`, `warnings`, `model_id`, `model_display_name`, and `device_used` instead of failing solely because ONNX is unavailable. Benchmark requests report missing ONNX weights unless `DEPTHLENS_AUTO_EXPORT_ONNX=true` explicitly opts into request-time export.
 
 ### Apple Silicon and provider notes
 
