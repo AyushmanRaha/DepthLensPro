@@ -2156,12 +2156,13 @@ function initScrollableNav() {
   if (!shell || shell.dataset.scrollNavBound === "true") return;
   shell.dataset.scrollNavBound = "true";
 
-  let dragging = false;
-  let suppressClick = false;
+  let pointerActive = false;
+  let dragMoved = false;
+  let ignoreNextClick = false;
   let startX = 0;
   let startY = 0;
   let startScrollLeft = 0;
-  const dragThreshold = 6;
+  const dragThreshold = 8;
 
   shell.addEventListener("wheel", event => {
     if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
@@ -2172,8 +2173,9 @@ function initScrollableNav() {
 
   shell.addEventListener("pointerdown", event => {
     if (event.button !== undefined && event.button !== 0) return;
-    dragging = true;
-    suppressClick = false;
+    pointerActive = true;
+    dragMoved = false;
+    ignoreNextClick = false;
     startX = event.clientX;
     startY = event.clientY;
     startScrollLeft = shell.scrollLeft;
@@ -2181,14 +2183,15 @@ function initScrollableNav() {
   });
 
   shell.addEventListener("pointermove", event => {
-    if (!dragging) return;
+    if (!pointerActive) return;
     const dx = event.clientX - startX;
     const dy = event.clientY - startY;
-    if (!suppressClick && Math.hypot(dx, dy) > dragThreshold) {
-      suppressClick = true;
+    const hasHorizontalIntent = Math.abs(dx) > dragThreshold && Math.abs(dx) > Math.abs(dy) * 1.15;
+    if (!dragMoved && hasHorizontalIntent) {
+      dragMoved = true;
       shell.classList.add("dragging");
     }
-    if (suppressClick) {
+    if (dragMoved) {
       event.preventDefault();
       shell.scrollLeft = startScrollLeft - dx;
     }
@@ -2196,19 +2199,20 @@ function initScrollableNav() {
 
   ["pointerup", "pointercancel", "pointerleave"].forEach(type => {
     shell.addEventListener(type, event => {
-      if (!dragging) return;
-      dragging = false;
+      if (!pointerActive) return;
+      pointerActive = false;
+      ignoreNextClick = dragMoved;
       shell.releasePointerCapture?.(event.pointerId);
       shell.classList.remove("dragging");
-      window.setTimeout(() => { suppressClick = false; }, 120);
+      window.setTimeout(() => { ignoreNextClick = false; }, 0);
     });
   });
 
   shell.addEventListener("click", event => {
-    if (!suppressClick) return;
+    if (!ignoreNextClick) return;
     event.preventDefault();
     event.stopPropagation();
-    suppressClick = false;
+    ignoreNextClick = false;
   }, true);
 }
 
@@ -2270,9 +2274,12 @@ function initGuideAccordion() {
 // PANEL NAVIGATION
 // ══════════════════════════════════════════════════════════════
 function switchPanel(name) {
+  const targetId = `panel-${name}`;
+  const targetPanel = el.panels.find?.(p => p.id === targetId) || document.getElementById(targetId);
+  if (!targetPanel) return;
+
   el.navBtns.forEach(b => b.classList.toggle("active", b.dataset.panel === name));
 
-  const targetId = `panel-${name}`;
   el.panels.forEach(p => {
     const isActive = p.id === targetId;
     p.hidden = !isActive;
@@ -2297,7 +2304,10 @@ function switchPanel(name) {
     stopPointCloudViewer();
   }
 }
-el.navBtns.forEach(b => b.addEventListener("click", () => switchPanel(b.dataset.panel)));
+el.navBtns.forEach(b => b.addEventListener("click", event => {
+  const panelName = event.currentTarget?.dataset?.panel;
+  if (panelName) switchPanel(panelName);
+}));
 
 // ══════════════════════════════════════════════════════════════
 // GROUND TRUTH MODE
@@ -3583,6 +3593,7 @@ async function init() {
   initReconstructionPanel();
   initScrollableNav();
   initGuideAccordion();
+  bindPointerGlow(".logo-group", { tilt: 3 });
   bindPointerGlow(".nav-btn", { tilt: 5 });
   bindPointerGlow(".guide-section-toggle", { tilt: 3 });
   bindPointerGlow(".guide-card, .guide-section", { tilt: 1.5 });
