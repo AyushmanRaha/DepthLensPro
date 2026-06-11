@@ -143,29 +143,92 @@
     resizeLogo();
   }
 
-  function buildLogoMetrics() {
-    const fontSize = Math.min(logoH * 0.70, logoW * 0.126);
-    logoCtx.font = `700 ${fontSize}px Rajdhani, Exo 2, sans-serif`;
-    logoCtx.textBaseline = "middle";
-    logoCtx.textAlign = "left";
+  function getLogoFont(fontSize) {
+  const displayFont = getComputedStyle(document.documentElement)
+    .getPropertyValue("--ff-display")
+    .trim();
 
-    const main = logoCtx.measureText("DepthLens");
-    const pro = logoCtx.measureText("Pro");
-    const totalWidth = main.width + pro.width;
-    const x = (logoW - totalWidth) / 2;
-    const y = logoH / 2 + fontSize * 0.02;
+  return `700 ${fontSize}px ${displayFont || "Rajdhani, Exo 2, sans-serif"}`;
+}
 
-    logoMetrics = {
-      fontSize,
-      x,
-      y,
-      mainWidth: main.width,
-      proWidth: pro.width,
-      totalWidth,
-      textTop: y - fontSize * 0.46,
-      textBottom: y + fontSize * 0.38,
-    };
+function measureLogoParts(fontSize) {
+  logoCtx.font = getLogoFont(fontSize);
+
+  const mainText = "DepthLens";
+  const proText = "Pro";
+
+  const main = logoCtx.measureText(mainText);
+  const pro = logoCtx.measureText(proText);
+
+  /*
+    Slight negative gap makes DepthLensPro read as one logo,
+    not two separated words.
+  */
+  const proGap = -fontSize * 0.035;
+  const totalWidth = main.width + proGap + pro.width;
+
+  return {
+    main,
+    pro,
+    proGap,
+    totalWidth,
+  };
+}
+
+function buildLogoMetrics() {
+  const vw = window.innerWidth || document.documentElement.clientWidth || logoW;
+  const isMobile = vw <= 560;
+
+  const clampValue = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  let fontSize = isMobile
+    ? clampValue(vw * 0.20, 84, 155)
+    : clampValue(vw * 0.135, 140, 240);
+
+  fontSize = Math.min(fontSize, logoH * 0.82);
+
+  logoCtx.textBaseline = "middle";
+  logoCtx.textAlign = "left";
+
+  let measured = measureLogoParts(fontSize);
+  const maxTextWidth = logoW * 0.92;
+
+  if (measured.totalWidth > maxTextWidth) {
+    fontSize = Math.max(
+      isMobile ? 72 : 120,
+      Math.floor(fontSize * (maxTextWidth / measured.totalWidth))
+    );
+
+    measured = measureLogoParts(fontSize);
   }
+
+  const ascent = Math.max(
+    measured.main.actualBoundingBoxAscent || 0,
+    measured.pro.actualBoundingBoxAscent || 0,
+    fontSize * 0.72
+  );
+
+  const descent = Math.max(
+    measured.main.actualBoundingBoxDescent || 0,
+    measured.pro.actualBoundingBoxDescent || 0,
+    fontSize * 0.22
+  );
+
+  const x = (logoW - measured.totalWidth) / 2;
+  const y = logoH / 2 + (ascent - descent) / 2;
+
+  logoMetrics = {
+    fontSize,
+    x,
+    y,
+    mainWidth: measured.main.width,
+    proWidth: measured.pro.width,
+    proGap: measured.proGap,
+    totalWidth: measured.totalWidth,
+    textTop: y - ascent,
+    textBottom: y + descent,
+  };
+}
 
   function buildPointCloud() {
     const rand = seededRandom(Math.floor(bgW * 17 + bgH * 31));
@@ -429,60 +492,95 @@
   }
 
   function drawLogo(alpha, sweepProgress, finalState) {
-    if (!logoMetrics) return;
-    const palette = getPalette();
-    const x = logoMetrics.x;
-    const y = logoMetrics.y;
-    const fontSize = logoMetrics.fontSize;
-    const mainX = x;
-    const proX = x + logoMetrics.mainWidth;
-    const revealWidth = finalState ? logoMetrics.totalWidth : logoMetrics.totalWidth * easeOutCubic(alpha);
+  if (!logoMetrics) return;
 
-    logoCtx.save();
-    logoCtx.font = `700 ${fontSize}px Rajdhani, Exo 2, sans-serif`;
-    logoCtx.textBaseline = "middle";
-    logoCtx.textAlign = "left";
-    logoCtx.globalAlpha = clamp01(alpha);
-    logoCtx.shadowColor = palette.shadow;
-    logoCtx.shadowBlur = isDark() ? 10 : 5;
-    logoCtx.shadowOffsetY = isDark() ? 2 : 1;
+  const palette = getPalette();
+  const x = logoMetrics.x;
+  const y = logoMetrics.y;
+  const fontSize = logoMetrics.fontSize;
 
-    logoCtx.beginPath();
-    logoCtx.rect(x - 4, 0, revealWidth + 8, logoH);
-    logoCtx.clip();
+  const mainText = "DepthLens";
+  const proText = "Pro";
 
-    const mainGradient = logoCtx.createLinearGradient(0, y - fontSize * 0.48, 0, y + fontSize * 0.42);
-    mainGradient.addColorStop(0, palette.textTop);
-    mainGradient.addColorStop(0.52, palette.textMid);
-    mainGradient.addColorStop(1, palette.textBottom);
-    logoCtx.fillStyle = mainGradient;
-    logoCtx.fillText("DepthLens", mainX, y);
+  const mainX = x;
+  const proX = x + logoMetrics.mainWidth + logoMetrics.proGap;
 
-    const proGradient = logoCtx.createLinearGradient(0, y - fontSize * 0.48, 0, y + fontSize * 0.42);
-    proGradient.addColorStop(0, palette.proTop);
-    proGradient.addColorStop(0.52, palette.proMid);
-    proGradient.addColorStop(1, palette.proBottom);
-    logoCtx.fillStyle = proGradient;
-    logoCtx.fillText("Pro", proX, y);
+  const revealWidth = finalState
+    ? logoMetrics.totalWidth
+    : logoMetrics.totalWidth * easeOutCubic(alpha);
 
-    if (sweepProgress > 0 && sweepProgress < 1) {
-      logoCtx.shadowBlur = 0;
-      logoCtx.globalCompositeOperation = "source-atop";
-      const sweepX = lerp(x - fontSize * 0.9, x + logoMetrics.totalWidth + fontSize * 0.9, sweepProgress);
-      const sweep = logoCtx.createLinearGradient(sweepX - 45, 0, sweepX + 45, 0);
-      sweep.addColorStop(0, "rgba(255, 255, 255, 0)");
-      sweep.addColorStop(0.5, palette.sweep);
-      sweep.addColorStop(1, "rgba(255, 255, 255, 0)");
-      logoCtx.fillStyle = sweep;
-      logoCtx.fillRect(x - 10, logoMetrics.textTop - 10, logoMetrics.totalWidth + 20, fontSize);
-    }
+  logoCtx.save();
 
-    logoCtx.restore();
+  logoCtx.font = getLogoFont(fontSize);
+  logoCtx.textBaseline = "middle";
+  logoCtx.textAlign = "left";
+  logoCtx.globalAlpha = clamp01(alpha);
+  logoCtx.shadowColor = palette.shadow;
+  logoCtx.shadowBlur = isDark() ? 10 : 5;
+  logoCtx.shadowOffsetY = isDark() ? 2 : 1;
 
-    logoCanvas.style.filter = isDark()
-      ? "drop-shadow(0 10px 26px rgba(0, 0, 0, 0.28))"
-      : "drop-shadow(0 8px 18px rgba(0, 54, 110, 0.10))";
+  logoCtx.beginPath();
+  logoCtx.rect(x - 4, 0, revealWidth + 8, logoH);
+  logoCtx.clip();
+
+  const mainGradient = logoCtx.createLinearGradient(
+    0,
+    y - fontSize * 0.48,
+    0,
+    y + fontSize * 0.42
+  );
+
+  mainGradient.addColorStop(0, palette.textTop);
+  mainGradient.addColorStop(0.52, palette.textMid);
+  mainGradient.addColorStop(1, palette.textBottom);
+
+  logoCtx.fillStyle = mainGradient;
+  logoCtx.fillText(mainText, mainX, y);
+
+  const proGradient = logoCtx.createLinearGradient(
+    0,
+    y - fontSize * 0.48,
+    0,
+    y + fontSize * 0.42
+  );
+
+  proGradient.addColorStop(0, palette.proTop);
+  proGradient.addColorStop(0.52, palette.proMid);
+  proGradient.addColorStop(1, palette.proBottom);
+
+  logoCtx.fillStyle = proGradient;
+  logoCtx.fillText(proText, proX, y);
+
+  if (sweepProgress > 0 && sweepProgress < 1) {
+    logoCtx.shadowBlur = 0;
+    logoCtx.globalCompositeOperation = "source-atop";
+
+    const sweepX = lerp(
+      x - fontSize * 0.9,
+      x + logoMetrics.totalWidth + fontSize * 0.9,
+      sweepProgress
+    );
+
+    const sweep = logoCtx.createLinearGradient(sweepX - 45, 0, sweepX + 45, 0);
+    sweep.addColorStop(0, "rgba(255, 255, 255, 0)");
+    sweep.addColorStop(0.5, palette.sweep);
+    sweep.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    logoCtx.fillStyle = sweep;
+    logoCtx.fillRect(
+      x - 10,
+      logoMetrics.textTop - 10,
+      logoMetrics.totalWidth + 20,
+      fontSize
+    );
   }
+
+  logoCtx.restore();
+
+  logoCanvas.style.filter = isDark()
+    ? "drop-shadow(0 10px 26px rgba(0, 0, 0, 0.28))"
+    : "drop-shadow(0 8px 18px rgba(0, 54, 110, 0.10))";
+}
 
   function drawFinalLogo() {
     logoCtx.clearRect(0, 0, logoW, logoH);
@@ -552,6 +650,21 @@
 
   document.addEventListener("depthlens-theme-changed", handleThemeChange);
   window.addEventListener("resize", handleResize);
+
+  if (document.fonts && typeof document.fonts.ready?.then === "function") {
+  document.fonts.ready.then(function redrawAfterFontsLoad() {
+    resizeAll();
+
+    if (done || hasReducedMotion) {
+      drawBackground(0, 1);
+      drawFinalLogo();
+    }
+  });
+
+  if (typeof document.fonts.addEventListener === "function") {
+    document.fonts.addEventListener("loadingdone", handleResize);
+  }
+}
 
   if (typeof reduceMotion.addEventListener === "function") {
     reduceMotion.addEventListener("change", handleMotionPreferenceChange);
