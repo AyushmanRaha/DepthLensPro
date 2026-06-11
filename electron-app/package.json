@@ -30,7 +30,13 @@
     "clean:spotlight": "node scripts/clean-spotlight.js",
     "reinstall:mac": "node scripts/reinstall-mac.js",
     "backend:ready": "node -e \"fetch('http://127.0.0.1:8765/ready').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
-    "test": "node test-security-policy.js"
+    "test": "node test-security-policy.js",
+    "doctor": "cd .. && python3 scripts/doctor.py --doctor-only",
+    "setup": "cd .. && python3 scripts/doctor.py",
+    "setup:mac": "cd .. && scripts/setup-macos.sh",
+    "setup:linux": "cd .. && scripts/setup-linux.sh",
+    "setup:win": "powershell -ExecutionPolicy Bypass -File ../scripts/setup-windows.ps1",
+    "verify:onnx": "../venv/bin/python ../backend/scripts/export_onnx.py --validate-only --all"
   },
   "build": {
     "forceCodeSigning": false,
@@ -93,6 +99,16 @@
       {
         "from": "../frontend",
         "to": "frontend"
+      },
+      {
+        "from": "../models",
+        "to": "models",
+        "filter": [
+          "**/*",
+          "!**/.DS_Store",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
       }
     ],
     "linux": {

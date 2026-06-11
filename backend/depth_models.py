@@ -19,7 +19,7 @@ from backend.model_registry import (
 from backend.utils.hardware import _default_device_key
 
 MIDAS_REPO = "intel-isl/MiDaS"
-ONNX_INPUT_SIZE = (384, 384)
+ONNX_INPUT_SIZE = (256, 256)
 DEFAULT_ONNX_DIR = Path(__file__).resolve().parent / "onnx_weights"
 
 

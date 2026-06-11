@@ -52,7 +52,8 @@ def test_corrupt_onnx_file_is_invalid_not_available(
 
     status = onnx_diagnostics.onnx_model_status("midas_small", "cpu")
 
-    assert status["state"] == "invalid/corrupt"
+    assert status["state"] in {"invalid_checker", "invalid_session"}
+    assert status["legacy_state"] == "invalid/corrupt"
     assert status["selected_path"] == str(path.resolve())
     assert status["error_code"] == "ONNX_SESSION_INIT_FAILED"
 
