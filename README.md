@@ -32,6 +32,7 @@ flowchart LR
 
 - [Project Identity & Pitch](#project-identity--pitch)
 - [Key Features](#key-features)
+- [Latest Product Updates](#latest-product-updates)
 - [Tech Stack](#tech-stack)
 - [Why This Stack](#why-this-stack)
 - [Architecture](#architecture)
@@ -63,15 +64,30 @@ The repository demonstrates how to ship an AI-assisted desktop tool without hidi
 - Device-aware PyTorch inference with CPU fallback and runtime discovery for CUDA, MPS, and XPU where the local PyTorch installation supports them.
 - Optional ONNX Runtime path for exported `.onnx` graphs, with diagnostics that explain missing, invalid, or provider-incompatible weights instead of breaking PyTorch inference.
 - Health, readiness, cache, ONNX, benchmark, and model endpoints designed for desktop startup checks and developer debugging.
-- Real-Time Webcam Depth MVP samples browser/Electron camera frames, sends capped-FPS JPEG uploads to the local FastAPI `/estimate` endpoint, and previews live depth maps without any frames leaving localhost. Start with MiDaS Small for the smoothest first demo.
+- Redesigned header navigation with stable tab switching for Main, Webcam, Compare, Experiments, 3D, and Guide workspaces, plus a compact engine-status orb that opens a detailed diagnostics panel.
+- Real-Time Webcam Depth MVP samples browser/Electron camera frames, sends capped-FPS JPEG uploads to the local FastAPI `/estimate` endpoint, smooths optional preview frames, and captures the latest depth output without any frames leaving localhost. Start with MiDaS Small for the smoothest first demo.
 - 3D Reconstruction replaces the former About tab with a frontend workspace for the local `/api/reconstruct` endpoint. It exports relative colored point clouds as PLY/OBJ; because monocular depth is relative rather than metric calibrated, start with MiDaS Small on CPU or DPT Hybrid when hardware acceleration is available.
+- Built-in Guide tab documents the end-to-end workflow, model and device choices, metrics, ONNX fallback behavior, 3D controls, glossary terms, and recovery steps directly inside the app.
+
+## Latest Product Updates
+
+Recent repository changes reflected in this README:
+
+| Area | Update | What it means for users and reviewers |
+|---|---|---|
+| Header navigation | The Electron renderer now uses explicit panel buttons for Main, Webcam, Compare, Experiments, 3D, and Guide, with fixes for nested click targets and responsive wrapping. | Switching workspaces should be predictable across desktop sizes, and the active tab state stays synchronized with the visible panel. |
+| Engine status | The header includes an engine-status orb and popover with backend URL, readiness, diagnostics, runtime, cache, loaded models, system details, Python module checks, refresh controls, and last-updated time. | Users can diagnose backend startup and dependency issues without leaving the app. |
+| Real-time webcam depth | The Webcam workspace starts/stops camera capture, caps target FPS, limits frame size, supports optional depth-frame smoothing, reports camera/inference latency, and downloads the latest depth frame. | The webcam MVP demonstrates live local inference using the existing `/estimate` API rather than a separate streaming service. |
+| 3D reconstruction | The 3D workspace calls `/api/reconstruct` or `/reconstruct`, exposes point limits, preview limits, sampling, focal/depth scale, percentile clipping, RGB coloring, and coordinate-system options, then exports PLY or OBJ. | Depth maps can be turned into approximate relative colored point clouds while keeping monocular-depth limitations explicit. |
+| In-app guide | The old About-style content is now a scrollable Guide tab with quick-start cards, accordions, model/device/metrics explanations, export guidance, glossary terms, and troubleshooting notes. | First-time users can learn the app workflow from inside the desktop UI. |
+| Licensing | The repository now includes an MIT license. | The previous README note that no license was present is obsolete. |
 
 ## Tech Stack
 
 | Layer | Technology | Source of truth | Role |
 |---|---|---|---|
 | Desktop shell | Electron `^42.3.0`, electron-builder `^26.8.1` | `electron-app/package.json` | Native window, sandboxed renderer, backend child-process lifecycle, ARM packaging. |
-| Renderer | HTML, CSS, vanilla JavaScript, Chart.js CDN | `frontend/index.html`, `frontend/script.js`, `frontend/style.css` | Upload UI, diagnostics panels, benchmark charts, exports, local preferences. |
+| Renderer | HTML, CSS, vanilla JavaScript, Chart.js CDN | `frontend/index.html`, `frontend/script.js`, `frontend/style.css` | Upload UI, webcam workspace, comparison and experiments tabs, 3D reconstruction workspace, in-app guide, diagnostics panels, benchmark charts, exports, local preferences. |
 | Backend API | FastAPI `0.135.3`, Uvicorn `0.44.0` | `backend/requirements.txt`, `backend/main.py` | ASGI routes, JSON logging, CORS, liveness/readiness, inference endpoints. |
 | ML runtime | PyTorch `2.11.0`, torchvision `0.26.0`, timm `1.0.26` | `backend/requirements.txt` | Primary MiDaS/DPT inference path via Torch Hub. |
 | Optional acceleration | ONNX `1.20.1`, ONNX Runtime `1.24.3`, onnxscript `0.7.0` | `backend/requirements.txt`, `models/onnx/README.md` | Static-graph export, validation, benchmarking, provider diagnostics. |
@@ -145,7 +161,7 @@ flowchart TB
 |---|---|---|
 | Electron main process | `electron-app/main.js`, `electron-app/scripts/backend-lifecycle.js` | Single-instance app lock, resource discovery, backend port selection, backend PID metadata, startup polling, safe shutdown. |
 | Security policy | `electron-app/preload.js`, `electron-app/src/security-policy.js`, `electron-app/src/backend-process-policy.js` | Context isolation, no Node integration in the renderer, navigation filtering, and owned-process checks. |
-| Renderer UI | `frontend/index.html`, `frontend/script.js`, `frontend/style.css` | Upload flow, model/device/colormap controls, GT mode, comparison workspace, experiments, benchmark panel, cache metrics, downloads. |
+| Renderer UI | `frontend/index.html`, `frontend/script.js`, `frontend/style.css` | Upload flow, model/device/colormap controls, GT mode, webcam inference workspace, comparison workspace, experiments, 3D point-cloud workspace, guide tab, engine-status popover, benchmark panel, cache metrics, downloads. |
 | API layer | `backend/main.py`, `backend/api/live.py`, `backend/api/routes.py` | FastAPI app, JSON logs, liveness, readiness, inference routes, cache endpoints, benchmark and diagnostics endpoints. |
 | Inference services | `backend/services/inference.py`, `backend/depth_models.py` | Decode images, resolve models/devices, execute PyTorch or ONNX, normalize/colorize outputs, compute metrics, cache results. |
 | Models and assets | `backend/model_registry.py`, `models/README.md`, `models/onnx/README.md` | Canonical model metadata, ONNX search paths, optional generated model assets. |
@@ -156,11 +172,12 @@ flowchart TB
 
 1. Electron starts first for native desktop usage and creates a local-only backend URL, defaulting to `http://127.0.0.1:8765`.
 2. If a valid DepthLens backend is already live, Electron reuses it; otherwise it launches Uvicorn against `backend.app:app` from the packaged or repo-root Python environment.
-3. The renderer waits for `/ready` before enabling inference controls, then loads `/health`, `/devices`, `/models`, `/colormaps`, `/cache/metrics`, and `/onnx/status` for diagnostics.
-4. `/estimate` decodes one image, normalizes model/device/output options, optionally decodes a GT depth file, runs inference, computes requested metrics, caches eligible responses, and returns base64 image outputs.
+3. The renderer waits for `/ready` before enabling inference controls, then loads `/health`, `/devices`, `/models`, `/colormaps`, `/cache/metrics`, and `/onnx/status` for the header engine-status popover and diagnostics panels.
+4. `/estimate` decodes one image, normalizes model/device/output options, optionally decodes a GT depth file, runs inference, computes requested metrics, caches eligible responses, and returns base64 image outputs. The Webcam tab reuses this endpoint by sending capped-FPS JPEG frames from the local camera preview.
 5. `/batch` applies the same inference path to up to 10 image uploads and reports per-file success or failure.
-6. `/api/reconstruct` reuses the local inference/depth-cache path to export an approximate colored PLY/OBJ point cloud from relative monocular depth.
-7. `/benchmark` compares the PyTorch path against ONNX Runtime when an exported ONNX graph and compatible provider are available.
+6. `/api/reconstruct` and `/reconstruct` reuse the local inference/depth-cache path to export an approximate colored PLY/OBJ point cloud from relative monocular depth.
+7. `/api/benchmark` and `/benchmark` compare the PyTorch path against ONNX Runtime when an exported ONNX graph and compatible provider are available.
+8. The Guide tab is static frontend documentation that explains workflows and troubleshooting without calling external services.
 
 ## Quick Start / Runbook
 
@@ -378,6 +395,7 @@ When the app opens successfully:
 
 - The splash/startup flow should advance after `/live` responds.
 - The main UI should show the depth engine as online or warming.
+- The header engine-status orb should open a popover with backend URL, readiness, diagnostics, runtime, cache, loaded models, system details, and module checks.
 - Inference controls should become available after `/ready` passes.
 - Diagnostics panels should populate devices, cache metrics, and ONNX status.
 
@@ -919,6 +937,14 @@ http://127.0.0.1:8765
 
 The 3D Reconstruction frontend tab consumes this local endpoint and replaces the former About tab. It exports relative colored point clouds as PLY/OBJ and can preview points in the browser; the exported geometry is approximate because monocular depth is relative, not metric-scale accurate. For a first run, use MiDaS Small on CPU or DPT Hybrid when your hardware can support the heavier model.
 
+`/api/benchmark` and `/benchmark` query parameters:
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `model` | string | `midas_small` | Accepts the same aliases as inference. |
+| `device` | string | `auto` | Uses discovered PyTorch devices when available. |
+| `iterations` | integer | backend default | Number of timed iterations; keep small for local diagnostics. |
+
 `/estimate` form fields:
 
 | Field | Type | Default | Notes |
@@ -1223,7 +1249,7 @@ Keep changes focused, preserve API response compatibility unless intentionally d
 
 ## License
 
-No `LICENSE` file is currently present in this repository. Treat the code as not explicitly open-source licensed until a license file is added by the maintainer.
+DepthLens Pro is licensed under the MIT License. See `LICENSE` for the full license text.
 
 ## Maintainer
 
