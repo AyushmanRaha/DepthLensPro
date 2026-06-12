@@ -801,11 +801,38 @@
               <div class="metric-cell"><span class="metric-value" id="experimentStatusMetric">Idle</span><span class="metric-label">Status</span><span class="metric-desc">Warnings and export readiness</span></div>
             </div>
             <div class="experiment-table-wrap">
-              <table class="about-table" id="experimentTable">
-                <thead><tr><th>Image</th><th>Model</th><th>Device</th><th>Latency</th><th>Abs Rel</th><th>RMSE</th><th>δ&lt;1.25</th><th>Status</th></tr></thead>
-                <tbody id="experimentTableBody"><tr><td colspan="8">No experiment results yet.</td></tr></tbody>
-              </table>
-            </div>
+  <table class="about-table experiment-table" id="experimentTable" aria-describedby="experimentStatus">
+    <colgroup>
+      <col class="experiment-col-image" />
+      <col class="experiment-col-model" />
+      <col class="experiment-col-device" />
+      <col class="experiment-col-latency" />
+      <col class="experiment-col-absrel" />
+      <col class="experiment-col-rmse" />
+      <col class="experiment-col-delta" />
+      <col class="experiment-col-status" />
+    </colgroup>
+    <thead>
+      <tr>
+        <th scope="col" class="experiment-col-image">Image</th>
+        <th scope="col" class="experiment-col-model">Model</th>
+        <th scope="col" class="experiment-col-device">Device</th>
+        <th scope="col" class="experiment-col-latency">Latency</th>
+        <th scope="col" class="experiment-col-absrel">Abs Rel</th>
+        <th scope="col" class="experiment-col-rmse">RMSE</th>
+        <th scope="col" class="experiment-col-delta">δ&lt;1.25</th>
+        <th scope="col" class="experiment-col-status">Status</th>
+      </tr>
+    </thead>
+    <tbody id="experimentTableBody">
+      <tr class="experiment-empty-row">
+        <td class="experiment-empty" colspan="8">
+          <span>No experiment results yet.</span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
             <div class="experiment-previews" id="experimentPreviews"></div>
           </div>
         </div>
