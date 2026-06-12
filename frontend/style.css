@@ -1493,6 +1493,19 @@ ul.guide-step-list { list-style:disc; }
 .cmap-row { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
 .cmap-label { font-family:var(--ff-body); font-size:0.65rem; font-weight:500; color:var(--text-muted); letter-spacing:0.03em; flex-shrink:0; }
 .select-input { flex:1; min-width:90px; background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--r); color:var(--text); font-family:var(--ff-body); font-size:0.68rem; font-weight:500; padding:0.32rem 0.55rem; outline:none; cursor:pointer; transition:var(--t); }
+
+.compare-upload-card .cmap-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.compare-upload-card .cmap-row .select-input {
+  width: 100%;
+  min-width: 0;
+}
+
 .select-input:focus { border-color:var(--accent); box-shadow:0 0 8px var(--accent-glow); }
 .compare-results { min-height:280px; display:grid; grid-template-columns:repeat(3,1fr); gap:0.9rem; align-items:start; }
 @media (max-width:900px) { .compare-results { grid-template-columns:1fr; } }
