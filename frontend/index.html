@@ -891,22 +891,39 @@
           </section>
 
           <div class="reconstruct-grid">
-            <section class="card">
+            <section class="card reconstruct-source-card">
               <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Source Image</h3>
-              <div class="reconstruct-drop-zone" id="reconstructDropZone" role="button" tabindex="0" aria-label="Upload reconstruction source image">
+              <div
+                class="drop-zone reconstruct-drop-zone reconstruct-source-drop"
+                id="reconstructDropZone"
+                role="button"
+                tabindex="0"
+                aria-label="Drop source image here or press Enter to browse files"
+                aria-describedby="reconstructSourceHint reconstructSourceContext reconstructFileName"
+              >
                 <input id="reconstructFileInput" type="file" accept="image/*" hidden />
-                <div class="reconstruct-drop-copy">
-                  <span class="drop-icon" aria-hidden="true"></span>
-                  <strong>Drop an image here</strong>
-                  <span>or browse for a local image under 20 MB</span>
+                <div class="drop-zone-inner reconstruct-drop-copy">
+                  <div class="drop-icon" aria-hidden="true">
+                    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="8" y="16" width="48" height="36" rx="4" stroke="currentColor" stroke-width="2"/>
+                      <path d="M8 28 L20 20 L32 30 L44 22 L56 28" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                      <circle cx="44" cy="26" r="5" stroke="currentColor" stroke-width="2"/>
+                      <path d="M32 44 L32 52 M28 48 L32 44 L36 48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </div>
+                  <p class="drop-headline">Drop a source image here</p>
+                  <p class="drop-sub" id="reconstructSourceHint">PNG · JPG · WEBP · BMP &nbsp;|&nbsp; up to 20 MB</p>
+                  <p class="reconstruct-source-context" id="reconstructSourceContext">Used to generate depth and colored point-cloud geometry</p>
+                  <button class="btn btn-outline reconstruct-source-browse" id="reconstructBrowseBtn" type="button">Browse Image</button>
                 </div>
                 <img id="reconstructInputPreview" class="reconstruct-preview" alt="Selected reconstruction input preview" hidden />
               </div>
-              <p class="file-name" id="reconstructFileName">No image selected</p>
-              <div class="reconstruct-download-row">
-                <button class="btn btn-outline" id="reconstructBrowseBtn" type="button">Browse Image</button>
-                <button class="btn btn-outline" id="reconstructUseLatestBtn" type="button">Use Latest Result</button>
-                <button class="btn btn-ghost" id="reconstructClearBtn" type="button">Clear</button>
+              <div class="reconstruct-source-footer">
+                <p class="file-name reconstruct-source-status" id="reconstructFileName">No image selected</p>
+                <div class="reconstruct-source-actions">
+                  <button class="btn btn-outline" id="reconstructUseLatestBtn" type="button">Use Latest Result</button>
+                  <button class="btn btn-ghost" id="reconstructClearBtn" type="button">Clear</button>
+                </div>
               </div>
             </section>
 
