@@ -841,65 +841,82 @@
       <!-- ── Performance analysis panel ───────────────────────────────── -->
       <main class="panel" id="panel-performance" hidden>
         <div class="about-layout">
-          <div class="card about-card">
+          <div class="card about-card performance-card">
             <h2 class="card-title">
               <span class="card-icon" aria-hidden="true"></span> Performance Analysis
             </h2>
-            <p class="compare-desc">
+
+            <p class="compare-desc performance-desc">
               Benchmark the legacy PyTorch execution path against exported ONNX Runtime
               weights using a synthetic 384×384 frame. Results include latency, memory,
               and raw frame throughput.
             </p>
-            <div class="cmap-row">
-              <label for="benchmarkModel" class="cmap-label">Model</label>
-              <select id="benchmarkModel" class="select-input">
-                <option value="MiDaS_small">MiDaS Small</option>
-                <option value="DPT_Hybrid">DPT Hybrid</option>
-                <option value="DPT_Large">DPT Large</option>
-              </select>
-              <label for="benchmarkDevice" class="cmap-label">Device</label>
-              <select id="benchmarkDevice" class="select-input">
-                <option value="auto">Auto</option>
-              </select>
+
+            <div class="cmap-row performance-controls">
+              <div class="performance-field">
+                <label for="benchmarkModel" class="cmap-label">Model</label>
+                <select id="benchmarkModel" class="select-input">
+                  <option value="MiDaS_small">MiDaS Small</option>
+                  <option value="DPT_Hybrid">DPT Hybrid</option>
+                  <option value="DPT_Large">DPT Large</option>
+                </select>
+              </div>
+
+              <div class="performance-field">
+                <label for="benchmarkDevice" class="cmap-label">Device</label>
+                <select id="benchmarkDevice" class="select-input">
+                  <option value="auto">Auto</option>
+                </select>
+              </div>
+
               <button class="btn btn-primary btn-sm" id="benchmarkRunBtn" type="button">
                 Run Benchmark
               </button>
             </div>
-            <div class="metrics-grid benchmark-grid" id="benchmarkMetrics">
+
+            <div class="metrics-grid benchmark-grid performance-metrics" id="benchmarkMetrics">
               <div class="metric-cell">
                 <span class="metric-value" id="benchTorchLatency">—</span>
                 <span class="metric-label">PyTorch Avg Latency</span>
                 <span class="metric-desc">Torch Hub model forward-pass timing</span>
               </div>
+
               <div class="metric-cell">
                 <span class="metric-value" id="benchOnnxLatency">—</span>
                 <span class="metric-label">ONNX Avg Latency</span>
                 <span class="metric-desc">ONNX Runtime session .run() timing</span>
               </div>
+
               <div class="metric-cell">
                 <span class="metric-value" id="benchSpeedup">—</span>
                 <span class="metric-label">Speedup</span>
                 <span class="metric-desc">PyTorch latency divided by ONNX latency</span>
               </div>
+
               <div class="metric-cell">
                 <span class="metric-value" id="benchThroughput">—</span>
                 <span class="metric-label">ONNX Throughput</span>
                 <span class="metric-desc">Raw synthetic frames processed per second</span>
               </div>
+
               <div class="metric-cell">
                 <span class="metric-value" id="benchMemory">—</span>
                 <span class="metric-label">Process RSS</span>
                 <span class="metric-desc">Resident memory after benchmark</span>
               </div>
+
               <div class="metric-cell">
                 <span class="metric-value" id="benchProvider">—</span>
                 <span class="metric-label">Execution Status</span>
                 <span class="metric-desc" id="benchStatus">Awaiting benchmark run</span>
               </div>
             </div>
-            <p class="chart-label">PyTorch vs ONNX Runtime Latency</p>
-            <div class="chart-wrap">
-              <canvas id="benchmarkChart" aria-label="PyTorch and ONNX benchmark chart"></canvas>
+
+            <div class="performance-chart-section">
+              <p class="chart-label">PyTorch vs ONNX Runtime Latency</p>
+              <div class="chart-wrap">
+                <canvas id="benchmarkChart" aria-label="PyTorch and ONNX benchmark chart"></canvas>
+              </div>
             </div>
           </div>
         </div>
