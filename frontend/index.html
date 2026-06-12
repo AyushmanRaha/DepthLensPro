@@ -604,11 +604,13 @@
                 <span class="card-icon" aria-hidden="true"></span> Real-Time Webcam Depth
               </h2>
               <p class="webcam-desc">
-                Sample live camera frames, send them through the existing local
-                <code>/estimate</code> endpoint, and preview depth maps without
-                changing the FastAPI/Electron boundary.
-              </p>
-              <p class="webcam-hint">Your browser or Electron shell will ask for camera permission. Frames are sampled at a capped target FPS and stay on localhost.</p>
+  Turn your webcam feed into live depth maps. Start the camera to view the
+  live RGB image beside the latest depth output, then capture a depth frame
+  as a PNG when needed.
+</p>
+<p class="webcam-hint">
+  The app will ask for camera permission. Frames are processed locally at the selected FPS.
+</p>
             </div>
             <span class="webcam-status-pill" id="webcamStatusPill" aria-live="polite">Stopped · idle</span>
           </section>
