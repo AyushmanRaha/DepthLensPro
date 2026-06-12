@@ -130,7 +130,7 @@ def _dependency_unavailable(exc: Exception) -> HTTPException:
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 MAX_UPLOAD_SIZE_MB = 20
 BENCHMARK_TIMEOUT_MESSAGE = (
-    "Benchmark timed out; backend remains live and PyTorch fallback is available."
+    "Benchmark timed out · depth engine remains available"
 )
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
@@ -382,7 +382,7 @@ def _validated_device_or_422(device: str) -> str:
 
     avail = available_options()
     if device not in avail:
-        raise HTTPException(422, f"Device '{device}' unavailable. Options: {avail}")
+        raise HTTPException(422, f"Device '{device}' is unavailable. Options: {avail}")
     try:
         return str(_resolve(device))
     except asyncio.TimeoutError as exc:
@@ -397,7 +397,7 @@ def _validated_device_or_422(device: str) -> str:
     except ValueError as exc:
         refreshed = available_options(force=True)
         if device not in refreshed:
-            detail = f"Device '{device}' unavailable. Options: {refreshed}"
+            detail = f"Device '{device}' is unavailable. Options: {refreshed}"
             raise HTTPException(422, detail) from exc
         try:
             return str(_resolve(device))
@@ -681,11 +681,11 @@ async def estimate(
     resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Expected an image file")
+        raise HTTPException(415, "Image file required")
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+        raise HTTPException(413, f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
 
     gt_raw: bytes | None = None
     gt_filename: str | None = None
@@ -693,9 +693,9 @@ async def estimate(
         gt_raw = await gt_file.read()
         gt_filename = gt_file.filename
         if len(gt_raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-            raise HTTPException(413, f"Ground-truth file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+            raise HTTPException(413, f"GT depth file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
     elif gt_required:
-        raise HTTPException(422, "Ground-truth mode requires a GT depth file")
+        raise HTTPException(422, "GT mode requires one image and one GT depth file")
 
     # GT metrics depend on uploaded labels and must not reuse image-only cached payloads.
     ck = (
@@ -739,7 +739,7 @@ async def estimate(
         log.exception("Inference failed")
         raise HTTPException(
             500,
-            {"error_code": "INFERENCE_FAILED", "message": "Inference failed"},
+            {"error_code": "INFERENCE_FAILED", "message": "Depth inference failed"},
         ) from exc
 
     if ck is not None:
@@ -786,11 +786,11 @@ async def reconstruct(
     resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Expected an image file")
+        raise HTTPException(415, "Image file required")
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"File exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+        raise HTTPException(413, f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
 
     try:
         result = await reconstruct_point_cloud_async(
@@ -817,7 +817,7 @@ async def reconstruct(
             504,
             {
                 "error_code": "RECONSTRUCTION_TIMEOUT",
-                "message": "Reconstruction timed out; backend remains live.",
+                "message": "Point cloud generation timed out · depth engine remains available",
             },
         ) from exc
     except ValueError as exc:
@@ -826,7 +826,7 @@ async def reconstruct(
         log.exception("Reconstruction failed")
         raise HTTPException(
             500,
-            {"error_code": "RECONSTRUCTION_FAILED", "message": "Reconstruction failed"},
+            {"error_code": "RECONSTRUCTION_FAILED", "message": "Point cloud generation failed"},
         ) from exc
 
     log.info(
@@ -852,7 +852,7 @@ async def batch(
     max_dim: int | None = Form(None),
 ) -> JSONResponse:
     if len(files) > 10:
-        raise HTTPException(422, "Batch limit: 10 images")
+        raise HTTPException(422, "Batch limit is 10 images")
     try:
         model = normalize_model_id(model)
     except UnknownModelError as exc:
@@ -884,10 +884,10 @@ async def batch(
     for upload in files:
         try:
             if not (upload.content_type or "").startswith("image/"):
-                raise ValueError("Expected an image file")
+                raise ValueError("Image file required")
             raw = await upload.read()
             if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-                raise ValueError("File too large")
+                raise ValueError(f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
             ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
             cached = _cache_service().get(ck)
             if cached is not None:

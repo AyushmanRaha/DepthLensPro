@@ -173,7 +173,7 @@ const state = {
   initializingBackend: true,
   engineStatus: {
   cls: "connecting",
-  label: "Starting engine…",
+  label: "Starting depth engine",
   sub: DEFAULT_API_BASE_URL,
   deviceText: "",
   live: null,
@@ -926,31 +926,31 @@ function formatEngineBytes(bytes) {
 function engineStatusStateText() {
   const { cls, live } = state.engineStatus;
   if (cls === "online") {
-    if (live?.busy) return "Backend live · busy";
-    if (inferenceReady) return "Backend live · inference ready";
-    return "Backend live · checking inference";
+    if (live?.busy) return "Depth engine busy";
+    if (inferenceReady) return "Depth engine ready";
+    return "Engine detected · checking runtime";
   }
-  if (cls === "connecting") return "Connecting to local backend";
-  return "Backend unavailable";
+  if (cls === "connecting") return "Connecting to depth engine";
+  return "Depth engine unavailable";
 }
 
 function engineReadinessText() {
   const readiness = state.engineStatus.readiness || readinessDetails || state.engineStatus.health?.readiness;
 
-  if (inferenceReady) return "Ready for inference";
+  if (inferenceReady) return "Inference runtime ready";
   if (readiness?.required) return readinessSummary(readiness);
-  if (state.engineStatus.cls === "offline") return "Readiness unavailable";
-  return "Checking runtime dependencies…";
+  if (state.engineStatus.cls === "offline") return "Inference runtime unavailable";
+  return "Checking inference runtime";
 }
 
 function engineDiagnosticsText() {
   const health = state.engineStatus.health;
   if (!health) {
-    return backendOnline ? "Waiting for /health" : "Diagnostics unavailable";
+    return backendOnline ? "Waiting for diagnostics" : "Diagnostics unavailable";
   }
 
   const status = health.diagnostics_status || health.status || "unknown";
-  const accel = health.acceleration_ok === false ? "accelerator degraded" : "accelerator OK";
+  const accel = health.acceleration_ok === false ? "accelerator degraded" : "accelerator ok";
   return `${status} · ${accel}`;
 }
 
@@ -966,7 +966,7 @@ function engineRuntimeText() {
   if (readiness?.torch_runtime?.python_version) {
     return `Python ${readiness.torch_runtime.python_version}`;
   }
-  return "Runtime not reported yet";
+  return "Runtime not reported";
 }
 
 function engineCacheText() {
@@ -978,7 +978,7 @@ function engineCacheText() {
 
 function engineLoadedModelsText() {
   const loaded = state.engineStatus.health?.loaded_models;
-  if (!Array.isArray(loaded) || !loaded.length) return "None reported";
+  if (!Array.isArray(loaded) || !loaded.length) return "No models loaded";
   return loaded.join(", ");
 }
 
@@ -987,7 +987,7 @@ function engineSystemText() {
   const system = health?.system;
   const telemetry = health?.telemetry;
 
-  if (!system && !telemetry) return "Waiting for diagnostics…";
+  if (!system && !telemetry) return "Waiting for diagnostics";
 
   const parts = [];
   if (system?.os) parts.push(system.os);
@@ -1004,7 +1004,7 @@ function engineSystemText() {
     parts.push(`Disk usage: ${disk.usage_percent}%`);
   }
 
-  return parts.length ? parts.join(" · ") : "Diagnostics returned no system summary";
+  return parts.length ? parts.join(" · ") : "No system summary reported";
 }
 
 function engineModulePillsHtml() {
@@ -1013,7 +1013,7 @@ function engineModulePillsHtml() {
 
   const entries = Object.entries(required);
   if (!entries.length) {
-    return `<span class="engine-module-pill muted">Waiting for readiness check</span>`;
+    return `<span class="engine-module-pill muted">Waiting for runtime check</span>`;
   }
 
   return entries.map(([name, info]) => {
@@ -1142,7 +1142,7 @@ function initEngineStatusPanel() {
 
   el.engineStatusRefresh?.addEventListener("click", async () => {
     el.engineStatusRefresh.disabled = true;
-    el.engineStatusRefresh.textContent = "Checking…";
+    el.engineStatusRefresh.textContent = "Checking";
 
     try {
       const live = await checkLive({ quiet: true });
@@ -1244,7 +1244,7 @@ function readinessSummary(payload) {
   const failed = Object.entries(payload?.required || {})
     .filter(([, item]) => !item?.available)
     .map(([name, item]) => `${name}: ${item?.error || item?.status || "unavailable"}`);
-  return failed.length ? failed.join(" · ") : "Inference runtime is ready";
+  return failed.length ? failed.join(" · ") : "Inference runtime ready";
 }
 
 async function checkReadiness({ quiet = true } = {}) {
@@ -1257,13 +1257,13 @@ async function checkReadiness({ quiet = true } = {}) {
     readinessDetails = data;
     inferenceReady = Boolean(data.inference_ready);
     if (inferenceReady) {
-      setStatus("online", "Depth Engine: Online", `Backend ready · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
+      setStatus("online", "Depth engine online", `Inference runtime ready · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
     } else {
       const summary = readinessSummary(data);
-      setStatus("offline", "Depth Engine: Degraded", summary);
+      setStatus("offline", "Depth engine degraded", summary);
       const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
-      if (bannerText) bannerText.textContent = `Inference runtime degraded: ${summary}`;
-      if (!quiet) toastOnce(`Inference runtime is not ready: ${summary}`, "error", 8000);
+      if (bannerText) bannerText.textContent = `Inference runtime degraded · ${summary}`;
+      if (!quiet) toastOnce(`Inference runtime is not ready · ${summary}`, "error", 8000);
     }
     logEndpointTiming("/ready", started, inferenceReady);
     syncQueueControls();
@@ -1274,8 +1274,8 @@ async function checkReadiness({ quiet = true } = {}) {
     readinessDetails = null;
     inferenceReady = false;
     state.engineStatus.readiness = null;
-    setStatus("offline", "Depth Engine: Degraded", `Readiness check failed · ${err.message}`);
-    if (!quiet) toastOnce(`Readiness check failed: ${err.message}`, "error", 6000);
+    setStatus("offline", "Depth engine degraded", `Runtime check failed · ${err.message}`);
+    if (!quiet) toastOnce(`Runtime check failed · ${err.message}`, "error", 6000);
     syncQueueControls();
     return false;
   }
@@ -1306,7 +1306,7 @@ function deviceBadge(devs, primary) {
 }
 
 async function checkLive({ quiet = false, signal } = {}) {
-  if (!quiet) setStatus("connecting","Connecting…", API || DEFAULT_API_BASE_URL);
+  if (!quiet) setStatus("connecting","Connecting to depth engine", API || DEFAULT_API_BASE_URL);
   const started = performance.now();
   try {
     const res = await apiFetch("/live", { signal: requestSignal(signal, 2500) });
@@ -1315,9 +1315,9 @@ async function checkLive({ quiet = false, signal } = {}) {
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
     if (data.busy) {
-      setStatus("online", "Depth Engine: Busy", "Benchmark/model load running · liveness OK", deviceBadge(state.devices, state.primaryDevice));
+      setStatus("online", "Depth engine busy", "Benchmark or model load running · /live ok", deviceBadge(state.devices, state.primaryDevice));
     } else {
-      setStatus("online","Depth Engine: Detected",`Backend live · checking inference readiness`, deviceBadge(state.devices, state.primaryDevice));
+      setStatus("online","Depth engine detected",`Engine detected · checking runtime`, deviceBadge(state.devices, state.primaryDevice));
     }
     logEndpointTiming("/live", started, true);
     syncQueueControls();
@@ -1330,10 +1330,10 @@ async function checkLive({ quiet = false, signal } = {}) {
     state.engineStatus.live = null;
     state.engineStatus.readiness = null;
     state.engineStatus.health = null;
-    setStatus("offline","Depth Engine: Offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
+    setStatus("offline","Depth engine offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
     const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
     if (bannerText) bannerText.textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
-    if (!quiet) toastOnce(`Backend liveness check failed: ${err.message}`, "error", 6000);
+    if (!quiet) toastOnce(`Depth engine unavailable · ${err.message}`, "error", 6000);
     syncQueueControls();
     return false;
   }
@@ -1355,17 +1355,17 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
     state.devices = devs; state.primaryDevice = primary;
     const badge = deviceBadge(devs, primary);
     const accelText = accelerationSummary(data);
-    setStatus("online","Depth Engine: Online",`PyTorch ${data.torch_version} · ${primary} · diagnostics ${data.status || "ok"} · ${accelText}`,badge);
+    setStatus("online","Depth engine online",`PyTorch ${data.torch_version} · ${primary} · diagnostics ${data.status || "ok"} · ${accelText}`,badge);
     await loadDevices(devs, primary);
     updateDeviceInfoBanner(`${badge} · ${accelText}`);
     logEndpointTiming("/health", started, true, data.status || "ok");
-    if (data.status === "degraded" && !quiet) toastOnce("Diagnostics degraded; inference remains available.","warning");
+    if (data.status === "degraded" && !quiet) toastOnce("Diagnostics degraded · inference remains available","warning");
     return true;
   } catch (err) {
     logEndpointTiming("/health", started, false, err.message);
     if (backendOnline) {
-      setStatus("online","Depth Engine: Online",`Diagnostics degraded · ${err.message}`, deviceBadge(state.devices, state.primaryDevice));
-      if (!quiet) toastOnce(`Diagnostics check failed: ${err.message}`, "warning", 5000);
+      setStatus("online","Depth engine online",`Diagnostics degraded · ${err.message}`, deviceBadge(state.devices, state.primaryDevice));
+      if (!quiet) toastOnce(`Diagnostics unavailable · ${err.message}`, "warning", 5000);
     }
     state.engineStatus.health = {
     status: "degraded",
@@ -1566,7 +1566,7 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
 
 function updateDeviceInfoBanner(text) {
   const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
-  if (bannerText) bannerText.textContent = `Detected: ${text}. Choose compute target below.`;
+  if (bannerText) bannerText.textContent = `Detected ${text} · choose compute target below`;
 }
 
 
@@ -1611,8 +1611,8 @@ function syncReconstructControls() {
 
 function setReconstructFile(file, previewDataUrl = "") {
   if (!file) return;
-  if (!file.type?.startsWith("image/")) { toast("Select an image file for reconstruction", "warning"); return; }
-  if (file.size > 20 * 1024 * 1024) { toast("Reconstruction image exceeds 20 MB", "warning"); return; }
+  if (!file.type?.startsWith("image/")) { toast("Image file required for point cloud generation", "warning"); return; }
+  if (file.size > 20 * 1024 * 1024) { toast("Point cloud source image exceeds 20 MB", "warning"); return; }
   state.reconstruct.file = file;
   state.reconstruct.result = null;
   state.reconstruct.filePreview = previewDataUrl || "";
@@ -1632,7 +1632,7 @@ function setReconstructFile(file, previewDataUrl = "") {
       el.reconstructInputPreview.hidden = !state.reconstruct.filePreview;
     }
   };
-  reader.onerror = () => toast("Could not read reconstruction preview", "warning");
+  reader.onerror = () => toast("Point cloud preview could not be read", "warning");
   reader.readAsDataURL(file);
   syncReconstructControls();
 }
@@ -1667,12 +1667,12 @@ function dataUrlToFile(dataUrl, filename) {
 function useLatestReconstructionSource() {
   try {
     const latest = latestResultWithOriginal();
-    if (!latest) { toast("Run a workspace inference first, or upload an image directly.", "warning"); return; }
+    if (!latest) { toast("Run workspace inference first or upload an image", "warning"); return; }
     const file = dataUrlToFile(latest.originalSrc, latest.filename || "latest-depthlens-source.jpg");
     setReconstructFile(file, latest.originalSrc);
-    toast("Latest workspace source loaded for 3D reconstruction", "success");
+    toast("Latest workspace source loaded for point cloud generation", "success");
   } catch (err) {
-    toast(`Could not use latest result: ${err.message}`, "error", 6000);
+    toast(`Latest result unavailable · ${err.message}`, "error", 6000);
   }
 }
 
@@ -1701,13 +1701,13 @@ function startReconstructProgress() {
   let pct = 2;
   const started = performance.now();
   if (el.reconstructProgressBlock) el.reconstructProgressBlock.hidden = false;
-  updateReconstructProgress(pct, "Uploading image and options…", "Estimating…");
+  updateReconstructProgress(pct, "Uploading image and options", "Estimating");
   clearInterval(state.reconstruct.progressTimer);
   state.reconstruct.progressTimer = setInterval(() => {
     const elapsed = performance.now() - started;
     const ceiling = elapsed < 15000 ? 70 : 95;
     pct = Math.min(ceiling, pct + Math.max(0.4, (ceiling - pct) * 0.045));
-    updateReconstructProgress(pct, pct < 75 ? "Generating relative depth…" : "Building point-cloud artifact…", `${Math.round(elapsed / 1000)}s elapsed`);
+    updateReconstructProgress(pct, pct < 75 ? "Generating relative depth" : "Building point cloud artifact", `${Math.round(elapsed / 1000)}s elapsed`);
   }, 450);
 }
 
@@ -1734,10 +1734,10 @@ async function ensureReconstructionBackendReady() {
 
 async function runReconstruction() {
   if (!state.reconstruct.file) { toast("Choose an image before generating a point cloud", "warning"); return; }
-  if (!reconstructSupported()) { toast("This browser does not support the reconstruction upload APIs", "error"); return; }
+  if (!reconstructSupported()) { toast("Point cloud upload is not supported in this browser", "error"); return; }
   if (state.reconstruct.running) return;
   const ready = await ensureReconstructionBackendReady();
-  if (!ready) { toast("Depth engine is not ready for reconstruction yet", "warning", 6000); syncReconstructControls(); return; }
+  if (!ready) { toast("Inference runtime is not ready for point cloud generation", "warning", 6000); syncReconstructControls(); return; }
 
   const opts = readReconstructOptions();
   const controller = new AbortController();
@@ -1779,11 +1779,11 @@ async function runReconstruction() {
     if (err.name === "AbortError") {
       stopReconstructProgress(0, "Cancelled");
       setReconstructStatus("Cancelled", "idle");
-      toast("3D reconstruction cancelled", "info");
+      toast("Point cloud generation cancelled", "info");
     } else {
       stopReconstructProgress(0, "Failed");
       setReconstructStatus("Error", "error");
-      toast(`3D reconstruction failed: ${err.message}`, "error", 7000);
+      toast(`Point cloud generation failed · ${err.message}`, "error", 7000);
     }
   } finally {
     state.reconstruct.running = false;
@@ -1905,12 +1905,12 @@ function selectedReconstructionMetadata(result = state.reconstruct.result) {
 
 function downloadReconstructionArtifact() {
   const result = state.reconstruct.result;
-  if (!result?.artifact_base64) { toast("No point-cloud artifact is available yet", "warning"); return; }
+  if (!result?.artifact_base64) { toast("No point cloud artifact available", "warning"); return; }
   try {
     const blob = b64ToBlob(result.artifact_base64, result.artifact_mime || "text/plain");
     downloadBlob(blob, result.artifact_filename || `depthlens_point_cloud.${result.artifact_format || "ply"}`);
   } catch (err) {
-    toast(`Could not download point cloud: ${err.message}`, "error");
+    toast(`Point cloud download failed · ${err.message}`, "error");
   }
 }
 
@@ -1933,15 +1933,15 @@ async function copyReconstructionMetadata() {
       ta.style.position = "fixed"; ta.style.opacity = "0";
       document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
     }
-    toast("Reconstruction metadata copied", "success");
+    toast("Point cloud metadata copied", "success");
   } catch (err) {
-    toast(`Could not copy metadata: ${err.message}`, "error");
+    toast(`Metadata copy failed · ${err.message}`, "error");
   }
 }
 
 function downloadReconstructionDepth() {
   const b64 = state.reconstruct.result?.depth_map;
-  if (!b64) { toast("No depth preview is available yet", "warning"); return; }
+  if (!b64) { toast("No depth preview available", "warning"); return; }
   dlB64("reconstruction_depth.png", b64);
 }
 
@@ -1951,7 +1951,7 @@ function clearPointCloudViewer() {
   viewer.points = [];
   viewer.normalized = [];
   viewer.mode = "none";
-  if (el.pointCloudPlaceholder) { el.pointCloudPlaceholder.hidden = false; el.pointCloudPlaceholder.textContent = "Generate a reconstruction to preview points."; }
+  if (el.pointCloudPlaceholder) { el.pointCloudPlaceholder.hidden = false; el.pointCloudPlaceholder.textContent = "Generate a point cloud to preview points"; }
   if (el.pointCloudCanvas) {
     const ctx = el.pointCloudCanvas.getContext("2d");
     ctx?.clearRect(0, 0, el.pointCloudCanvas.width, el.pointCloudCanvas.height);
@@ -1981,12 +1981,12 @@ function renderPointCloudViewer(points = []) {
   viewer.mode = viewer.ctx2d ? "2d" : "none";
   if (el.pointCloudPlaceholder) {
     el.pointCloudPlaceholder.hidden = Boolean(viewer.normalized.length);
-    el.pointCloudPlaceholder.textContent = viewer.normalized.length ? "" : "No preview points returned by the backend.";
+    el.pointCloudPlaceholder.textContent = viewer.normalized.length ? "" : "No preview points returned";
   }
   if (el.pointCloudModeMessage) {
     el.pointCloudModeMessage.textContent = pointCloudWebglAvailable()
-      ? "Native 2D canvas preview · drag to rotate · wheel to zoom · double-click to reset."
-      : "WebGL unavailable — showing 2D preview.";
+      ? "2D canvas preview · drag to rotate · wheel to zoom · double-click to reset"
+      : "WebGL unavailable — showing 2D preview";
   }
   resizePointCloudCanvas();
   drawPointCloudFrame();
@@ -2391,15 +2391,15 @@ function syncGtUi() {
 }
 function setGtFile(file) {
   if (!file) return;
-  if (!GT_ALLOWED.test(file.name)) { toast("GT depth must be PNG, TIFF, or NPY", "warning"); return; }
-  if (file.size > 20*1024*1024) { toast("GT depth exceeds 20 MB", "warning"); return; }
+  if (!GT_ALLOWED.test(file.name)) { toast("GT depth file must be PNG, TIFF, or NPY", "warning"); return; }
+  if (file.size > 20*1024*1024) { toast("GT depth file exceeds 20 MB", "warning"); return; }
   state.gtFile = file;
   if (el.gtFileName) el.gtFileName.textContent = file.name;
   syncQueueControls();
 }
 el.gtToggle?.addEventListener("change", () => {
   syncGtUi();
-  toast(state.gtMode ? "GT mode enabled — select one image and one GT depth file" : "GT mode disabled — standard batch upload restored", "info");
+  toast(state.gtMode ? "GT mode enabled — add one image and one GT depth file" : "GT mode disabled — batch upload restored", "info");
 });
 el.gtFileInput?.addEventListener("change", () => { setGtFile(el.gtFileInput.files[0]); });
 el.clearGtBtn?.addEventListener("click", () => { state.gtFile=null; if (el.gtFileInput) el.gtFileInput.value=""; if (el.gtFileName) el.gtFileName.textContent="No GT file selected"; syncQueueControls(); });
@@ -2418,8 +2418,8 @@ function fmtSize(b) {
 function addFiles(list) {
   let added = 0;
   for (const file of list) {
-    if (state.gtMode && state.files.length + added >= 1) { toast("GT mode accepts exactly one source image", "warning"); break; }
-    if (!ALLOWED.test(file.type)) { toast(`Skipped "${file.name}" — not an image`,"warning"); continue; }
+    if (state.gtMode && state.files.length + added >= 1) { toast("GT mode requires one image and one GT depth file", "warning"); break; }
+    if (!ALLOWED.test(file.type)) { toast(`Skipped "${file.name}" — image file required`,"warning"); continue; }
     if (file.size > 20*1024*1024) { toast(`Skipped "${file.name}" — exceeds 20 MB`,"warning"); continue; }
     if (state.files.some(f=>f.file.name===file.name&&f.file.size===file.size)) continue;
     const entry = {id:uid(),file,thumb:null,status:"pending",result:null};
@@ -2466,7 +2466,7 @@ function syncQueueControls() {
   const gtBlocked = state.gtMode && (state.files.length !== 1 || !state.gtFile);
   if (el.runBtn) {
     el.runBtn.disabled = !has || Boolean(state.abort) || state.initializingBackend || !ready || gtBlocked;
-    el.runBtn.title = state.initializingBackend ? "Starting depth engine…" : (!backendOnline ? `Depth engine offline at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready; open Diagnostics or check /ready" : (gtBlocked ? "GT mode requires exactly one source image and one GT depth file" : "")));
+    el.runBtn.title = state.initializingBackend ? "Starting depth engine" : (!backendOnline ? `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}` : (!inferenceReady ? "Inference runtime is not ready · check Diagnostics or /ready" : (gtBlocked ? "GT mode requires one image and one GT depth file" : "")));
   }
 }
 
@@ -2537,7 +2537,7 @@ async function runBatch() {
   state.abort = new AbortController();
   el.runBtn.disabled=true; el.clearBtn.disabled=true;
   el.cancelBtn.hidden=false; el.progressBlock.hidden=false;
-  setProgress(0,"Starting batch…","","",`0 / ${pending.length}`);
+  setProgress(0,"Starting batch","","",`0 / ${pending.length}`);
 
   const batchStart=Date.now();
   const model=selModel(), colormap=selCmap(), device=selDevice();
@@ -2546,7 +2546,7 @@ async function runBatch() {
   for (let i=0;i<pending.length;i++) {
     if (state.abort?.signal?.aborted) break;
     const entry=pending[i];
-    setFileSt(entry.id,"running","Running…");
+    setFileSt(entry.id,"running","Running");
     const estCurrent=getEstimate("workspace",model,device);
     const estRemainingStatic=pending.slice(i+1).reduce(acc=>acc+getEstimate("workspace",model,device),0);
     const itemStart=Date.now();
@@ -2555,7 +2555,7 @@ async function runBatch() {
       const unitDone=i+Math.min(elapsedCurrent/estCurrent,0.98);
       const pct=Math.min((unitDone/pending.length)*100,99);
       const rem=Math.max(0,estCurrent-elapsedCurrent+estRemainingStatic);
-      setProgress(pct,`Processing ${i+1} of ${pending.length}…`,`ETA: ${fmtDuration(rem)}`,esc(entry.file.name),`${i+1} / ${pending.length}`);
+      setProgress(pct,`Processing ${i+1} of ${pending.length}`,`ETA ${fmtDuration(rem)}`,esc(entry.file.name),`${i+1} / ${pending.length}`);
     },120);
 
     try {
@@ -2564,7 +2564,7 @@ async function runBatch() {
       updateEstimate("workspace",model,device,result.latency_ms);
       entry.result=result; entry.status=result.fallback_used?"completed_with_warning":"done";
       setFileSt(entry.id,result.fallback_used?"warning":"done",`${result.fallback_used?"⚠":"✓"} ${result.latency_ms}ms${result.engine_used?` · ${result.engine_used}`:""}`);
-      if (result.fallback_used) toastOnce("Depth map generated using PyTorch fallback because ONNX is unavailable.", "warning", 4500);
+      if (result.fallback_used) toastOnce("Depth map generated with PyTorch fallback · ONNX unavailable", "warning", 4500);
       state.session.total++; state.session.totalInferenceMs+=result.latency_ms;
       if (result.cached) state.session.cached++;
       state.session.latencies.push(result.latency_ms);
@@ -2585,7 +2585,7 @@ async function runBatch() {
 
   const elapsed=Date.now()-batchStart;
   const done=pending.filter(e=>e.status==="done"||e.status==="completed_with_warning").length;
-  setProgress(100,`Done — ${done} image${done!==1?"s":""} in ${fmtDuration(elapsed)}`,"");
+  setProgress(100,`Batch complete — ${done} image${done!==1?"s":""} in ${fmtDuration(elapsed)}`,"");
   if (done>0) toast(`Batch complete — ${done} succeeded`,"success");
   } catch (err) {
     pending.filter(e=>e.status==="running").forEach(e=>{ e.status="error"; setFileSt(e.id,"error","Error"); });
@@ -2680,7 +2680,7 @@ function syncWebcamControls() {
   const wc = state.webcam;
   if (el.webcamStartBtn) {
     el.webcamStartBtn.disabled = wc.running || wc.starting || !supported;
-    el.webcamStartBtn.title = supported ? (engineReady() ? "Start webcam depth inference" : "Depth engine readiness will be checked before starting") : "This browser does not support camera capture";
+    el.webcamStartBtn.title = supported ? (engineReady() ? "Start webcam depth inference" : "Inference runtime will be checked before starting") : "Camera capture is not supported in this browser";
   }
   if (el.webcamStopBtn) el.webcamStopBtn.disabled = !wc.running;
   if (el.webcamPauseBtn) {
@@ -2690,12 +2690,12 @@ function syncWebcamControls() {
   if (el.webcamCaptureBtn) el.webcamCaptureBtn.disabled = !(wc.lastDepthBase64 || wc.lastDepthDataUrl);
 }
 async function startWebcam() {
-  if (!webcamSupported()) { toast("Camera capture is not supported in this browser.", "error"); return; }
+  if (!webcamSupported()) { toast("Camera capture is not supported in this browser", "error"); return; }
   if (state.webcam.running || state.webcam.starting) return;
   state.webcam.starting = true;
   syncWebcamControls();
   if (!engineReady()) {
-    appendWebcamLog("Checking depth engine readiness…");
+    appendWebcamLog("Checking inference runtime");
     const ok = await checkHealth();
     if (!ok) {
       state.webcam.starting = false;
@@ -2774,7 +2774,7 @@ function toggleWebcamPause() {
   state.webcam.paused = !state.webcam.paused;
   state.webcam.hiddenPaused = false;
   setWebcamStatus("Running", state.webcam.paused ? "Paused" : "Scheduled");
-  appendWebcamLog(state.webcam.paused ? "Inference paused" : "Inference resumed", state.webcam.paused ? "warning" : "success");
+  appendWebcamLog(state.webcam.paused ? "Webcam inference paused" : "Webcam inference resumed", state.webcam.paused ? "warning" : "success");
   syncWebcamControls();
   scheduleNextWebcamFrame(0);
 }
@@ -2836,8 +2836,8 @@ async function processWebcamFrame() {
       toastOnce(`Webcam inference failed: ${err.message}`, "error", 6000);
       if (wc.consecutiveErrors >= 5) {
         wc.paused = true;
-        setWebcamStatus("Running", "Auto-paused after errors");
-        toast("Webcam inference auto-paused after 5 consecutive errors.", "error", 8000);
+        setWebcamStatus("Running", "Paused after errors");
+        toast("Webcam paused after repeated errors", "error", 8000);
       }
     }
   } finally {
@@ -2971,7 +2971,7 @@ function updateMetrics() {
   if (cache) {
     const cacheCell = el.metricCached.closest(".metric-cell");
     if (cacheCell) {
-      cacheCell.title = `Cache hits: ${cache.totalHits} · Misses: ${cache.cacheMisses} · Keys: ${cache.keyspaceSize} · Backend: ${cache.backend} · TTL: ${cache.ttlSeconds}s`;
+      cacheCell.title = `Cache hits ${cache.totalHits} · misses ${cache.cacheMisses} · keys ${cache.keyspaceSize} · backend ${cache.backend} · TTL ${cache.ttlSeconds}s`;
     }
   }
   el.metricErrors.textContent=s.errors;
@@ -3020,7 +3020,7 @@ el.clearResultsBtn?.addEventListener("click",()=>{ state.results=[]; el.gallery.
 el.downloadAllBtn?.addEventListener("click",()=>{
   if (!state.results.length) return;
   state.results.forEach(r=>dlB64(`depth_${r.filename}`,r.depth_map));
-  toast(`Downloading ${state.results.length} depth maps…`);
+  toast(`Downloading ${state.results.length} depth maps`);
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -3221,14 +3221,14 @@ el.lbDlGray?.addEventListener("click",()=>{ const r=state.lb.current; if (r) dlB
 // ══════════════════════════════════════════════════════════════
 el.compareFileInput?.addEventListener("change",()=>{
   state.compareFile=el.compareFileInput.files[0];
-  if (state.compareFile) { el.compareFileName.textContent=state.compareFile.name; el.compareRunBtn.disabled=false; toast(`Loaded: ${state.compareFile.name}`); }
+  if (state.compareFile) { el.compareFileName.textContent=state.compareFile.name; el.compareRunBtn.disabled=false; toast(`Loaded ${state.compareFile.name}`); }
 });
 el.compareDropZone?.addEventListener("dragover",e=>{ e.preventDefault(); el.compareDropZone.classList.add("drag-over"); });
 el.compareDropZone?.addEventListener("dragleave",e=>{ if (!el.compareDropZone.contains(e.relatedTarget)) el.compareDropZone.classList.remove("drag-over"); });
 el.compareDropZone?.addEventListener("drop",e=>{
   e.preventDefault(); el.compareDropZone.classList.remove("drag-over");
   const f=e.dataTransfer.files[0];
-  if (f?.type.startsWith("image/")) { state.compareFile=f; el.compareFileName.textContent=f.name; el.compareRunBtn.disabled=false; toast(`Loaded: ${f.name}`); }
+  if (f?.type.startsWith("image/")) { state.compareFile=f; el.compareFileName.textContent=f.name; el.compareRunBtn.disabled=false; toast(`Loaded ${f.name}`); }
 });
 el.compareDropZone?.addEventListener("click",()=>el.compareFileInput.click());
 el.compareRunBtn?.addEventListener("click",runComparison);
@@ -3266,8 +3266,8 @@ async function runComparison() {
       const rem=Math.max(0,estCurrent-elapsedCurrent+estRemainingStatic);
       el.compareProgressFill.style.width=`${pct}%`;
       el.compareProgressPct.textContent=`${Math.round(pct)}%`;
-      el.compareProgressText.textContent=`Running ${model}…`;
-      el.compareProgressEta.textContent=`ETA: ${fmtDuration(rem)}`;
+      el.compareProgressText.textContent=`Running ${model}`;
+      el.compareProgressEta.textContent=`ETA ${fmtDuration(rem)}`;
     },120);
     try {
       const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray");
@@ -3275,22 +3275,22 @@ async function runComparison() {
       results.push(r); renderCompareCard(r);
     } catch(err) {
       clearInterval(tick);
-      if (err.name!=="AbortError") toast(`${model} failed: ${err.message}`,"error");
+      if (err.name!=="AbortError") toast(`${model} failed · ${err.message}`,"error");
     }
   }
   el.compareProgressFill.style.width="100%"; el.compareProgressPct.textContent="100%";
-  el.compareProgressText.textContent=state.compareAbort.signal.aborted?"Cancelled":"Done!";
-  el.compareProgressEta.textContent=`Total: ${fmtDuration(Date.now()-t0)}`;
+  el.compareProgressText.textContent=state.compareAbort.signal.aborted?"Cancelled":"Comparison complete";
+  el.compareProgressEta.textContent=`Total ${fmtDuration(Date.now()-t0)}`;
   if (results.length) {
     state.compareView.results=results;
     renderCompareSummary(results);
     renderCompareChart(results,state.compareView.metricKey);
-    toast("Comparison complete!","success");
+    toast("Comparison complete","success");
   }
   } catch (err) {
     el.compareProgressText.textContent="Comparison failed";
-    el.compareProgressEta.textContent=err.message || "Inference failed";
-    toast(`Comparison failed: ${err.message}`, "error", 6000);
+    el.compareProgressEta.textContent=err.message || "Depth inference failed";
+    toast(`Comparison failed · ${err.message}`, "error", 6000);
   } finally {
     setTimeout(()=>{ el.compareProgressBlock.hidden=true; },2500);
     el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
@@ -3383,9 +3383,9 @@ function renderBenchmark(data) {
   const provider = onnx?.provider || onnx?.diagnostics?.runtime?.selected_provider || data?.onnx_diagnostics?.runtime?.selected_provider;
   const cpuFallback = onnx?.uses_cpu_fallback || onnx?.diagnostics?.runtime?.uses_cpu_fallback || data?.onnx_diagnostics?.runtime?.uses_cpu_fallback;
   const onnxStatus = data?.onnx?.status || onnx?.state || "unavailable";
-  el.benchProvider.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `ONNX Ready${provider ? ` · ${provider}` : ""}${cpuFallback ? " · CPU fallback" : ""}` : `ONNX ${onnxStatus}`;
+  el.benchProvider.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `ONNX ready${provider ? ` · ${provider}` : ""}${cpuFallback ? " · CPU fallback" : ""}` : `ONNX ${onnxStatus}`;
   const diag = data?.onnx_diagnostics || onnx?.diagnostics || {};
-  el.benchStatus.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `Weights: ${data.weights?.onnx_path || data?.onnx?.onnx_path}` : `${data?.onnx?.message || onnx?.reason || "PyTorch benchmark completed; ONNX unavailable"}${diag.expected_path ? ` · expected: ${diag.expected_path}` : ""}${diag.recommended_export_command ? ` · run: ${diag.recommended_export_command}` : ""}`;
+  el.benchStatus.textContent = onnx?.status === "ok" || data?.onnx?.status === "ok" ? `Weights ${data.weights?.onnx_path || data?.onnx?.onnx_path}` : `${data?.onnx?.message || onnx?.reason || "PyTorch benchmark complete · ONNX unavailable"}${diag.expected_path ? ` · expected ${diag.expected_path}` : ""}${diag.recommended_export_command ? ` · run ${diag.recommended_export_command}` : ""}`;
   renderBenchmarkChart(data);
 }
 
@@ -3396,9 +3396,9 @@ async function runBenchmark() {
   const model = el.benchmarkModel?.value || "MiDaS_small";
   const device = el.benchmarkDevice?.value || "auto";
   el.benchmarkRunBtn.disabled = true;
-  el.benchmarkRunBtn.textContent = "Running…";
-  el.benchStatus.textContent = "Loading models and measuring latency…";
-  setStatus("online", "Depth Engine: Busy", "Benchmark running · /live remains available", deviceBadge(state.devices, state.primaryDevice));
+  el.benchmarkRunBtn.textContent = "Running";
+  el.benchStatus.textContent = "Loading models and measuring latency";
+  setStatus("online", "Depth engine busy", "Benchmark running · /live available", deviceBadge(state.devices, state.primaryDevice));
   try {
     if (!engineReady()) {
       const ok = await checkHealth();
@@ -3413,7 +3413,7 @@ async function runBenchmark() {
     el.benchProvider.textContent = "Failed";
     el.benchStatus.textContent = err.message;
     checkLive({ quiet: true }).catch(() => {});
-    if (err.name !== "AbortError") toastOnce(`Benchmark failed: ${err.message}`,"error");
+    if (err.name !== "AbortError") toastOnce(`Benchmark failed · ${err.message}`,"error");
   } finally {
     el.benchmarkRunBtn.disabled = false;
     el.benchmarkRunBtn.textContent = "Run Benchmark";
@@ -3481,10 +3481,10 @@ async function runExperiment() {
     if (!ok) { toast("Inference runtime is not ready", "error"); return; }
   }
   if (!state.files.length) { toast("Add images in the Workspace queue before running an experiment", "warning"); return; }
-  if (state.gtMode && (state.files.length !== 1 || !state.gtFile)) { toast("GT experiments require exactly one image and one GT file", "warning"); return; }
+  if (state.gtMode && (state.files.length !== 1 || !state.gtFile)) { toast("GT experiments require one image and one GT depth file", "warning"); return; }
   const model=selModel(), colormap=selCmap(), device=selDevice();
   state.experiment = { name: el.experimentName?.value || "DepthLens validation run", results: [], startedAt: new Date().toISOString() };
-  el.experimentStatus.textContent = "Running experiment…";
+  el.experimentStatus.textContent = "Running experiment";
   el.experimentRunBtn.disabled = true;
   try {
     for (const entry of state.files) {
@@ -3492,11 +3492,11 @@ async function runExperiment() {
       state.experiment.results.push({...result, originalSrc: entry.thumb, filename: entry.file.name, experiment_name: state.experiment.name});
       renderExperiment();
     }
-    el.experimentStatus.textContent = `Completed ${state.experiment.results.length} result(s) for ${state.experiment.name}.`;
+    el.experimentStatus.textContent = `Experiment complete — ${state.experiment.results.length} result(s) for ${state.experiment.name}`;
     toast("Experiment complete", "success");
   } catch (err) {
     el.experimentStatus.textContent = err.message;
-    toast(`Experiment failed: ${err.message}`, "error", 6000);
+    toast(`Experiment failed · ${err.message}`, "error", 6000);
   } finally {
     el.experimentRunBtn.disabled = false;
   }
@@ -3652,7 +3652,7 @@ async function init() {
   if (el.appShell) el.appShell.classList.remove("ready");
   state.initializingBackend = true;
   loadPrefs();
-  setStatus("connecting", "Starting engine…", DEFAULT_API_BASE_URL);
+  setStatus("connecting", "Starting depth engine", DEFAULT_API_BASE_URL);
   syncQueueControls();
   initReconstructionPanel();
   initScrollableNav();
@@ -3663,7 +3663,7 @@ async function init() {
   bindPointerGlow(".guide-card, .guide-section", { tilt: 1.5 });
   try {
     await resolveApiBaseUrl();
-    if (!runningInElectron) toastOnce("Browser/file mode detected — start the backend manually for inference.", "warning", 7000);
+    if (!runningInElectron) toastOnce("Browser mode detected — start the depth engine manually for inference", "warning", 7000);
     initLatencyChart();
     initCompareControls();
     initEngineStatusPanel();
@@ -3681,8 +3681,8 @@ async function init() {
     Promise.allSettled([checkDiagnostics({ quiet: true }), loadCacheMetrics()]);
   } catch (err) {
     backendOnline = false;
-    setStatus("offline", "Depth Engine: Offline", `Backend URL resolution failed: ${err.message}`);
-    toast(`Backend initialization failed: ${err.message}`, "error", 6000);
+    setStatus("offline", "Depth engine offline", `Depth engine URL resolution failed · ${err.message}`);
+    toast(`Depth engine initialization failed · ${err.message}`, "error", 6000);
   } finally {
     state.initializingBackend = false;
     syncQueueControls();
