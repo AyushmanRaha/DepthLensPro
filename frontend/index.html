@@ -184,7 +184,6 @@
         type="button"
         aria-label="Close depth engine status"
       >
-        ×
       </button>
     </div>
 
@@ -273,10 +272,10 @@
               aria-labelledby="deviceHeading"
             >
               <h2 class="card-title" id="deviceHeading">
-                <span class="card-icon">◉</span> Compute Device
+                <span class="card-icon" aria-hidden="true"></span> Compute Device
               </h2>
               <div class="device-info-banner" id="deviceInfoBanner">
-                <span class="device-info-icon">ℹ</span>
+                <span class="device-info-icon" aria-hidden="true"></span>
                 <span>Connect the inference engine to detect GPU/CPU</span>
               </div>
               <div
@@ -288,7 +287,7 @@
                 <label class="device-opt selected" data-device="auto">
                   <input type="radio" name="device" value="auto" checked />
                   <div class="device-opt-inner">
-                    <span class="device-opt-icon">◎</span>
+                    <span class="device-opt-icon" aria-hidden="true"></span>
                     <div>
                       <span class="device-opt-name">Auto</span>
                       <span class="device-opt-sub">Best available</span>
@@ -308,7 +307,7 @@
             <!-- Model selection -->
             <section class="card" aria-labelledby="modelHeading">
               <h2 class="card-title" id="modelHeading">
-                <span class="card-icon">▣</span> Model Architecture
+                <span class="card-icon" aria-hidden="true"></span> Model Architecture
               </h2>
               <div
                 class="model-grid"
@@ -400,7 +399,7 @@
             <!-- Colormap selection -->
             <section class="card" aria-labelledby="cmapHeading">
               <h2 class="card-title" id="cmapHeading">
-                <span class="card-icon">▣</span> Colormap
+                <span class="card-icon" aria-hidden="true"></span> Colormap
               </h2>
               <div
                 class="colormap-grid"
@@ -429,7 +428,7 @@
             <!-- Session metrics -->
             <section class="card" aria-labelledby="metricsHeading">
               <h2 class="card-title" id="metricsHeading">
-                <span class="card-icon">▣</span> Session Dashboard
+                <span class="card-icon" aria-hidden="true"></span> Session Dashboard
               </h2>
 
               <div class="metrics-grid">
@@ -487,7 +486,7 @@
             <!-- Upload controls -->
             <div class="card upload-card" id="uploadCard">
               <h2 class="card-title">
-                <span class="card-icon">▣</span> Image Queue
+                <span class="card-icon" aria-hidden="true"></span> Image Queue
               </h2>
 
               <div
@@ -558,9 +557,9 @@
 
               <div class="action-row">
                 <button class="btn btn-ghost" id="clearBtn" type="button" disabled>Clear All</button>
-                <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>✕ Cancel</button>
+                <button class="btn btn-danger btn-sm" id="cancelBtn" type="button" hidden>Cancel</button>
                 <button class="btn btn-primary" id="runBtn" type="button" disabled>
-                  <span class="btn-icon">▶</span> Generate Depth Maps
+                  Generate Depth Maps
                 </button>
               </div>
 
@@ -583,11 +582,11 @@
             <div class="card results-card" id="resultsCard" hidden>
               <div class="results-header">
                 <h2 class="card-title">
-                  <span class="card-icon">▣</span> Results Gallery
+                  <span class="card-icon" aria-hidden="true"></span> Results Gallery
                 </h2>
                 <div class="results-actions">
-                  <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">⇩ Download All</button>
-                  <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">✕ Clear</button>
+                  <button class="btn btn-ghost btn-sm" id="downloadAllBtn" type="button">Download All</button>
+                  <button class="btn btn-ghost btn-sm" id="clearResultsBtn" type="button">Clear</button>
                 </div>
               </div>
               <div class="gallery" id="gallery" role="list" aria-label="Depth map results"></div>
@@ -602,7 +601,7 @@
           <section class="card webcam-hero" aria-labelledby="webcamHeading">
             <div>
               <h2 class="card-title" id="webcamHeading">
-                <span class="card-icon">◉</span> Real-Time Webcam Depth
+                <span class="card-icon" aria-hidden="true"></span> Real-Time Webcam Depth
               </h2>
               <p class="webcam-desc">
                 Sample live camera frames, send them through the existing local
@@ -616,13 +615,13 @@
 
           <section class="card webcam-controls-card" aria-labelledby="webcamControlsHeading">
             <h2 class="card-title" id="webcamControlsHeading">
-              <span class="card-icon">▣</span> Webcam Controls
+              <span class="card-icon" aria-hidden="true"></span> Webcam Controls
             </h2>
             <div class="webcam-control-grid">
-              <button class="btn btn-primary" id="webcamStartBtn" type="button">▶ Start Camera</button>
-              <button class="btn btn-danger" id="webcamStopBtn" type="button" disabled>■ Stop Camera</button>
+              <button class="btn btn-primary" id="webcamStartBtn" type="button">Start Camera</button>
+              <button class="btn btn-danger" id="webcamStopBtn" type="button" disabled>Stop Camera</button>
               <button class="btn btn-ghost" id="webcamPauseBtn" type="button" disabled>Pause Inference</button>
-              <button class="btn btn-outline" id="webcamCaptureBtn" type="button" disabled>⇩ Capture Depth Frame</button>
+              <button class="btn btn-outline" id="webcamCaptureBtn" type="button" disabled>Capture Depth Frame</button>
               <label class="webcam-control-field" for="webcamTargetFps">
                 <span>Target FPS</span>
                 <select class="select-input" id="webcamTargetFps">
@@ -654,7 +653,7 @@
 
           <section class="card webcam-preview-card" aria-labelledby="webcamPreviewHeading">
             <h2 class="card-title" id="webcamPreviewHeading">
-              <span class="card-icon">▣</span> Live Preview
+              <span class="card-icon" aria-hidden="true"></span> Live Preview
             </h2>
             <div class="webcam-preview-grid">
               <div class="webcam-preview-tile">
@@ -674,7 +673,7 @@
 
           <section class="card webcam-telemetry-card" aria-labelledby="webcamTelemetryHeading" aria-live="polite">
             <h2 class="card-title" id="webcamTelemetryHeading">
-              <span class="card-icon">◈</span> Live Telemetry
+              <span class="card-icon" aria-hidden="true"></span> Live Telemetry
             </h2>
             <div class="webcam-telemetry-grid">
               <div class="metric-cell"><span class="metric-value" id="webcamCameraState">Stopped</span><span class="metric-label">Camera State</span></div>
@@ -701,7 +700,7 @@
         <div class="compare-layout">
           <div class="card compare-upload-card">
             <h2 class="card-title">
-              <span class="card-icon">▣</span> Model Comparison
+              <span class="card-icon" aria-hidden="true"></span> Model Comparison
             </h2>
             <p class="compare-desc">
               Upload one image to run all three MiDaS models side-by-side and
@@ -732,10 +731,10 @@
               </select>
             </div>
             <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>
-              <span class="btn-icon">▶</span> Run All Models
+              Run All Models
             </button>
             <button class="btn btn-danger btn-sm w-full" id="compareCancelBtn" type="button" hidden>
-              ✕ Cancel Comparison
+              Cancel Comparison
             </button>
             <div class="progress-block" id="compareProgressBlock" hidden>
               <div class="progress-timer-row">
@@ -759,7 +758,7 @@
         <div class="card compare-chart-card" id="compareChartCard" hidden>
           <div class="compare-chart-head">
             <h2 class="card-title">
-              <span class="card-icon">▣</span> Performance Comparison
+              <span class="card-icon" aria-hidden="true"></span> Performance Comparison
             </h2>
             <button class="btn btn-ghost btn-sm" id="compareChartToggle" type="button" aria-expanded="true" aria-controls="compareChartBody">
               Hide Graph
@@ -783,7 +782,7 @@
       <main class="panel" id="panel-experiments" hidden>
         <div class="about-layout">
           <div class="card about-card">
-            <h2 class="card-title"><span class="card-icon">▣</span> Experiment Workspace</h2>
+            <h2 class="card-title"><span class="card-icon" aria-hidden="true"></span> Experiment Workspace</h2>
             <p class="compare-desc">
               Name a local validation run, execute the current image queue, inspect outputs, and export reproducible JSON/CSV evidence. GT mode uses the optional Workspace ground-truth pair.
             </p>
@@ -817,7 +816,7 @@
         <div class="about-layout">
           <div class="card about-card">
             <h2 class="card-title">
-              <span class="card-icon">▣</span> Performance Analysis
+              <span class="card-icon" aria-hidden="true"></span> Performance Analysis
             </h2>
             <p class="compare-desc">
               Benchmark the legacy PyTorch execution path against exported ONNX Runtime
@@ -884,7 +883,7 @@
         <div class="reconstruct-layout">
           <section class="card reconstruct-hero-card">
             <div>
-              <h2 class="card-title"><span class="card-icon">◇</span> 3D Reconstruction</h2>
+              <h2 class="card-title"><span class="card-icon" aria-hidden="true"></span> 3D Reconstruction</h2>
               <p class="muted">Generate colored point clouds from monocular depth.</p>
               <p class="reconstruct-note">Depth is relative, not metric scale. Use these exports as approximate visual geometry unless you calibrate the camera externally.</p>
             </div>
@@ -893,11 +892,11 @@
 
           <div class="reconstruct-grid">
             <section class="card">
-              <h3 class="card-title"><span class="card-icon">↥</span> Source Image</h3>
+              <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Source Image</h3>
               <div class="reconstruct-drop-zone" id="reconstructDropZone" role="button" tabindex="0" aria-label="Upload reconstruction source image">
                 <input id="reconstructFileInput" type="file" accept="image/*" hidden />
                 <div class="reconstruct-drop-copy">
-                  <span class="drop-icon">◎</span>
+                  <span class="drop-icon" aria-hidden="true"></span>
                   <strong>Drop an image here</strong>
                   <span>or browse for a local image under 20 MB</span>
                 </div>
@@ -912,7 +911,7 @@
             </section>
 
             <section class="card">
-              <h3 class="card-title"><span class="card-icon">⚙</span> Point Cloud Options</h3>
+              <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Point Cloud Options</h3>
               <div class="reconstruct-options-grid">
                 <label>Export Format<select id="reconstructFormat"><option value="ply" selected>PLY</option><option value="obj">OBJ</option></select></label>
                 <label>Max Dimension<select id="reconstructMaxDim"><option value="384">384 px</option><option value="512" selected>512 px</option><option value="768">768 px</option></select></label>
@@ -947,7 +946,7 @@
           <div class="reconstruct-grid reconstruct-grid-wide">
             <section class="card point-cloud-viewer-card">
               <div class="point-cloud-head">
-                <h3 class="card-title"><span class="card-icon">✦</span> Point Cloud Preview</h3>
+                <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Point Cloud Preview</h3>
                 <div class="point-cloud-controls">
                   <button class="btn btn-outline btn-sm" id="pointCloudResetViewBtn" type="button">Reset View</button>
                   <label>Point Size<input id="pointCloudPointSize" type="range" min="1" max="6" step="0.5" value="2" /></label>
@@ -962,7 +961,7 @@
             </section>
 
             <section class="card">
-              <h3 class="card-title"><span class="card-icon">▤</span> Reconstruction Details</h3>
+              <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Reconstruction Details</h3>
               <div class="reconstruct-telemetry-grid">
                 <div class="metric-cell"><span class="metric-value" id="reconstructPointCount">—</span><span class="metric-label">Points</span></div>
                 <div class="metric-cell"><span class="metric-value" id="reconstructPreviewCount">—</span><span class="metric-label">Preview</span></div>
@@ -982,7 +981,7 @@
 
           <div class="reconstruct-grid">
             <section class="card">
-              <h3 class="card-title"><span class="card-icon">◈</span> Depth Preview</h3>
+              <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Depth Preview</h3>
               <div class="reconstruct-depth-preview-wrap">
                 <img id="reconstructDepthPreview" class="reconstruct-depth-preview" alt="Reconstruction depth preview" hidden />
                 <p class="muted" id="reconstructDepthEmpty">Depth preview appears after generation.</p>
@@ -991,7 +990,7 @@
             </section>
 
             <section class="card">
-              <h3 class="card-title"><span class="card-icon">⇩</span> Export</h3>
+              <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Export</h3>
               <p class="muted">Download the generated PLY/OBJ point cloud or save the reconstruction metadata JSON for reproducibility.</p>
               <div class="reconstruct-download-row">
                 <button class="btn btn-primary" id="reconstructDownloadBtn" type="button" disabled>Download Point Cloud</button>
@@ -1020,12 +1019,12 @@
           </section>
 
           <section class="card guide-card" aria-labelledby="guideHeading">
-            <h2 class="card-title" id="guideHeading"><span class="card-icon">▣</span> Guide</h2>
+            <h2 class="card-title" id="guideHeading"><span class="card-icon" aria-hidden="true"></span> Guide</h2>
             <div class="guide-accordion" id="guideAccordion">
               <article class="guide-section open">
                 <button class="guide-section-toggle" type="button" aria-expanded="true" aria-controls="guide-general">
                   <span><span class="guide-section-kicker">Start here</span><span class="guide-section-title">General UI Guidelines</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-general"><div class="guide-section-inner">
                   <p>The header tabs switch workspaces; if they overflow, scroll the tab bar with a wheel, trackpad, touch, or drag gesture. The engine status orb reports backend health, the theme toggle switches dark/light presentation, and cards group controls by task.</p>
@@ -1037,7 +1036,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-workspace">
                   <span><span class="guide-section-kicker">Core workflow</span><span class="guide-section-title">Workspace: Queue, Device, Model, Colormap, GT, Dashboard</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-workspace"><div class="guide-section-inner">
                   <p>Workspace turns an image queue into depth maps. Pick <strong>Auto device selection</strong> for the best detected accelerator, <strong>CPU</strong> for compatibility, or a <strong>GPU</strong> path such as CUDA, MPS, XPU, or NPU / Neural Engine when available.</p>
@@ -1049,7 +1048,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-webcam">
                   <span><span class="guide-section-kicker">Live mode</span><span class="guide-section-title">Webcam: Real-time Depth, FPS, Smoothing, Latency</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-webcam"><div class="guide-section-inner">
                   <p>Webcam mode asks for camera permission, captures frames, and runs real-time monocular depth estimation. Target FPS caps protect the backend from overload, frame max dimension reduces compute, and smoothing stabilizes flicker at the cost of a little responsiveness.</p>
@@ -1060,7 +1059,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-compare">
                   <span><span class="guide-section-kicker">Quality tradeoffs</span><span class="guide-section-title">Compare: Run All Models and Read Visual/Metric Results</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-compare"><div class="guide-section-inner">
                   <p>Compare runs one image through the available model set so you can inspect depth boundaries, object separation, and speed. Use it when deciding whether a scene needs DPT Large detail or whether MiDaS Small/DPT Hybrid is sufficient.</p>
@@ -1071,7 +1070,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-performance">
                   <span><span class="guide-section-kicker">Engine profiling</span><span class="guide-section-title">Performance: PyTorch vs ONNX Runtime Benchmark</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-performance"><div class="guide-section-inner">
                   <p>Performance compares <strong>PyTorch</strong> execution with optional <strong>ONNX Runtime</strong>. ONNX can be unavailable if weights, dependencies, or a matching provider are missing. Provider means the runtime backend, such as CPU or CUDA; fallback means the app safely returns to another provider/path.</p>
@@ -1082,7 +1081,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-experiments">
                   <span><span class="guide-section-kicker">Validation</span><span class="guide-section-title">Experiments: GT Metrics, Exports, Reproducibility</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-experiments"><div class="guide-section-inner">
                   <p>Experiments package repeated validation into named runs. Use GT runs when ground truth depth is aligned with each image; use image-only runs for qualitative batches. JSON exports preserve detailed metadata, while CSV exports are convenient for spreadsheets and reports.</p>
@@ -1093,7 +1092,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-reconstruct">
                   <span><span class="guide-section-kicker">Geometry export</span><span class="guide-section-title">3D Reconstruction: Point Clouds, PLY/OBJ, Preview Controls</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-reconstruct"><div class="guide-section-inner">
                   <p>Monocular depth is generally <strong>relative depth</strong>, not calibrated <strong>metric depth</strong>. Reconstruction converts one source image and its depth map into an approximate point cloud, useful for visualization and creative geometry—not survey-grade measurement.</p>
@@ -1104,7 +1103,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-glossary">
                   <span><span class="guide-section-kicker">Reference</span><span class="guide-section-title">Technical Glossary / Nomenclature</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-glossary"><div class="guide-section-inner">
                   <div class="guide-term-grid">
@@ -1131,7 +1130,7 @@
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-troubleshooting">
                   <span><span class="guide-section-kicker">Recovery</span><span class="guide-section-title">Troubleshooting and Best Practices</span></span>
-                  <span class="guide-section-icon" aria-hidden="true">⌄</span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-troubleshooting"><div class="guide-section-inner">
                   <ul class="guide-step-list guide-warning"><li><strong>Backend offline/degraded:</strong> check the engine orb, refresh status, and confirm dependencies are installed.</li><li><strong>Unsupported device:</strong> switch to Auto or CPU; CUDA/MPS/XPU/NPU availability depends on hardware and runtime builds.</li><li><strong>Large files or slow inference:</strong> reduce image size, use MiDaS Small, or choose a faster device.</li><li><strong>GT mismatch:</strong> ensure ground truth dimensions and pairing match the source image.</li><li><strong>Webcam permission failure:</strong> allow camera access and close other apps using the camera.</li><li><strong>ONNX unavailable:</strong> use PyTorch or install/provide the correct ONNX weights/provider.</li></ul>
@@ -1158,7 +1157,7 @@
                 <p class="lightbox-title" id="lightboxTitle">Depth Inspector</p>
                 <p class="lightbox-subtitle">Interactive depth blend + full diagnostic metrics</p>
               </div>
-              <button class="lightbox-close" id="lightboxClose" aria-label="Close preview">✕</button>
+              <button class="lightbox-close" id="lightboxClose" aria-label="Close preview"></button>
             </div>
 
             <div class="lightbox-body">
@@ -1189,8 +1188,8 @@
             <div class="lightbox-footer">
               <div class="lb-tags" id="lbTags"></div>
               <div class="lb-downloads">
-                <button class="btn btn-outline btn-sm" id="lbDlDepth">⇩ Depth Map</button>
-                <button class="btn btn-outline btn-sm" id="lbDlGray">⇩ Grayscale</button>
+                <button class="btn btn-outline btn-sm" id="lbDlDepth">Depth Map</button>
+                <button class="btn btn-outline btn-sm" id="lbDlGray">Grayscale</button>
               </div>
             </div>
           </div>

@@ -1522,7 +1522,7 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
   auto.innerHTML = `
     <input type="radio" name="device" value="auto" ${autoChecked?"checked":""} />
     <div class="device-opt-inner">
-      <span class="device-opt-icon">◎</span>
+      <span class="device-opt-icon" aria-hidden="true"></span>
       <div>
         <span class="device-opt-name">Auto Select</span>
         <span class="device-opt-sub">${esc(autoDeviceLabel(devs,primary))}</span>
@@ -1533,7 +1533,6 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
   deviceEntries.forEach(({key,info,kinds}) => {
     if (!matchesDeviceFilter(kinds, state.deviceFilter)) return;
     const isCuda=info.type==="cuda", isMps=info.type==="mps", isXpu=info.type==="xpu";
-    const icon = isCuda?"▦":isMps?"⬢":isXpu?"⬣":"◻";
     const classLabel=[kinds.includes("gpu")?"GPU":null,kinds.includes("npu")?"NPU":null,kinds.includes("cpu")?"CPU":null].filter(Boolean).join("/");
     const sub = isCuda ? `CUDA · ${info.memory_gb} GB VRAM · ${classLabel}`
       : isMps  ? `Apple ${info.chip||"Silicon"} · Metal + Neural Engine · ${classLabel}`
@@ -1546,7 +1545,7 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
     lbl.innerHTML = `
       <input type="radio" name="device" value="${esc(key)}" ${checked?"checked":""} />
       <div class="device-opt-inner">
-        <span class="device-opt-icon">${esc(icon)}</span>
+        <span class="device-opt-icon" aria-hidden="true"></span>
         <div>
           <span class="device-opt-name">${esc(info.name||key)}</span>
           <span class="device-opt-sub">${esc(sub)}</span>
@@ -2448,7 +2447,7 @@ function renderFileItem(entry) {
       <div class="file-size">${fmtSize(entry.file.size)}</div>
     </div>
     <span class="file-status pending" id="fst-${entry.id}">Pending</span>
-    <button class="file-remove" data-id="${entry.id}" aria-label="Remove ${esc(entry.file.name)}">✕</button>`;
+    <button class="file-remove" data-id="${entry.id}" aria-label="Remove ${esc(entry.file.name)}"></button>`;
   el.fileQueue.appendChild(li);
   $(".file-remove",li).addEventListener("click",()=>removeFile(entry.id));
 }
@@ -3028,7 +3027,7 @@ el.downloadAllBtn?.addEventListener("click",()=>{
 // LIGHTBOX METRICS ACCORDION
 // ══════════════════════════════════════════════════════════════
 const METRIC_GROUPS = [
-  { id:"error", icon:"⨯", label:"Core Error Metrics",
+  { id:"error", icon:"", label:"Core Error Metrics",
     note:"Computed from predicted depth distribution only (no ground truth required). Values reflect self-consistency of the depth map.",
     metrics:[
       {key:"mae",label:"Mean Absolute Deviation from Predicted Mean",unit:"",desc:"Prediction-only mean absolute deviation from the predicted depth mean. Proxy statistic, not GT MAE.",needsGT:false},
@@ -3040,21 +3039,21 @@ const METRIC_GROUPS = [
       {key:"gt_rmse",label:"True RMSE vs GT",unit:"",desc:"Root mean squared error after median-scale alignment to valid GT pixels.",needsGT:true},
       {key:"gt_log_rmse",label:"True Log RMSE vs GT",unit:"",desc:"Log-depth RMSE after median-scale alignment to valid GT pixels.",needsGT:true},
     ]},
-  { id:"accuracy", icon:"◔", label:"Threshold Accuracy",
+  { id:"accuracy", icon:"", label:"Threshold Accuracy",
     note:"δ metrics require ground-truth depth maps and cannot be computed here.",
     metrics:[
       {key:"delta_1",label:"δ < 1.25¹",unit:"%",desc:"Fraction of pixels within 25% scale of ground truth. Requires GT.",needsGT:true},
       {key:"delta_2",label:"δ < 1.25²",unit:"%",desc:"Looser threshold (56%). Requires GT.",needsGT:true},
       {key:"delta_3",label:"δ < 1.25³",unit:"%",desc:"Loosest threshold (95%). Requires GT.",needsGT:true},
     ]},
-  { id:"scaleinv", icon:"⇲", label:"Scale-Invariant Metrics",
+  { id:"scaleinv", icon:"", label:"Scale-Invariant Metrics",
     metrics:[
       {key:"silog",label:"Log-Depth Dispersion Proxy",unit:"",desc:"Prediction-only log-depth dispersion proxy. True SILog requires GT.",needsGT:false},
       {key:"dynamic_range",label:"Dynamic Range",unit:" bits",desc:"Log₂ ratio of max/min non-zero depth. Larger = more depth variation captured.",needsGT:false},
       {key:"entropy",label:"Shannon Entropy",unit:" bits",desc:"Entropy of the depth histogram. Higher = more uniformly distributed depth values.",needsGT:false},
       {key:"coverage",label:"Depth Coverage",unit:"%",desc:"Fraction of histogram bins with ≥1% of peak count. Higher = depth values spread across the full range.",needsGT:false,pct:true},
     ]},
-  { id:"structural", icon:"◬", label:"Structural & Geometric Metrics",
+  { id:"structural", icon:"", label:"Structural & Geometric Metrics",
     metrics:[
       {key:"ssim",label:"RGB–Depth Structural Proxy",unit:"",desc:"Proxy comparing predicted depth structure to grayscale RGB input; not reference SSIM.",needsGT:false},
       {key:"gradient_mean",label:"Gradient Mean",unit:"",desc:"Mean Sobel gradient magnitude over the depth map. Higher = more depth edges/transitions.",needsGT:false},
@@ -3063,12 +3062,12 @@ const METRIC_GROUPS = [
       {key:"edge_density",label:"Edge Density",unit:"%",desc:"Fraction of pixels with gradient > mean+std. Indicates how richly detailed the depth edges are.",needsGT:false,pct:true},
       {key:"surface_normal_error",label:"Surface Normal Error",unit:"",desc:"Requires ground-truth normals derived from GT depth. Not computable without GT.",needsGT:true},
     ]},
-  { id:"perceptual", icon:"◉", label:"Perceptual & Consistency Metrics",
+  { id:"perceptual", icon:"", label:"Perceptual & Consistency Metrics",
     metrics:[
       {key:"psnr",label:"Depth Variance PSNR Proxy",unit:" dB",desc:"Prediction-only PSNR-like variance proxy; true PSNR requires a reference depth map.",needsGT:false},
       {key:"lpips",label:"LPIPS (Perceptual Similarity)",unit:"",desc:"Learned perceptual metric. Requires a reference depth map. Not computable without GT.",needsGT:true},
     ]},
-  { id:"ranking", icon:"≋", label:"Ranking / Relative Depth Metrics",
+  { id:"ranking", icon:"", label:"Ranking / Relative Depth Metrics",
     metrics:[
       {key:"ordinal_error",label:"Ordinal Error",unit:"",desc:"Fraction of pixel pairs where relative ordering of pred depth disagrees with GT. Requires GT.",needsGT:true},
     ]},
@@ -3103,7 +3102,7 @@ function renderMetricsAccordion(resultOrMetrics) {
     const hdr=document.createElement("div");
     hdr.className="metric-group-header"; hdr.setAttribute("role","button");
     hdr.setAttribute("tabindex","0"); hdr.setAttribute("aria-expanded","false");
-    hdr.innerHTML=`<span><span class="mg-icon">${esc(group.icon)}</span>${esc(group.label)}</span><span class="mg-toggle">▾</span>`;
+    hdr.innerHTML=`<span><span class="mg-icon">${esc(group.icon)}</span>${esc(group.label)}</span><span class="mg-toggle" aria-hidden="true"></span>`;
     hdr.addEventListener("click",()=>toggleAccordion(div));
     hdr.addEventListener("keydown",e=>{ if (e.key==="Enter"||e.key===" "){e.preventDefault();toggleAccordion(div);} });
     const body=document.createElement("div");
