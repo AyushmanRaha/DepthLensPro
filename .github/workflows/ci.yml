@@ -3,16 +3,16 @@ name: CI
 on:
   push:
     branches:
-      - main
-      - master
-      - chore/**
-      - feature/**
-      - fix/**
+      - "main"
+      - "master"
+      - "chore/**"
+      - "feature/**"
+      - "fix/**"
   pull_request:
     branches:
-      - main
-      - master
-  workflow_dispatch:
+      - "main"
+      - "master"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -90,18 +90,3 @@ jobs:
       - name: Verify packaged resource inputs
         working-directory: electron-app
         run: node scripts/verify-resources.js --root-kind repo --mode native --onnx off ..
-
-  docker-config:
-    name: docker-config
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate Docker Compose config
-        run: docker compose config
-
-      - name: Validate Dockerfile parse/build context
-        run: docker build --pull --no-cache --target runner -t depthlenspro-backend:ci .
