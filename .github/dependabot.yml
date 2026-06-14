@@ -1,0 +1,35 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Kolkata
+    labels:
+      - dependencies
+      - github-actions
+
+  - package-ecosystem: npm
+    directory: /electron-app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: Asia/Kolkata
+    labels:
+      - dependencies
+      - electron
+
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: Asia/Kolkata
+    labels:
+      - dependencies
+      - backend
