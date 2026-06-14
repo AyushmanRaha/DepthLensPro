@@ -1,0 +1,27 @@
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: "Features"
+      labels:
+        - enhancement
+        - feature
+    - title: "Fixes"
+      labels:
+        - bug
+        - fix
+    - title: "CI/CD"
+      labels:
+        - ci
+        - github-actions
+        - release
+    - title: "Documentation"
+      labels:
+        - documentation
+    - title: "Dependencies"
+      labels:
+        - dependencies
+    - title: "Other Changes"
+      labels:
+        - "*"
