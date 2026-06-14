@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, for example v4.0.1"
+        required: true
+        type: string
+      draft:
+        description: "Create GitHub release as draft"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: "1"
+  TESTING: "1"
+  DEPTHLENS_SKIP_WARMUP: "1"
+  DEPTHLENS_DISABLE_MODEL_DOWNLOADS: "1"
+  DEPTHLENS_CACHE_BACKEND: "memory"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build-macos-arm64:
+    name: release-macos-arm64
+    runs-on: macos-15
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Build macOS ARM64 package
+        run: bash scripts/build-native-macos.sh --without-onnx
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: depthlenspro-macos-arm64
+          path: |
+            electron-app/dist/*.dmg
+          if-no-files-found: error
+
+  build-linux-arm64:
+    name: release-linux-arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Build Linux ARM64 package
+        run: bash scripts/build-native-linux.sh --without-onnx
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: depthlenspro-linux-arm64
+          path: |
+            electron-app/dist/*.AppImage
+          if-no-files-found: error
+
+  build-windows-arm64:
+    name: release-windows-arm64
+    runs-on: windows-11-arm
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Build Windows ARM64 package
+        shell: pwsh
+        run: .\scripts\build-native-windows.ps1 --without-onnx
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: depthlenspro-windows-arm64
+          path: |
+            electron-app/dist/*.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: publish-release
+    runs-on: ubuntu-latest
+    needs:
+      - build-macos-arm64
+      - build-linux-arm64
+      - build-windows-arm64
+    permissions:
+      contents: write
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_DRAFT: ${{ inputs.draft }}
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TARGET_FLAG="--verify-tag"
+            DRAFT_FLAG=""
+          else
+            TAG="${DISPATCH_VERSION}"
+            TARGET_FLAG="--target ${GITHUB_SHA}"
+            if [[ "${DISPATCH_DRAFT}" == "true" ]]; then
+              DRAFT_FLAG="--draft"
+            else
+              DRAFT_FLAG=""
+            fi
+          fi
+
+          find release-artifacts -type f -maxdepth 3 -print
+
+          gh release create "${TAG}" \
+            release-artifacts/**/* \
+            --repo "${{ github.repository }}" \
+            --generate-notes \
+            ${DRAFT_FLAG} \
+            ${TARGET_FLAG}
