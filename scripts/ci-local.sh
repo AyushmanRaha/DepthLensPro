@@ -19,6 +19,10 @@ pytest backend/tests -q
   node scripts/verify-resources.js --root-kind repo --mode native --onnx off ..
 )
 
-docker compose config
+if command -v docker >/dev/null 2>&1; then
+  docker compose config
+else
+  echo "Docker not found; skipping local Docker Compose config check."
+fi
 
 echo "Local CI checks passed."

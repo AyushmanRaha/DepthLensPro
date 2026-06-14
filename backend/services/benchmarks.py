@@ -9,7 +9,7 @@ import resource
 import threading
 import time
 from statistics import mean
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import numpy as np
 
@@ -29,6 +29,7 @@ log = logging.getLogger("depthlens")
 def benchmark_busy() -> bool:
     with _ACTIVE_BENCHMARKS_LOCK:
         return _ACTIVE_BENCHMARKS > 0
+
 
 _AUTO_EXPORT_LOCKS: dict[str, threading.Lock] = {}
 _AUTO_EXPORT_LOCKS_GUARD = threading.Lock()
@@ -53,7 +54,14 @@ def _auto_export_lock(model: str) -> threading.Lock:
 def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any]:
     """Export missing ONNX weights on demand for benchmark comparisons."""
 
-    exportable_states = {"missing_weights", "missing_model_file", "missing", "invalid_checker", "invalid_session", "invalid_dummy_inference"}
+    exportable_states = {
+        "missing_weights",
+        "missing_model_file",
+        "missing",
+        "invalid_checker",
+        "invalid_session",
+        "invalid_dummy_inference",
+    }
     if onnx_diag.get("state") not in exportable_states:
         return onnx_diag
     if not _env_flag("DEPTHLENS_AUTO_EXPORT_ONNX", False):
@@ -65,7 +73,11 @@ def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any
         if refreshed.get("state") not in exportable_states:
             return refreshed
 
-        if refreshed.get("state") in {"invalid_checker", "invalid_session", "invalid_dummy_inference"}:
+        if refreshed.get("state") in {
+            "invalid_checker",
+            "invalid_session",
+            "invalid_dummy_inference",
+        }:
             corrupt_path = refreshed.get("selected_path") or refreshed.get("path", {}).get(
                 "onnx_path"
             )
@@ -198,7 +210,9 @@ def run_benchmark(
         frame = _synthetic_frame()
 
         try:
-            pytorch_result = _measure("pytorch", lambda: _infer_torch(frame, model, resolved), iterations)
+            pytorch_result = _measure(
+                "pytorch", lambda: _infer_torch(frame, model, resolved), iterations
+            )
         except Exception as exc:
             pytorch_result = _unavailable("pytorch", str(exc))
 
@@ -207,31 +221,85 @@ def run_benchmark(
         state = onnx_diag.get("state")
         if state == "available":
             try:
-                onnx_result = _measure("onnxruntime", lambda: _infer_onnx(frame, model, resolved), iterations)
+                onnx_result = _measure(
+                    "onnxruntime", lambda: _infer_onnx(frame, model, resolved), iterations
+                )
                 onnx_result["provider"] = onnx_diag.get("runtime", {}).get("selected_provider")
-                onnx_result["providers"] = onnx_diag.get("runtime", {}).get("selected_providers", [])
-                onnx_result["uses_cpu_fallback"] = onnx_diag.get("runtime", {}).get("uses_cpu_fallback", False)
+                onnx_result["providers"] = onnx_diag.get("runtime", {}).get(
+                    "selected_providers", []
+                )
+                onnx_result["uses_cpu_fallback"] = onnx_diag.get("runtime", {}).get(
+                    "uses_cpu_fallback", False
+                )
             except Exception as exc:
-                onnx_result = _unavailable("onnxruntime", str(exc), "runtime_error", {"diagnostics": onnx_diag})
+                onnx_result = _unavailable(
+                    "onnxruntime", str(exc), "runtime_error", {"diagnostics": onnx_diag}
+                )
         elif state in {"missing_weights", "missing_model_file", "missing", "optional_unavailable"}:
             command = onnx_diag.get("recommended_export_command")
-            onnx_result = _unavailable("onnxruntime", f"ONNX weights missing. Expected {weights_path}. Run {command}.", "missing_model_file", {"diagnostics": onnx_diag})
+            onnx_result = _unavailable(
+                "onnxruntime",
+                f"ONNX weights missing. Expected {weights_path}. Run {command}.",
+                "missing_model_file",
+                {"diagnostics": onnx_diag},
+            )
         elif state in {"onnxruntime_missing", "runtime_unavailable"}:
-            onnx_result = _unavailable("onnxruntime", "onnxruntime is not installed or cannot be imported", "runtime_unavailable", {"diagnostics": onnx_diag})
+            onnx_result = _unavailable(
+                "onnxruntime",
+                "onnxruntime is not installed or cannot be imported",
+                "runtime_unavailable",
+                {"diagnostics": onnx_diag},
+            )
         elif state == "provider_unavailable":
-            onnx_result = _unavailable("onnxruntime", "No compatible ONNX Runtime execution provider is available", "provider_unavailable", {"diagnostics": onnx_diag})
+            onnx_result = _unavailable(
+                "onnxruntime",
+                "No compatible ONNX Runtime execution provider is available",
+                "provider_unavailable",
+                {"diagnostics": onnx_diag},
+            )
         elif state in {"invalid_checker", "invalid_session", "invalid_dummy_inference", "empty"}:
-            onnx_result = _unavailable("onnxruntime", f"ONNX unavailable ({state}): {onnx_diag.get('technical_detail') or onnx_diag.get('message') or 'validation failed'}", str(state), {"diagnostics": onnx_diag})
+            onnx_result = _unavailable(
+                "onnxruntime",
+                f"ONNX unavailable ({state}): {onnx_diag.get('technical_detail') or onnx_diag.get('message') or 'validation failed'}",
+                str(state),
+                {"diagnostics": onnx_diag},
+            )
         elif state == "export_failed":
-            onnx_result = _unavailable("onnxruntime", f"Automatic ONNX export failed: {onnx_diag.get('export_error', 'unknown error')}", "export_failed", {"diagnostics": onnx_diag})
+            onnx_result = _unavailable(
+                "onnxruntime",
+                f"Automatic ONNX export failed: {onnx_diag.get('export_error', 'unknown error')}",
+                "export_failed",
+                {"diagnostics": onnx_diag},
+            )
         else:
-            onnx_result = _unavailable("onnxruntime", "ONNX Runtime is unavailable", "unavailable", {"diagnostics": onnx_diag})
+            onnx_result = _unavailable(
+                "onnxruntime",
+                "ONNX Runtime is unavailable",
+                "unavailable",
+                {"diagnostics": onnx_diag},
+            )
 
         comparison: dict[str, Any] = {}
         pt_avg = (pytorch_result.get("latency_ms") or {}).get("avg")
         onnx_avg = (onnx_result.get("latency_ms") or {}).get("avg")
         if isinstance(pt_avg, (int, float)) and isinstance(onnx_avg, (int, float)) and onnx_avg > 0:
-            comparison = {"latency_delta_ms": round(pt_avg - onnx_avg, 2), "speedup": round(pt_avg / onnx_avg, 2), "faster_engine": "onnxruntime" if onnx_avg < pt_avg else "pytorch"}
+            comparison = {
+                "latency_delta_ms": round(pt_avg - onnx_avg, 2),
+                "speedup": round(pt_avg / onnx_avg, 2),
+                "faster_engine": "onnxruntime" if onnx_avg < pt_avg else "pytorch",
+            }
+
+        onnx_diagnostics_payload = onnx_result.get("diagnostics")
+        onnx_diagnostics = cast(
+            dict[str, Any],
+            onnx_diagnostics_payload if isinstance(onnx_diagnostics_payload, dict) else {},
+        )
+
+        onnx_status = (
+            "ok"
+            if onnx_result.get("status") == "ok"
+            else str(onnx_result.get("state", "unavailable"))
+        )
 
         result = {
             "model": model,
@@ -242,33 +310,58 @@ def run_benchmark(
             "device_resolved": resolved,
             "iterations": iterations,
             "frame_shape": list(frame.shape),
-            "weights": {"onnx_path": os.fspath(weights_path), "onnx_available": weights_path.exists()},
+            "weights": {
+                "onnx_path": os.fspath(weights_path),
+                "onnx_available": weights_path.exists(),
+            },
             "onnx_diagnostics": onnx_diag,
             "results": [pytorch_result, onnx_result],
             "comparison": comparison,
             "speedup": comparison.get("speedup"),
             "pytorch": {
                 "status": pytorch_result.get("status"),
-                "latency_ms": ((pytorch_result.get("latency_ms") or {}).get("avg") if isinstance(pytorch_result.get("latency_ms"), dict) else None),
+                "latency_ms": (
+                    (pytorch_result.get("latency_ms") or {}).get("avg")
+                    if isinstance(pytorch_result.get("latency_ms"), dict)
+                    else None
+                ),
                 "throughput_fps": pytorch_result.get("throughput_fps"),
                 "device_used": resolved,
                 "memory_mb": _memory_snapshot().get("process_rss_mb"),
                 "error": pytorch_result.get("reason"),
             },
             "onnx": {
-                "status": "ok" if onnx_result.get("status") == "ok" else onnx_result.get("state", "unavailable"),
-                "latency_ms": ((onnx_result.get("latency_ms") or {}).get("avg") if isinstance(onnx_result.get("latency_ms"), dict) else None),
+                "status": onnx_status,
+                "latency_ms": (
+                    (onnx_result.get("latency_ms") or {}).get("avg")
+                    if isinstance(onnx_result.get("latency_ms"), dict)
+                    else None
+                ),
                 "throughput_fps": onnx_result.get("throughput_fps"),
                 "providers_used": onnx_result.get("providers", []),
                 "onnx_path": os.fspath(weights_path),
-                "error_code": None if onnx_result.get("status") == "ok" else str(onnx_result.get("state", "unavailable")).upper(),
+                "error_code": (
+                    None
+                    if onnx_result.get("status") == "ok"
+                    else str(onnx_result.get("state", "unavailable")).upper()
+                ),
                 "message": onnx_result.get("reason"),
-                "technical_detail": onnx_result.get("diagnostics", {}).get("export_error") or onnx_result.get("reason"),
+                "technical_detail": onnx_diagnostics.get("export_error")
+                or onnx_result.get("reason"),
             },
-            "warnings": [] if onnx_result.get("status") == "ok" else [onnx_result.get("reason", "ONNX unavailable; PyTorch benchmark completed")],
+            "warnings": (
+                []
+                if onnx_result.get("status") == "ok"
+                else [onnx_result.get("reason", "ONNX unavailable; PyTorch benchmark completed")]
+            ),
             "memory_snapshot": _memory_snapshot(),
         }
-        log.info("BENCHMARK_END model=%s device=%s onnx_state=%s", model, resolved, result.get("onnx", {}).get("status"))
+        log.info(
+            "BENCHMARK_END model=%s device=%s onnx_state=%s",
+            model,
+            resolved,
+            onnx_status,
+        )
         return result
     finally:
         with _ACTIVE_BENCHMARKS_LOCK:

@@ -34,6 +34,7 @@ async def live() -> dict[str, Any]:
     busy = False
     try:
         from backend.services.benchmarks import benchmark_busy
+
         busy = benchmark_busy()
     except Exception:
         busy = False

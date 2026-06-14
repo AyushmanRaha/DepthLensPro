@@ -480,6 +480,19 @@ Expected `/live` response:
 
 Native packaged builds are currently restricted to:
 
+CI/CD packaging labels used by tests and release automation:
+
+| Release label | Build command | Output / status |
+|---|---|---|
+| macOS Apple Silicon only | `npm run build:mac` / `npm run build:mac:arm64` | `dist/mac-arm64/DepthLens Pro.app` |
+| Windows ARM only | `npm run build:win` / `npm run build:win:arm64` | Windows ARM64 installer |
+| Linux ARM only | `npm run build:linux` / `npm run build:linux:arm64` | Linux ARM64 AppImage |
+| Intel Mac / macOS x64 | Unsupported | `npm run build:mac:x64` exits intentionally |
+
+Setup helpers: `scripts/setup-macos.sh`, `scripts/setup-linux.sh`, `scripts/setup-windows.ps1`.
+Native build helpers: `scripts/build-native-macos.sh`, `scripts/build-native-linux.sh`, `scripts/build-native-windows.ps1`.
+Packaged resource verification uses `verify-packaged-resources.js`.
+
 - macOS Apple Silicon (arm64)
 - Windows ARM64
 - Linux ARM64

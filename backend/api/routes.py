@@ -129,9 +129,7 @@ def _dependency_unavailable(exc: Exception) -> HTTPException:
 
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 MAX_UPLOAD_SIZE_MB = 20
-BENCHMARK_TIMEOUT_MESSAGE = (
-    "Benchmark timed out · depth engine remains available"
-)
+BENCHMARK_TIMEOUT_MESSAGE = "Benchmark timed out · depth engine remains available"
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
 _PROBE_TTL_SECONDS = 10.0
@@ -681,7 +679,7 @@ async def estimate(
     resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Image file required")
+        raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
@@ -739,7 +737,7 @@ async def estimate(
         log.exception("Inference failed")
         raise HTTPException(
             500,
-            {"error_code": "INFERENCE_FAILED", "message": "Depth inference failed"},
+            {"error_code": "INFERENCE_FAILED", "message": "Inference failed"},
         ) from exc
 
     if ck is not None:
@@ -786,7 +784,7 @@ async def reconstruct(
     resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Image file required")
+        raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
@@ -884,7 +882,7 @@ async def batch(
     for upload in files:
         try:
             if not (upload.content_type or "").startswith("image/"):
-                raise ValueError("Image file required")
+                raise ValueError("Expected an image file")
             raw = await upload.read()
             if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
                 raise ValueError(f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
