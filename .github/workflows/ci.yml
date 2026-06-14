@@ -87,6 +87,16 @@ jobs:
         working-directory: electron-app
         run: npm test
 
+      - name: Set up Python 3.12 for resource verification
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Create packaging resource placeholders
+        run: |
+          python -m venv venv
+          mkdir -p models/onnx
+
       - name: Verify packaged resource inputs
         working-directory: electron-app
         run: node scripts/verify-resources.js --root-kind repo --mode native --onnx off ..
