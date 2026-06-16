@@ -921,11 +921,23 @@ body.macos .window-drag-strip {
 }
 
 .engine-status-close {
+  display: grid;
+  place-items: center;
   width: 30px;
   height: 30px;
   border-radius: 50%;
   font-size: 1.1rem;
   line-height: 1;
+}
+
+.engine-status-close-icon {
+  display: block;
+  font-family: var(--ff-display);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  transform: translateY(-0.02em);
+  pointer-events: none;
 }
 
 .engine-status-close:hover,
@@ -990,6 +1002,13 @@ body.macos .window-drag-strip {
   transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
+.engine-status-device-details {
+  margin: 0 0 0.72rem;
+  background: rgba(255,255,255,0.028);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.engine-status-device-details:hover,
 .engine-status-item:hover {
   transform: translateY(-2px);
   border-color: var(--border-hi);
@@ -1026,6 +1045,14 @@ body.macos .window-drag-strip {
   font-size: 0.58rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.engine-status-device-details .device-info-banner {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 0;
+  background: rgba(0,200,255,0.055);
+  overflow-wrap: anywhere;
 }
 
 .engine-status-code {
@@ -1102,6 +1129,7 @@ body.macos .window-drag-strip {
 .site-header .engine-status-orb,
 .site-header .engine-status-panel,
 .site-header .engine-status-close,
+.site-header .engine-status-close-icon,
 .site-header .engine-status-refresh {
   -webkit-app-region: no-drag;
 }
@@ -1138,6 +1166,7 @@ body.macos .window-drag-strip {
   .engine-status-orb,
   .engine-status-panel,
   .engine-status-item,
+  .engine-status-device-details,
   .engine-status-close,
   .engine-status-refresh {
     transition: none !important;

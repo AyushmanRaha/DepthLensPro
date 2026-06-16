@@ -184,6 +184,7 @@
         type="button"
         aria-label="Close depth engine status"
       >
+        <span class="engine-status-close-icon" aria-hidden="true">×</span>
       </button>
     </div>
 
@@ -194,6 +195,14 @@
       </div>
 
       <div class="device-badge engine-status-device-chip" id="deviceBadge" hidden></div>
+    </div>
+
+    <div class="engine-status-section engine-status-device-details">
+      <div class="engine-status-section-title">Device Details</div>
+      <div class="device-info-banner" id="deviceInfoBanner">
+        <span class="device-info-icon" aria-hidden="true"></span>
+        <span>Connect the inference engine to detect GPU/CPU</span>
+      </div>
     </div>
 
     <div class="engine-status-grid">
@@ -274,10 +283,6 @@
               <h2 class="card-title" id="deviceHeading">
                 <span class="card-icon" aria-hidden="true"></span> Compute Device
               </h2>
-              <div class="device-info-banner" id="deviceInfoBanner">
-                <span class="device-info-icon" aria-hidden="true"></span>
-                <span>Connect the inference engine to detect GPU/CPU</span>
-              </div>
               <div
                 class="device-type-toggle"
                 id="deviceTypeToggle"
