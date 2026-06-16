@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // FIX (Issue 4): expose platform so the renderer can conditionally apply
   // macOS traffic-light padding without hard-coding it in CSS
   getPlatform: () => ipcRenderer.invoke("get-platform"),
+  loadSettings: () => ipcRenderer.invoke("settings:load"),
+  saveSettings: (payload) => ipcRenderer.invoke("settings:save", payload),
   showSaveDialog: (options) => ipcRenderer.invoke("show-save-dialog", options),
   showOpenDialog: (options) => ipcRenderer.invoke("show-open-dialog", options),
   platform: process.platform,

@@ -52,7 +52,9 @@ def get_detector(device: str = "auto") -> tuple[Any, str, Any]:
         from torchvision.models.detection import FasterRCNN_MobileNet_V3_Large_320_FPN_Weights
         from torchvision.models.detection import fasterrcnn_mobilenet_v3_large_320_fpn
     except Exception as exc:  # pragma: no cover - depends on optional runtime wheels
-        raise DetectorUnavailableError("TorchVision detector dependencies are unavailable") from exc
+        err = DetectorUnavailableError("TorchVision detector dependencies are unavailable; install backend requirements including torch and torchvision.")
+        err.error_code = "DETECTOR_DEPENDENCY_MISSING"
+        raise err from exc
 
     resolved = _resolve_device(device)
     if resolved.startswith("mps"):
@@ -69,7 +71,9 @@ def get_detector(device: str = "auto") -> tuple[Any, str, Any]:
             model = fasterrcnn_mobilenet_v3_large_320_fpn(weights=weights)
             model.to(torch_device).eval()
         except Exception as exc:
-            raise DetectorUnavailableError("Local object detector model is unavailable") from exc
+            err = DetectorUnavailableError("Local object detector weights are missing or could not be downloaded; run setup with network access or retry detection.")
+            err.error_code = "DETECTOR_WEIGHTS_UNAVAILABLE"
+            raise err from exc
         _model_cache[key] = model
         return model, key, torch
 
@@ -113,7 +117,9 @@ def detect_objects(
             with torch.inference_mode():
                 output = model([tensor])[0]
         else:
-            raise DetectorUnavailableError("Local object detector inference failed") from exc
+            err = DetectorUnavailableError("Local object detector inference failed; try CPU device or lower camera resolution.")
+            err.error_code = "DETECTOR_INFERENCE_FAILED"
+            raise err from exc
 
     detections: list[dict[str, Any]] = []
     scores = output.get("scores", [])

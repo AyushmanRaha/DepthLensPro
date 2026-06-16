@@ -6,22 +6,22 @@
   "scripts": {
     "start": "electron .",
     "build:mac": "npm run clean:dist && npm run build:mac:arm64 && npm run scan:apps",
-    "build:win": "npm run build:win:arm64",
-    "build:all": "npm run build:mac:arm64 && npm run build:win:arm64 && npm run build:linux:arm64",
+    "build:win": "npm run build:win:arm64 && npm run build:win:x64",
+    "build:all": "npm run build:mac:arm64 && npm run build:win:arm64 && npm run build:win:x64 && npm run build:linux:arm64 && npm run build:linux:x64",
     "start:dev": "electron .",
     "backend:smoke": "npm run smoke:backend",
     "verify:resources": "node scripts/verify-resources.js",
     "backend:live": "node -e \"fetch('http://127.0.0.1:8765/live').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
     "backend:health": "node -e \"fetch('http://127.0.0.1:8765/health').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
     "backend:devices": "node -e \"fetch('http://127.0.0.1:8765/devices').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
-    "build:linux": "npm run build:linux:arm64",
+    "build:linux": "npm run build:linux:arm64 && npm run build:linux:x64",
     "build:mac:arm64": "npm run verify:resources:native && npm run build:mac:arm64:raw && npm run verify:packaged:mac",
     "build:win:arm64": "npm run verify:resources:native && npm run build:win:arm64:raw && npm run verify:packaged:win",
     "build:linux:arm64": "npm run verify:resources:native && npm run build:linux:arm64:raw && npm run verify:packaged:linux",
-    "build:mac:x64": "node scripts/unsupported-arch.js",
-    "build:mac:universal": "node scripts/unsupported-arch.js",
-    "build:win:x64": "node scripts/unsupported-arch.js",
-    "build:linux:x64": "node scripts/unsupported-arch.js",
+    "build:mac:x64": "node scripts/unsupported-arch.js --platform darwin --arch x64",
+    "build:mac:universal": "node scripts/unsupported-arch.js --platform darwin --arch universal",
+    "build:win:x64": "npm run verify:resources:native && npm run build:win:x64:raw && npm run verify:packaged:win:x64",
+    "build:linux:x64": "npm run verify:resources:native && npm run build:linux:x64:raw && npm run verify:packaged:linux:x64",
     "kill:backend": "node scripts/backend-lifecycle.js kill",
     "smoke:backend": "node scripts/backend-lifecycle.js smoke",
     "clean:dist": "node scripts/clean-dist.js",
@@ -30,7 +30,7 @@
     "clean:spotlight": "node scripts/clean-spotlight.js",
     "reinstall:mac": "node scripts/reinstall-mac.js",
     "backend:ready": "node -e \"fetch('http://127.0.0.1:8765/ready').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
-    "test": "node test-security-policy.js && node test-verify-resources.js",
+    "test": "node test-security-policy.js && node test-verify-resources.js && node test-platform-targets.js && node test-persistence-schema.js",
     "doctor": "cd .. && python3 scripts/doctor.py --doctor-only",
     "setup": "cd .. && python3 scripts/doctor.py",
     "setup:mac": "cd .. && scripts/setup-macos.sh",
@@ -44,7 +44,11 @@
     "verify:packaged:linux": "node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx optional",
     "build:mac:arm64:raw": "electron-builder --mac dmg --arm64",
     "build:win:arm64:raw": "electron-builder --win nsis --arm64",
-    "build:linux:arm64:raw": "electron-builder --linux AppImage --arm64"
+    "build:linux:arm64:raw": "electron-builder --linux AppImage --arm64",
+    "verify:packaged:win:x64": "node scripts/verify-packaged-resources.js --platform win32 --arch x64 --mode native --onnx optional",
+    "verify:packaged:linux:x64": "node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --onnx optional",
+    "build:win:x64:raw": "electron-builder --win nsis --x64",
+    "build:linux:x64:raw": "electron-builder --linux AppImage --x64"
   },
   "build": {
     "forceCodeSigning": false,
@@ -73,7 +77,8 @@
         {
           "target": "nsis",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
@@ -125,7 +130,8 @@
         {
           "target": "AppImage",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],

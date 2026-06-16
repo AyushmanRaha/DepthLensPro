@@ -862,8 +862,9 @@ async def detect(
             raise HTTPException(
                 503,
                 {
-                    "error_code": "DETECTOR_UNAVAILABLE",
-                    "message": "Local object detector is unavailable",
+                    "error_code": getattr(exc, "error_code", "DETECTOR_UNAVAILABLE"),
+                    "message": str(exc) or "Local object detector is unavailable",
+                    "action": "Run setup to install detector dependencies, or retry when network access is available for lazy weights download.",
                 },
             ) from exc
         observability.record_crash("detector", "DETECTION_FAILED", exc, route="/detect")
