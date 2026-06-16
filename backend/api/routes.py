@@ -84,6 +84,12 @@ def reconstruct_point_cloud(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return impl(*args, **kwargs)
 
 
+def detect_objects(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from backend.services.object_detection import detect_objects as impl
+
+    return impl(*args, **kwargs)
+
+
 def loaded_model_keys() -> list[str]:
     try:
         return cast(list[str], _inference().loaded_model_keys())
@@ -191,6 +197,12 @@ async def process_image_async(
         gt_scale,
         gt_invalid_value,
     )
+
+
+async def detect_objects_async(**kwargs: Any) -> dict[str, Any]:
+    """Offload blocking local object detection while preserving route monkeypatching."""
+
+    return await run_in_threadpool(detect_objects, **kwargs)
 
 
 async def reconstruct_point_cloud_async(
@@ -753,6 +765,50 @@ async def estimate(
     )
     return JSONResponse(result)
 
+
+
+@router.post("/api/detect")
+@router.post("/detect")
+async def detect(
+    file: UploadFile = File(...),
+    device: str = Form("auto"),
+    threshold: float = Form(0.35),
+    max_detections: int = Form(5),
+) -> JSONResponse:
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(415, "Image file required")
+    if threshold < 0.05 or threshold > 0.95:
+        raise HTTPException(422, "threshold must be between 0.05 and 0.95")
+    if max_detections < 1 or max_detections > 20:
+        raise HTTPException(422, "max_detections must be between 1 and 20")
+    resolved = _validated_device_or_422(device)
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise HTTPException(413, f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+    try:
+        result = await detect_objects_async(
+            raw=raw,
+            filename=file.filename,
+            device=resolved,
+            threshold=threshold,
+            max_detections=max_detections,
+        )
+        return JSONResponse(result)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        if exc.__class__.__name__ == "DetectorUnavailableError" or (
+            isinstance(exc, ModuleNotFoundError) and exc.name in {"PIL", "torch", "torchvision"}
+        ):
+            raise HTTPException(
+                503,
+                {"error_code": "DETECTOR_UNAVAILABLE", "message": "Local object detector is unavailable"},
+            ) from exc
+        log.exception("Object detection failed")
+        raise HTTPException(
+            500,
+            {"error_code": "DETECTION_FAILED", "message": "Object detection failed"},
+        ) from exc
 
 @router.post("/api/reconstruct")
 @router.post("/reconstruct")

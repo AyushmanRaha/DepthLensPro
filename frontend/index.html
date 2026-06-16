@@ -941,7 +941,8 @@
             <span class="reconstruct-status-pill" id="reconstructStatusPill" data-state="idle">Idle</span>
           </section>
 
-          <div class="reconstruct-grid">
+          <div class="reconstruct-grid reconstruct-input-grid">
+            <div class="reconstruct-source-stack">
             <section class="card reconstruct-source-card">
               <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Source Image</h3>
               <div
@@ -977,6 +978,29 @@
                 </div>
               </div>
             </section>
+
+            <section class="card reconstruct-capture-card" aria-labelledby="reconstructCaptureHeading">
+              <h3 class="card-title" id="reconstructCaptureHeading"><span class="card-icon" aria-hidden="true"></span> Image Capture</h3>
+              <div class="reconstruct-capture-zone" aria-describedby="reconstructCaptureStatus">
+                <div class="drop-icon reconstruct-capture-icon" aria-hidden="true">
+                  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M22 20l4-6h12l4 6h8a6 6 0 0 1 6 6v20a6 6 0 0 1-6 6H14a6 6 0 0 1-6-6V26a6 6 0 0 1 6-6h8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <circle cx="32" cy="36" r="10" stroke="currentColor" stroke-width="2"/>
+                    <path d="M48 28h.01" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                <div class="reconstruct-capture-copy">
+                  <p class="drop-headline">Capture from webcam</p>
+                  <p class="drop-sub">Use a live RGB frame as the reconstruction source</p>
+                </div>
+                <button class="btn btn-outline" id="reconstructOpenCaptureBtn" type="button" aria-haspopup="dialog" aria-controls="captureBackdrop">Click Image</button>
+              </div>
+              <div class="reconstruct-capture-footer">
+                <p class="reconstruct-capture-status" id="reconstructCaptureStatus" aria-live="polite">Camera not opened</p>
+                <p class="muted">Local camera stream · not uploaded until you generate/capture locally</p>
+              </div>
+            </section>
+            </div>
 
             <section class="card">
               <h3 class="card-title"><span class="card-icon" aria-hidden="true"></span> Point Cloud Options</h3>
@@ -1208,6 +1232,30 @@
           </section>
         </div>
       </main>
+
+
+      <!-- ── 3D Image Capture Modal ────────────────────────────────── -->
+      <div class="capture-backdrop" id="captureBackdrop" hidden>
+        <section class="capture-modal" role="dialog" aria-modal="true" aria-labelledby="captureModalTitle">
+          <div class="capture-modal-head">
+            <div>
+              <h2 class="capture-title" id="captureModalTitle">RGB Camera View</h2>
+              <p class="capture-subtitle" id="captureModalStatus" aria-live="polite">Starting camera…</p>
+            </div>
+            <button class="capture-close" id="captureCloseBtn" type="button" aria-label="Close camera capture"></button>
+          </div>
+          <div class="capture-stage">
+            <video id="captureVideo" class="capture-video" autoplay playsinline muted></video>
+            <canvas id="captureCanvas" hidden></canvas>
+            <div class="capture-detections" id="captureDetections" aria-live="polite">Detecting…</div>
+            <div id="capturePlaceholder" class="capture-placeholder">Starting camera…</div>
+            <button id="captureStillBtn" class="capture-shutter-btn" type="button" aria-label="Capture image">
+              <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M22 20l4-6h12l4 6h8a6 6 0 0 1 6 6v20a6 6 0 0 1-6 6H14a6 6 0 0 1-6-6V26a6 6 0 0 1 6-6h8z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="32" cy="36" r="10" stroke="currentColor" stroke-width="2.5"/></svg>
+            </button>
+          </div>
+          <p class="capture-footer-hint">Esc closes · Capture uses the current RGB frame</p>
+        </section>
+      </div>
 
       <!-- ── Lightbox ────────────────────────────────────────────────── -->
       <div

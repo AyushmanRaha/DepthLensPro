@@ -216,6 +216,17 @@ const state = {
     running: false,
     result: null,
     progressTimer: null,
+    capture: {
+      stream: null,
+      running: false,
+      starting: false,
+      detecting: false,
+      detectTimer: null,
+      detectAbort: null,
+      lastDetections: [],
+      lastCapturedFile: null,
+      previousFocus: null,
+    },
     viewer: {
       gl: null,
       ctx2d: null,
@@ -415,6 +426,16 @@ const el = {
   reconstructBrowseBtn:        $("#reconstructBrowseBtn"),
   reconstructUseLatestBtn:     $("#reconstructUseLatestBtn"),
   reconstructClearBtn:         $("#reconstructClearBtn"),
+  reconstructOpenCaptureBtn:   $("#reconstructOpenCaptureBtn"),
+  reconstructCaptureStatus:    $("#reconstructCaptureStatus"),
+  captureBackdrop:             $("#captureBackdrop"),
+  captureCloseBtn:             $("#captureCloseBtn"),
+  captureVideo:                $("#captureVideo"),
+  captureCanvas:               $("#captureCanvas"),
+  captureStillBtn:             $("#captureStillBtn"),
+  captureDetections:           $("#captureDetections"),
+  captureModalStatus:          $("#captureModalStatus"),
+  capturePlaceholder:          $("#capturePlaceholder"),
   reconstructFormat:           $("#reconstructFormat"),
   reconstructMaxDim:           $("#reconstructMaxDim"),
   reconstructMaxPoints:        $("#reconstructMaxPoints"),
@@ -1609,14 +1630,16 @@ function syncReconstructControls() {
   if (!supported) setReconstructStatus("Unsupported browser", "error");
 }
 
-function setReconstructFile(file, previewDataUrl = "") {
+function setReconstructSourceFile(file, source = "upload", previewDataUrl = "") {
   if (!file) return;
   if (!file.type?.startsWith("image/")) { toast("Image file required for point cloud generation", "warning"); return; }
   if (file.size > 20 * 1024 * 1024) { toast("Point cloud source image exceeds 20 MB", "warning"); return; }
   state.reconstruct.file = file;
   state.reconstruct.result = null;
+  state.reconstruct.capture.lastCapturedFile = source === "camera" ? file : null;
   state.reconstruct.filePreview = previewDataUrl || "";
-  if (el.reconstructFileName) el.reconstructFileName.textContent = file.name || "Selected image";
+  const sourceLabel = source === "camera" ? "Camera capture" : source === "latest" ? "Latest result" : "Uploaded image";
+  if (el.reconstructFileName) el.reconstructFileName.textContent = `${file.name || "Selected image"} · ${sourceLabel}`;
   if (el.reconstructInputPreview) {
     el.reconstructInputPreview.hidden = !state.reconstruct.filePreview;
     if (state.reconstruct.filePreview) el.reconstructInputPreview.src = state.reconstruct.filePreview;
@@ -1637,11 +1660,180 @@ function setReconstructFile(file, previewDataUrl = "") {
   syncReconstructControls();
 }
 
+function setReconstructFile(file, previewDataUrl = "") {
+  return setReconstructSourceFile(file, previewDataUrl ? "latest" : "upload", previewDataUrl);
+}
+
+function setCaptureStatus(message, type = "idle") {
+  if (el.captureModalStatus) el.captureModalStatus.textContent = message;
+  if (el.reconstructCaptureStatus) {
+    el.reconstructCaptureStatus.textContent = message;
+    el.reconstructCaptureStatus.dataset.state = type;
+  }
+}
+
+function withCaptureModalOpen() {
+  return Boolean(el.captureBackdrop && !el.captureBackdrop.hidden && state.reconstruct.capture.running);
+}
+
+function captureTimestamp(date = new Date()) {
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function blobToFile(blob, name, type = "image/jpeg") {
+  return new File([blob], name, { type, lastModified: Date.now() });
+}
+
+async function openReconstructCaptureModal() {
+  if (!el.captureBackdrop || state.reconstruct.capture.starting || state.reconstruct.capture.running) return;
+  state.reconstruct.capture.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : el.reconstructOpenCaptureBtn;
+  el.captureBackdrop.hidden = false;
+  el.captureBackdrop.classList.remove("is-open");
+  if (el.capturePlaceholder) { el.capturePlaceholder.hidden = false; el.capturePlaceholder.textContent = "Starting camera…"; }
+  renderCaptureDetections([]);
+  requestAnimationFrame(() => el.captureBackdrop?.classList.add("is-open"));
+  el.captureCloseBtn?.focus();
+  await startReconstructCaptureStream();
+}
+
+function closeReconstructCaptureModal({ quiet = false } = {}) {
+  if (!el.captureBackdrop || el.captureBackdrop.hidden) return;
+  stopReconstructCaptureStream();
+  el.captureBackdrop.classList.remove("is-open");
+  el.captureBackdrop.hidden = true;
+  setCaptureStatus(quiet ? "Camera not opened" : "Camera closed", "idle");
+  const previous = state.reconstruct.capture.previousFocus;
+  state.reconstruct.capture.previousFocus = null;
+  if (previous?.focus) previous.focus();
+}
+
+async function startReconstructCaptureStream() {
+  const cap = state.reconstruct.capture;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setCaptureStatus("No camera API available", "error");
+    if (el.capturePlaceholder) el.capturePlaceholder.textContent = "No camera API available";
+    return;
+  }
+  cap.starting = true;
+  setCaptureStatus("Starting camera…", "idle");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" }, audio: false });
+    cap.stream = stream;
+    cap.running = true;
+    if (el.captureVideo) {
+      el.captureVideo.srcObject = stream;
+      await new Promise(resolve => {
+        if (el.captureVideo.readyState >= 1) resolve();
+        else el.captureVideo.onloadedmetadata = () => resolve();
+      });
+      await el.captureVideo.play?.();
+    }
+    if (el.capturePlaceholder) el.capturePlaceholder.hidden = true;
+    setCaptureStatus("Camera ready", "ready");
+    scheduleCaptureDetection(250);
+  } catch (err) {
+    const name = err?.name || "";
+    const message = name === "NotAllowedError" ? "Permission denied" : name === "NotFoundError" ? "No camera found" : "Camera unavailable";
+    setCaptureStatus(message, "error");
+    if (el.capturePlaceholder) el.capturePlaceholder.textContent = message;
+    toast(`${message} · image capture remains available through upload`, "warning", 5000);
+  } finally {
+    cap.starting = false;
+  }
+}
+
+function stopReconstructCaptureStream() {
+  const cap = state.reconstruct.capture;
+  clearTimeout(cap.detectTimer);
+  cap.detectTimer = null;
+  cap.detectAbort?.abort();
+  cap.detectAbort = null;
+  cap.detecting = false;
+  cap.stream?.getTracks?.().forEach(track => track.stop());
+  cap.stream = null;
+  cap.running = false;
+  if (el.captureVideo) {
+    el.captureVideo.pause?.();
+    el.captureVideo.srcObject = null;
+    el.captureVideo.onloadedmetadata = null;
+  }
+}
+
+async function captureFrameFile({ maxDim = 640, quality = 0.82 } = {}) {
+  const video = el.captureVideo;
+  const canvas = el.captureCanvas;
+  if (!video || !canvas || !video.videoWidth || !video.videoHeight) throw new Error("Camera frame is not ready");
+  const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+  canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+  canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Image encoding unavailable");
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
+  if (!blob) throw new Error("Image encoding failed");
+  return blobToFile(blob, `webcam-capture-${captureTimestamp()}.jpg`, "image/jpeg");
+}
+
+async function captureReconstructStill() {
+  try {
+    const file = await captureFrameFile({ maxDim: 1600, quality: 0.9 });
+    state.reconstruct.capture.lastCapturedFile = file;
+    await setReconstructSourceFile(file, "camera");
+    closeReconstructCaptureModal({ quiet: true });
+    toast("Camera image captured for 3D reconstruction", "success");
+  } catch (err) {
+    toast(`Camera capture failed · ${err.message || err}`, "error", 6000);
+  }
+}
+
+function scheduleCaptureDetection(delay = 750) {
+  const cap = state.reconstruct.capture;
+  clearTimeout(cap.detectTimer);
+  if (!withCaptureModalOpen() || document.hidden) return;
+  cap.detectTimer = setTimeout(runCaptureDetectionOnce, delay);
+}
+
+async function runCaptureDetectionOnce() {
+  const cap = state.reconstruct.capture;
+  if (!withCaptureModalOpen() || cap.detecting || document.hidden) return;
+  cap.detecting = true;
+  try {
+    const file = await captureFrameFile({ maxDim: 640, quality: 0.78 });
+    cap.detectAbort?.abort();
+    const controller = new AbortController();
+    cap.detectAbort = controller;
+    const form = new FormData();
+    form.append("file", file, file.name);
+    form.append("device", selDevice?.() || "auto");
+    form.append("threshold", "0.35");
+    form.append("max_detections", "5");
+    const response = await apiFetch("/api/detect", { method: "POST", body: form, signal: requestSignal(controller.signal, 15000) });
+    const payload = await response.json();
+    renderCaptureDetections(payload.detections || []);
+  } catch (err) {
+    if (err?.name !== "AbortError") renderCaptureDetections(null);
+  } finally {
+    cap.detecting = false;
+    if (withCaptureModalOpen()) scheduleCaptureDetection(900);
+  }
+}
+
+function renderCaptureDetections(detections) {
+  if (!el.captureDetections) return;
+  if (detections === null) { el.captureDetections.textContent = "Detector unavailable"; return; }
+  const visible = (detections || []).filter(d => Number(d.score) >= 0.35).slice(0, 3);
+  state.reconstruct.capture.lastDetections = visible;
+  if (!visible.length) { el.captureDetections.textContent = withCaptureModalOpen() ? "No object detected" : "Detecting…"; return; }
+  el.captureDetections.innerHTML = visible.map(d => `<div class="capture-detection-label"><span>${esc(d.label || "object")}</span><span>${Math.round(Number(d.score || 0) * 100)}%</span></div>`).join("");
+}
+
 function clearReconstruct() {
   cancelReconstruction({ quiet: true });
   state.reconstruct.file = null;
   state.reconstruct.filePreview = "";
   state.reconstruct.result = null;
+  state.reconstruct.capture.lastCapturedFile = null;
   if (el.reconstructFileInput) el.reconstructFileInput.value = "";
   if (el.reconstructFileName) el.reconstructFileName.textContent = "No image selected";
   if (el.reconstructInputPreview) { el.reconstructInputPreview.hidden = true; el.reconstructInputPreview.removeAttribute("src"); }
@@ -1669,7 +1861,7 @@ function useLatestReconstructionSource() {
     const latest = latestResultWithOriginal();
     if (!latest) { toast("Run workspace inference first or upload an image", "warning"); return; }
     const file = dataUrlToFile(latest.originalSrc, latest.filename || "latest-depthlens-source.jpg");
-    setReconstructFile(file, latest.originalSrc);
+    setReconstructSourceFile(file, "latest", latest.originalSrc);
     toast("Latest workspace source loaded for point cloud generation", "success");
   } catch (err) {
     toast(`Latest result unavailable · ${err.message}`, "error", 6000);
@@ -2083,9 +2275,16 @@ function initReconstructionPanel() {
   el.reconstructDropZone.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); el.reconstructFileInput?.click(); } });
   el.reconstructDropZone.addEventListener("dragover", event => { event.preventDefault(); el.reconstructDropZone.classList.add("drag-over"); });
   el.reconstructDropZone.addEventListener("dragleave", event => { if (!el.reconstructDropZone.contains(event.relatedTarget)) el.reconstructDropZone.classList.remove("drag-over"); });
-  el.reconstructDropZone.addEventListener("drop", event => { event.preventDefault(); el.reconstructDropZone.classList.remove("drag-over"); setReconstructFile(event.dataTransfer?.files?.[0]); });
-  el.reconstructFileInput?.addEventListener("change", () => { setReconstructFile(el.reconstructFileInput.files?.[0]); el.reconstructFileInput.value = ""; });
+  el.reconstructDropZone.addEventListener("drop", event => { event.preventDefault(); el.reconstructDropZone.classList.remove("drag-over"); setReconstructSourceFile(event.dataTransfer?.files?.[0], "upload"); });
+  el.reconstructFileInput?.addEventListener("change", () => { setReconstructSourceFile(el.reconstructFileInput.files?.[0], "upload"); el.reconstructFileInput.value = ""; });
   el.reconstructUseLatestBtn?.addEventListener("click", useLatestReconstructionSource);
+  el.reconstructOpenCaptureBtn?.addEventListener("click", openReconstructCaptureModal);
+  el.captureCloseBtn?.addEventListener("click", () => closeReconstructCaptureModal());
+  el.captureStillBtn?.addEventListener("click", captureReconstructStill);
+  el.captureBackdrop?.addEventListener("click", event => { if (event.target === el.captureBackdrop) closeReconstructCaptureModal(); });
+  document.addEventListener("keydown", event => { if (event.key === "Escape" && el.captureBackdrop && !el.captureBackdrop.hidden) closeReconstructCaptureModal(); });
+  document.addEventListener("visibilitychange", () => { if (!el.captureBackdrop || el.captureBackdrop.hidden) return; document.hidden ? stopReconstructCaptureStream() : startReconstructCaptureStream(); });
+  window.addEventListener("pagehide", () => closeReconstructCaptureModal({ quiet: true }));
   el.reconstructClearBtn?.addEventListener("click", clearReconstruct);
   el.reconstructRunBtn?.addEventListener("click", runReconstruction);
   el.reconstructCancelBtn?.addEventListener("click", () => cancelReconstruction());
