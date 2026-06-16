@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+target=$(python3 - <<'PY'
+from scripts.platform_support import current_target
+print(current_target().platform_key + ':' + current_target().arch)
+PY
+)
+case "$target" in
+  darwin:arm64)
+    app=$(find electron-app/dist -path '*mac-arm64*DepthLens Pro.app' -maxdepth 4 -print 2>/dev/null | sort | tail -1 || true)
+    if [[ -n "$app" ]]; then echo "Launching: $app"; open "$app"; else echo "No built app found. Run ./scripts/build" >&2; exit 1; fi ;;
+  linux:*)
+    app=$(find electron-app/dist -name 'DepthLens Pro*AppImage' -o -name '*DepthLens*AppImage' 2>/dev/null | sort | tail -1 || true)
+    if [[ -n "$app" ]]; then echo "Launching: $app"; chmod +x "$app"; "$app"; else echo "No built app found. Run ./scripts/build" >&2; exit 1; fi ;;
+  win32:*) echo "Use .\\scripts\\launch.ps1 on Windows." >&2; exit 1 ;;
+  *) echo "Unsupported target $target" >&2; exit 1 ;;
+esac

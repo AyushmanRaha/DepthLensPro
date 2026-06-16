@@ -10,7 +10,7 @@ import shutil
 import time
 from typing import Any, cast
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
@@ -18,6 +18,7 @@ from backend.api.live import SERVICE_VERSION
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
+from backend.utils.platform_support import evaluate_target, supported_matrix
 from backend.services import observability
 
 
@@ -128,7 +129,7 @@ def _dependency_unavailable(exc: Exception) -> HTTPException:
     return HTTPException(
         503,
         {
-            "error_code": "INFERENCE_RUNTIME_UNAVAILABLE",
+            "error_code": "INFERENCE_DEPENDENCY_UNAVAILABLE",
             "message": "Inference runtime is not ready. Check /ready for dependency diagnostics.",
         },
     )
@@ -393,27 +394,33 @@ def _validated_device_or_422(device: str) -> str:
 
     avail = available_options()
     if device not in avail:
-        raise HTTPException(422, f"Device '{device}' is unavailable. Options: {avail}")
+        raise HTTPException(
+            422,
+            {
+                "error_code": "DEVICE_UNAVAILABLE",
+                "message": f"Device '{device}' is unavailable.",
+                "options": avail,
+            },
+        )
     try:
         return str(_resolve(device))
-    except asyncio.TimeoutError as exc:
-        log.warning("Benchmark timed out", extra={"device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
     except ValueError as exc:
         refreshed = available_options(force=True)
         if device not in refreshed:
-            detail = f"Device '{device}' is unavailable. Options: {refreshed}"
-            raise HTTPException(422, detail) from exc
+            raise HTTPException(
+                422,
+                {
+                    "error_code": "DEVICE_UNAVAILABLE",
+                    "message": f"Device '{device}' is unavailable.",
+                    "options": refreshed,
+                },
+            ) from exc
         try:
             return str(_resolve(device))
         except ValueError as refreshed_exc:
-            raise HTTPException(422, str(refreshed_exc)) from refreshed_exc
+            raise HTTPException(
+                422, {"error_code": "DEVICE_UNAVAILABLE", "message": str(refreshed_exc)}
+            ) from refreshed_exc
 
 
 def _percent(numerator: int, denominator: int) -> float:
@@ -621,6 +628,55 @@ async def onnx_status(device: str = "auto") -> dict[str, Any]:
     return await run_in_threadpool(onnx_status_payload, device=device)
 
 
+@router.get("/api/models/status")
+async def models_status(device: str = "auto") -> dict[str, Any]:
+    from backend.services.model_assets import model_status
+
+    resolved = "cpu" if device == "auto" else device
+    return await run_in_threadpool(model_status, deep=False, device=resolved)
+
+
+@router.post("/api/models/validate")
+async def models_validate(device: str = "cpu") -> dict[str, Any]:
+    from backend.services.model_assets import model_status
+
+    return await run_in_threadpool(model_status, deep=True, device=device)
+
+
+@router.get("/api/capabilities")
+async def capabilities() -> dict[str, Any]:
+    from backend.services.model_assets import model_status
+    from backend.services.object_detection import detector_status
+    from backend.services.persistence import init_storage
+    from backend.services.workload import low_power_status
+
+    devs, primary, _meta = _cached_devices()
+    target = evaluate_target(platform.system(), platform.machine())
+    models = await run_in_threadpool(model_status, deep=False, device=primary)
+    detector = await run_in_threadpool(detector_status, primary)
+    storage = await run_in_threadpool(init_storage)
+    return {
+        "platform": target.platform_key,
+        "arch": target.arch,
+        "label": target.label,
+        "supported": target.supported,
+        "unsupported_reason": target.reason,
+        "supported_matrix": supported_matrix(),
+        "devices": devs,
+        "primary_device": primary,
+        "models": models,
+        "onnx": {"installed": models.get("onnx_all_valid"), "models": models.get("models", {})},
+        "pytorch": {
+            "installed": models.get("pytorch_all_visible"),
+            "models": models.get("models", {}),
+        },
+        "detector": detector,
+        "persistent_storage": storage,
+        "realtime": {"supported": True, "routes": ["POST /api/realtime/depth"]},
+        "low_power_mode": low_power_status(),
+    }
+
+
 @router.get("/models")
 async def list_models() -> dict[str, Any]:
     return {"models": supported_models_payload()}
@@ -691,18 +747,14 @@ async def estimate(
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
         metrics = normalize_metrics_mode(metrics)
-        outputs = ",".join(parse_outputs(outputs))
-    except asyncio.TimeoutError as exc:
-        log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(
+            422, {"error_code": "INVALID_METRICS_MODE", "message": str(exc)}
+        ) from exc
+    try:
+        outputs = ",".join(parse_outputs(outputs))
+    except ValueError as exc:
+        raise HTTPException(422, {"error_code": "INVALID_OUTPUTS", "message": str(exc)}) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -723,7 +775,13 @@ async def estimate(
         if len(gt_raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
             raise HTTPException(413, f"GT depth file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
     elif gt_required:
-        raise HTTPException(422, "GT mode requires one image and one GT depth file")
+        raise HTTPException(
+            422,
+            {
+                "error_code": "GT_REQUIRED",
+                "message": "GT mode requires one image and one GT depth file",
+            },
+        )
 
     # GT metrics depend on uploaded labels and must not reuse image-only cached payloads.
     ck = (
@@ -765,16 +823,13 @@ async def estimate(
             gt_invalid_value,
         )
     except asyncio.TimeoutError as exc:
-        log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
+            504, {"error_code": "ESTIMATE_TIMEOUT", "message": "Depth estimate timed out"}
         ) from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(
+            422, {"error_code": "INVALID_ESTIMATE_REQUEST", "message": str(exc)}
+        ) from exc
     except Exception as exc:
         observability.record_crash("inference", "INFERENCE_FAILED", exc, route="/estimate")
         observability.record_inference(
@@ -817,6 +872,14 @@ async def estimate(
         result["latency_ms"],
     )
     return JSONResponse(result)
+
+
+@router.get("/api/detect/status")
+async def detect_status(device: str = "auto") -> dict[str, Any]:
+    from backend.services.object_detection import detector_status
+
+    resolved = _validated_device_or_422(device)
+    return await run_in_threadpool(detector_status, resolved)
 
 
 @router.post("/api/detect")
@@ -880,6 +943,88 @@ async def detect(
             500,
             {"error_code": "DETECTION_FAILED", "message": "Object detection failed"},
         ) from exc
+
+
+@router.post("/api/realtime/depth")
+async def realtime_depth(
+    request: Request,
+    model: str = "midas_small",
+    device: str = "auto",
+    colormap: str = "inferno",
+    max_dim: int = 256,
+) -> Response:
+    from backend.services import workload
+
+    if colormap not in COLORMAP_NAMES:
+        raise HTTPException(
+            422, {"error_code": "INVALID_OUTPUTS", "message": f"Unknown colormap '{colormap}'"}
+        )
+    try:
+        model = normalize_model_id(model)
+    except UnknownModelError as exc:
+        raise HTTPException(
+            422,
+            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
+        ) from exc
+    resolved = _validated_device_or_422(device)
+    if workload.realtime_busy():
+        raise HTTPException(
+            429,
+            {
+                "error_code": "REALTIME_BACKPRESSURE",
+                "message": "Realtime worker is busy; drop this frame and send the latest frame.",
+            },
+        )
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(
+            422,
+            {
+                "error_code": "INVALID_OUTPUTS",
+                "message": "Realtime request body must contain image bytes",
+            },
+        )
+    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            413,
+            {
+                "error_code": "PAYLOAD_TOO_LARGE",
+                "message": f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit",
+            },
+        )
+    started = time.perf_counter()
+    try:
+        async with workload.realtime_slot():
+            result = await process_image_async(
+                raw,
+                model,
+                colormap,
+                resolved,
+                "realtime-frame",
+                "none",
+                "color",
+                max(128, min(int(max_dim or 256), 512)),
+            )
+    except RuntimeError as exc:
+        if str(exc) == "REALTIME_BACKPRESSURE":
+            raise HTTPException(
+                429,
+                {
+                    "error_code": "REALTIME_BACKPRESSURE",
+                    "message": "Realtime worker is busy; drop this frame and send the latest frame.",
+                },
+            ) from exc
+        raise
+    import base64
+
+    payload = base64.b64decode(result.get("depth_map") or "")
+    headers = {
+        "X-DepthLens-Latency-Ms": str(result.get("latency_ms", "")),
+        "X-DepthLens-End-To-End-Ms": str(_elapsed_ms(started)),
+        "X-DepthLens-Engine": str(result.get("engine_used", "unknown")),
+        "Cache-Control": "no-store",
+    }
+    return Response(payload, media_type="image/png", headers=headers)
 
 
 @router.post("/api/reconstruct")
@@ -1010,18 +1155,14 @@ async def batch(
         raise HTTPException(422, f"Unknown colormap '{colormap}'")
     try:
         metrics = normalize_metrics_mode(metrics)
-        outputs = ",".join(parse_outputs(outputs))
-    except asyncio.TimeoutError as exc:
-        log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(
+            422, {"error_code": "INVALID_METRICS_MODE", "message": str(exc)}
+        ) from exc
+    try:
+        outputs = ",".join(parse_outputs(outputs))
+    except ValueError as exc:
+        raise HTTPException(422, {"error_code": "INVALID_OUTPUTS", "message": str(exc)}) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
     resolved = _validated_device_or_422(device)

@@ -13,15 +13,87 @@ MODEL_NAME = "fasterrcnn_mobilenet_v3_large_320_fpn"
 MAX_INTERNAL_DIM = 960
 
 COCO_LABELS = [
-    "__background__", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse",
-    "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie",
-    "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
-    "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
-    "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
-    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-    "teddy bear", "hair drier", "toothbrush",
+    "__background__",
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
 ]
 GENERIC_LABELS = {label for label in COCO_LABELS if label != "__background__"}
 
@@ -128,7 +200,13 @@ def detect_objects(
         if label not in GENERIC_LABELS:
             continue
         coords = box.detach().cpu().tolist() if hasattr(box, "detach") else list(box)
-        detections.append({"label": label, "score": round(score_f, 4), "box": [round(float(v), 2) for v in coords]})
+        detections.append(
+            {
+                "label": label,
+                "score": round(score_f, 4),
+                "box": [round(float(v), 2) for v in coords],
+            }
+        )
         if len(detections) >= max_detections:
             break
 
@@ -140,3 +218,53 @@ def detect_objects(
         "latency_ms": round((time.perf_counter() - started) * 1000, 2),
         "resolution": {"width": width, "height": height},
     }
+
+
+def detector_status(device: str = "auto") -> dict[str, Any]:
+    """Return actionable diagnostics for the local detector without requiring inference."""
+
+    status: dict[str, Any] = {
+        "available": False,
+        "model": MODEL_NAME,
+        "device_requested": device,
+        "device_selected": None,
+        "torch": {"import_ok": False},
+        "torchvision": {"import_ok": False},
+        "weights": {"present": False, "source": "torchvision_default_cache"},
+        "last_error": None,
+    }
+    try:
+        import torch  # type: ignore
+
+        status["torch"] = {"import_ok": True, "version": getattr(torch, "__version__", None)}
+    except Exception as exc:
+        status["last_error"] = f"torch import failed: {type(exc).__name__}: {exc}"
+        return status
+    try:
+        import torchvision  # type: ignore
+        from torchvision.models.detection import FasterRCNN_MobileNet_V3_Large_320_FPN_Weights
+
+        status["torchvision"] = {
+            "import_ok": True,
+            "version": getattr(torchvision, "__version__", None),
+        }
+        weights = FasterRCNN_MobileNet_V3_Large_320_FPN_Weights.DEFAULT
+        status["weights"].update(
+            {"present": True, "name": str(weights), "source": "torchvision_default"}
+        )
+    except Exception as exc:
+        status["last_error"] = f"torchvision/weights unavailable: {type(exc).__name__}: {exc}"
+        return status
+    try:
+        resolved = _resolve_device(device)
+        if resolved.startswith("mps"):
+            status["warning"] = (
+                "TorchVision detection uses CPU on Apple Silicon because MPS detection ops are unreliable."
+            )
+            resolved = "cpu"
+        status["device_selected"] = resolved
+        status["available"] = True
+        return status
+    except Exception as exc:
+        status["last_error"] = f"device unavailable: {type(exc).__name__}: {exc}"
+        return status

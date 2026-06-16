@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-ONNX_VERIFY_MODE="optional"
-ONNX_MODELS="midas_small"
+ONNX_VERIFY_MODE="require-all"
+ONNX_MODELS="all"
 SETUP_ARGS=("$@")
 while (($#)); do
   case "$1" in
