@@ -22,7 +22,7 @@ from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services import observability
-from backend.services.model_assets import ModelAssetsUnavailableError, model_assets_status, model_downloads_disabled, should_treat_hub_error_as_assets_unavailable
+from backend.services.model_assets import ModelAssetsUnavailableError, should_treat_hub_error_as_assets_unavailable
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
@@ -95,10 +95,6 @@ def _load_model(
         # future transform depends on CUDA/MPS/XPU state, change this key to
         # include ``device_str`` alongside the model cache key below.
         try:
-            assets = model_assets_status()
-            model_status = assets.get("pytorch_models", {}).get(spec.pytorch_model_name, {})
-            if model_downloads_disabled() and not model_status.get("ready"):
-                raise ModelAssetsUnavailableError(missing_models=[spec.pytorch_model_name])
             if model_id not in TRANSFORMS:
                 transforms = torch.hub.load(  # type: ignore[no-untyped-call]
                     "intel-isl/MiDaS", "transforms", trust_repo=True
@@ -115,7 +111,7 @@ def _load_model(
         except Exception as exc:
             log.exception("PyTorch MiDaS assets unavailable for %s", model_id)
             if should_treat_hub_error_as_assets_unavailable(exc):
-                raise ModelAssetsUnavailableError(cause=exc, missing_models=[spec.pytorch_model_name]) from exc
+                raise ModelAssetsUnavailableError(cause=exc) from exc
             raise
         model.to(device).eval()
 

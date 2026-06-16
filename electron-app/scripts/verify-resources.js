@@ -7,11 +7,6 @@ const VALID_ROOT_KINDS = new Set(["repo", "packaged"]);
 const VALID_MODES = new Set(["basic", "native"]);
 const VALID_ONNX_MODES = new Set(["off", "optional", "required", "require-all"]);
 const ONNX_MODELS = ["midas_small", "dpt_hybrid", "dpt_large"];
-const PYTORCH_MODELS = [
-  { name: "MiDaS_small", checkpoint: "midas_v21_small_256.pt" },
-  { name: "DPT_Hybrid", checkpoint: "dpt_hybrid_384.pt" },
-  { name: "DPT_Large", checkpoint: "dpt_large_384.pt" },
-];
 
 function parseOnnxModels(value = "midas_small") {
   if (!value) return ["midas_small"];
@@ -115,16 +110,6 @@ function verifyResourceRoot(options = {}) {
   addCheck(path.join("models", "onnx"), requiresModelDirs, isDirectory);
 
   const requiredModels = onnxMode === "off" || onnxMode === "optional" ? [] : (onnxMode === "require-all" ? ONNX_MODELS : onnxModels);
-  if (mode === "native") {
-    const hub = path.join(root, "models", "torch-cache", "hub");
-    const repoOk = ["intel-isl_MiDaS_master", "intel-isl_MiDaS_main"].some((dir) => isFile(path.join(hub, dir, "hubconf.py")) && isDirectory(path.join(hub, dir, "midas")));
-    checks.push({ rel: path.join("models", "torch-cache", "hub", "intel-isl_MiDaS_master"), label: "PyTorch MiDaS Torch Hub repo", full: hub, ok: repoOk, required: true });
-    for (const model of PYTORCH_MODELS) {
-      const rel = path.join("models", "torch-cache", "hub", "checkpoints", model.checkpoint);
-      const full = path.join(root, rel);
-      checks.push({ rel, label: `PyTorch checkpoint ${model.name}`, full, ok: isFile(full) && fs.statSync(full).size > 0, required: true });
-    }
-  }
   const onnxFiles = ONNX_MODELS.map((model) => ({
     rel: path.join("models", "onnx", `${model}.onnx`),
     required: requiredModels.includes(model),
@@ -155,7 +140,7 @@ function remediation(result) {
     "Repo-root resources are incomplete. Run setup before packaging:",
     "  macOS/Linux: npm run setup",
     "  Windows:     npm run setup:win",
-    "Then run: npm run verify:model-assets. Rebuild with the supported native build script. ONNX binaries remain optional; PyTorch MiDaS assets are required for native standard builds.",
+    "Then rebuild with the supported native build script. ONNX binaries remain optional unless --onnx required or --onnx require-all is used.",
   ].join("\n");
 }
 

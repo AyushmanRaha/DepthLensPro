@@ -21,10 +21,7 @@ OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
 def _module_check(name: str, *, required: bool) -> dict[str, Any]:
     started = time.perf_counter()
     result: dict[str, Any] = {"required": required, "available": False}
-    try:
-        spec = importlib.util.find_spec(name)
-    except (ImportError, ValueError):
-        spec = None
+    spec = importlib.util.find_spec(name)
     if spec is None:
         result.update(
             {
