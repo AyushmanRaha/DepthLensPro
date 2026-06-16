@@ -238,9 +238,13 @@ def run_benchmark(
                 )
         elif state in {"missing_weights", "missing_model_file", "missing", "optional_unavailable"}:
             command = onnx_diag.get("recommended_export_command")
+            if os.getenv("DEPTHLENS_PACKAGED_APP") == "1":
+                reason = f"ONNX model assets were not installed correctly. Expected {weights_path}. Reinstall the app or run the documented setup/build flow."
+            else:
+                reason = f"ONNX weights missing. Expected {weights_path}. Run setup to export/download all model assets (dev repair command: {command})."
             onnx_result = _unavailable(
                 "onnxruntime",
-                f"ONNX weights missing. Expected {weights_path}. Run {command}.",
+                reason,
                 "missing_model_file",
                 {"diagnostics": onnx_diag},
             )

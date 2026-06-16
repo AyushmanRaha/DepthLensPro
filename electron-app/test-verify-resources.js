@@ -19,7 +19,7 @@ function mkdir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function makeTree(root, { platform = process.platform, models = true, onnxDir = true, onnxFile = false } = {}) {
+function makeTree(root, { platform = process.platform, models = true, onnxDir = true, onnxFile = false, allOnnx = false } = {}) {
   mkdir(path.join(root, "backend"));
   touch(path.join(root, "backend", "app.py"));
   mkdir(path.join(root, "frontend"));
@@ -28,7 +28,8 @@ function makeTree(root, { platform = process.platform, models = true, onnxDir = 
   else touch(path.join(root, "venv", "bin", "python3"));
   if (models) mkdir(path.join(root, "models"));
   if (models && onnxDir) mkdir(path.join(root, "models", "onnx"));
-  if (models && onnxDir && onnxFile) touch(path.join(root, "models", "onnx", "midas_small.onnx"));
+  if (models && onnxDir && (onnxFile || allOnnx)) touch(path.join(root, "models", "onnx", "midas_small.onnx"));
+  if (models && onnxDir && allOnnx) { touch(path.join(root, "models", "onnx", "dpt_hybrid.onnx")); touch(path.join(root, "models", "onnx", "dpt_large.onnx")); }
 }
 
 function verify(root, options = {}) {
@@ -37,9 +38,9 @@ function verify(root, options = {}) {
 
 {
   const root = tempRoot();
-  makeTree(root);
+  makeTree(root, { allOnnx: true });
   const result = verify(root);
-  assert.strictEqual(result.ok, true, "valid minimal repo root should pass without ONNX binaries");
+  assert.strictEqual(result.ok, true, "valid repo root should pass with all ONNX binaries");
 }
 
 {
@@ -104,21 +105,21 @@ function verify(root, options = {}) {
 {
   const dist = tempRoot();
   const macResources = path.join(dist, "mac-arm64", "DepthLens Pro.app", "Contents", "Resources");
-  makeTree(macResources, { platform: "darwin" });
+  makeTree(macResources, { platform: "darwin", allOnnx: true });
   assert.deepStrictEqual(discoverResourceRoots({ dist, platform: "darwin", arch: "arm64" }), [macResources]);
 }
 
 {
   const dist = tempRoot();
   const winResources = path.join(dist, "win-arm64-unpacked", "resources");
-  makeTree(winResources, { platform: "win32" });
+  makeTree(winResources, { platform: "win32", allOnnx: true });
   assert.deepStrictEqual(discoverResourceRoots({ dist, platform: "win32", arch: "arm64" }), [winResources]);
 }
 
 {
   const dist = tempRoot();
   const linuxResources = path.join(dist, "linux-arm64-unpacked", "resources");
-  makeTree(linuxResources, { platform: "linux" });
+  makeTree(linuxResources, { platform: "linux", allOnnx: true });
   assert.deepStrictEqual(discoverResourceRoots({ dist, platform: "linux", arch: "arm64" }), [linuxResources]);
 }
 
@@ -154,4 +155,17 @@ console.log("Resource verification tests passed.");
   const winScript = fs.readFileSync(path.join(__dirname, "..", "scripts", "build-native-windows.ps1"), "utf8");
   assert(winScript.includes("@SetupArgs"), "Windows build script must pass through all setup arguments");
   assert(winScript.includes("--onnx-models"), "Windows build script must parse --onnx-models examples");
+}
+
+{
+  const dist = tempRoot();
+  const winResources = path.join(dist, "win-x64-unpacked", "resources");
+  makeTree(winResources, { platform: "win32", allOnnx: true });
+  assert.deepStrictEqual(discoverResourceRoots({ dist, platform: "win32", arch: "x64" }), [winResources]);
+}
+{
+  const dist = tempRoot();
+  const linuxResources = path.join(dist, "linux-x64-unpacked", "resources");
+  makeTree(linuxResources, { platform: "linux", allOnnx: true });
+  assert.deepStrictEqual(discoverResourceRoots({ dist, platform: "linux", arch: "x64" }), [linuxResources]);
 }

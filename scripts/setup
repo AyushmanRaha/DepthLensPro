@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+echo "DepthLens Pro setup — this installs dependencies and required model assets."
+python3 scripts/doctor.py --enforce-arch "$@"

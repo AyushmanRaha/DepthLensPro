@@ -191,6 +191,97 @@ def _align_gt_to_prediction(
     return resized.astype(np.float32, copy=False), "gt_resize_to_prediction:nearest", "nearest"
 
 
+def _masked_normalized(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    out = np.zeros(values.shape, dtype=np.float32)
+    data = values[valid].astype(np.float32, copy=False)
+    if data.size == 0:
+        return out
+    lo, hi = float(np.nanmin(data)), float(np.nanmax(data))
+    if hi - lo <= GT_EPS:
+        return out
+    out[valid] = np.clip((values[valid].astype(np.float32) - lo) / (hi - lo), 0.0, 1.0)
+    return out
+
+
+def _masked_psnr(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray) -> float:
+    pn = _masked_normalized(pred, valid)
+    gn = _masked_normalized(gt, valid)
+    mse = float(np.mean((pn[valid].astype(np.float64) - gn[valid].astype(np.float64)) ** 2))
+    if mse <= 1e-12:
+        return 99.0
+    return float(20.0 * np.log10(1.0 / np.sqrt(mse)))
+
+
+def _masked_ssim(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray) -> float:
+    pn = _masked_normalized(pred, valid)
+    gn = _masked_normalized(gt, valid)
+    # Fill invalid pixels with valid means to keep Gaussian windows stable at mask boundaries.
+    if valid.any():
+        pn = pn.copy()
+        gn = gn.copy()
+        pn[~valid] = float(np.mean(pn[valid]))
+        gn[~valid] = float(np.mean(gn[valid]))
+    c1, c2 = 0.01**2, 0.03**2
+    mu_p = cv2.GaussianBlur(pn, (11, 11), 1.5)
+    mu_g = cv2.GaussianBlur(gn, (11, 11), 1.5)
+    sig_p = cv2.GaussianBlur(pn * pn, (11, 11), 1.5) - mu_p * mu_p
+    sig_g = cv2.GaussianBlur(gn * gn, (11, 11), 1.5) - mu_g * mu_g
+    sig_pg = cv2.GaussianBlur(pn * gn, (11, 11), 1.5) - mu_p * mu_g
+    ssim = ((2 * mu_p * mu_g + c1) * (2 * sig_pg + c2)) / (
+        (mu_p * mu_p + mu_g * mu_g + c1) * (sig_p + sig_g + c2) + 1e-12
+    )
+    return float(np.mean(ssim[valid]))
+
+
+def _surface_normals(depth: np.ndarray) -> np.ndarray:
+    dzdx = cv2.Sobel(depth.astype(np.float32, copy=False), cv2.CV_32F, 1, 0, ksize=3)
+    dzdy = cv2.Sobel(depth.astype(np.float32, copy=False), cv2.CV_32F, 0, 1, ksize=3)
+    normals = np.dstack((-dzdx, -dzdy, np.ones_like(depth, dtype=np.float32)))
+    denom = np.linalg.norm(normals, axis=2, keepdims=True) + 1e-8
+    return normals / denom
+
+
+def _surface_normal_error(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray) -> float | None:
+    if int(valid.sum()) < 9:
+        return None
+    pn = _surface_normals(_masked_normalized(pred, valid))
+    gn = _surface_normals(_masked_normalized(gt, valid))
+    dots = np.clip(np.sum(pn * gn, axis=2), -1.0, 1.0)
+    angles = np.degrees(np.arccos(dots))
+    return float(np.mean(angles[valid]))
+
+
+def _ordinal_error(
+    pred: np.ndarray, gt: np.ndarray, valid: np.ndarray, *, max_pairs: int = 4096
+) -> float | None:
+    coords = np.flatnonzero(valid.ravel())
+    if coords.size < 2:
+        return None
+    count = min(max_pairs, coords.size // 2)
+    if count <= 0:
+        return None
+    # Deterministic spread across valid pixels; pair low/high index samples.
+    left_idx = np.linspace(0, coords.size - 1, count, dtype=np.int64)
+    right_idx = (left_idx * 1103515245 + 12345) % coords.size
+    a = coords[left_idx]
+    b = coords[right_idx]
+    keep = a != b
+    a = a[keep]
+    b = b[keep]
+    if a.size == 0:
+        return None
+    pred_f = pred.ravel()
+    gt_f = gt.ravel()
+    gt_diff = gt_f[a] - gt_f[b]
+    pred_diff = pred_f[a] - pred_f[b]
+    threshold = max(float(np.nanstd(gt_f[coords])) * 0.01, GT_EPS)
+    informative = np.abs(gt_diff) > threshold
+    if not bool(informative.any()):
+        return None
+    disagree = np.sign(gt_diff[informative]) != np.sign(pred_diff[informative])
+    return float(np.mean(disagree))
+
+
 def compute_ground_truth_metrics(
     pred: np.ndarray,
     gt: np.ndarray,
@@ -248,6 +339,26 @@ def compute_ground_truth_metrics(
         "delta_2": round(float(np.mean(ratio < 1.25**2)), 4),
         "delta_3": round(float(np.mean(ratio < 1.25**3)), 4),
     }
+    unavailable: dict[str, str] = {}
+    try:
+        metrics["gt_psnr"] = round(_masked_psnr(pred_scaled, gt_aligned, valid), 4)
+    except Exception:
+        unavailable["gt_psnr"] = "insufficient_valid_pixels"
+    try:
+        metrics["gt_ssim"] = round(_masked_ssim(pred_scaled, gt_aligned, valid), 4)
+    except Exception:
+        unavailable["gt_ssim"] = "insufficient_valid_pixels"
+    normal_error = _surface_normal_error(pred_scaled, gt_aligned.astype(np.float64), valid)
+    if normal_error is None:
+        unavailable["surface_normal_error"] = "insufficient_valid_pixels"
+    else:
+        metrics["surface_normal_error"] = round(normal_error, 4)
+    ordinal = _ordinal_error(pred_scaled, gt_aligned.astype(np.float64), valid)
+    if ordinal is None:
+        unavailable["ordinal_error"] = "insufficient_valid_pixels"
+    else:
+        metrics["ordinal_error"] = round(ordinal, 4)
+    unavailable["lpips"] = "optional_dependency_missing"
 
     err = np.zeros_like(pred32, dtype=np.float32)
     err[valid] = np.abs(pred_scaled.astype(np.float32)[valid] - gt_aligned[valid])
@@ -266,13 +377,6 @@ def compute_ground_truth_metrics(
         "scale_alignment": "median_scale",
         "scale_factor": round(float(scale), 6),
         "warnings": warnings,
-    }
-    unavailable = {
-        "gt_ssim": "not_implemented",
-        "gt_psnr": "not_implemented",
-        "ordinal_error": "not_implemented",
-        "surface_normal_error": "not_implemented",
-        "lpips": "not_implemented",
     }
     return {
         "metrics": metrics,

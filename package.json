@@ -14,6 +14,11 @@
     "verify:onnx": "venv/bin/python backend/scripts/export_onnx.py --validate-only --all",
     "backend:dev": "venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8765",
     "frontend:dev": "cd electron-app && npm run start:dev",
-    "stop:backend": "cd electron-app && npm run kill:backend"
+    "stop:backend": "cd electron-app && npm run kill:backend",
+    "setup:native": "./scripts/setup",
+    "build:native": "./scripts/build",
+    "launch:native": "./scripts/launch",
+    "build:linux:x64": "scripts/build-native-linux.sh --arch x64",
+    "build:win:x64": "powershell -ExecutionPolicy Bypass -File scripts/build-native-windows.ps1 -Arch x64"
   }
 }
