@@ -30,7 +30,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    "Usage: node scripts/verify-packaged-resources.js [--platform darwin|win32|linux] [--arch arm64|x64] [--mode native] [--onnx optional|required|require-all|off] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list]",
+    "Usage: node scripts/verify-packaged-resources.js [--platform darwin|win32|linux] [--arch arm64] [--mode native] [--onnx optional|required|require-all|off] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list]",
     "",
     "Discovers electron-builder packaged resource roots under electron-app/dist and verifies backend, frontend, venv, models, and models/onnx.",
   ].join("\n");
@@ -93,10 +93,10 @@ function discoveryFailureMessage(options) {
     return `No macOS packaged resource root found. Expected: ${path.join(options.dist, `mac-${options.arch}`, "DepthLens Pro.app", "Contents", "Resources")}`;
   }
   if (options.platform === "win32") {
-    return `No Windows packaged resources directory found under ${options.dist}. Expected an electron-builder *win*${options.arch}*unpacked*/resources-style output. Re-run the matching Windows native build and inspect electron-app/dist.`;
+    return `No Windows ARM unpacked resources directory found under ${options.dist}. Expected an electron-builder *win*${options.arch}*unpacked*/resources-style output. Re-run the Windows ARM native build and inspect electron-app/dist.`;
   }
   if (options.platform === "linux") {
-    return `No Linux packaged resources directory found under ${options.dist}. Expected an electron-builder *linux*${options.arch}*unpacked*/resources-style output. If only an AppImage remains, extract it with --appimage-extract on Linux and verify the extracted resources, or adjust the build to retain linux-${options.arch}-unpacked.`;
+    return `No Linux ARM unpacked resources directory found under ${options.dist}. Expected an electron-builder *linux*${options.arch}*unpacked*/resources-style output. If only an AppImage remains, extract it with --appimage-extract on Linux and verify the extracted resources, or adjust the build to retain linux-${options.arch}-unpacked.`;
   }
   return `Unsupported platform for packaged resource discovery: ${options.platform}`;
 }

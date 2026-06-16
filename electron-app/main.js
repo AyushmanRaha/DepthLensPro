@@ -205,20 +205,17 @@ function writeBackendPidFiles(metadata) {
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-const { evaluateTarget, isSupportedTarget } = require("./src/platform-support");
-
 function isSupportedArchitecture() {
-  return isSupportedTarget(process.platform, process.arch);
+  return ["darwin:arm64", "win32:arm64", "linux:arm64"].includes(`${process.platform}:${process.arch}`);
 }
 
 function showUnsupportedArchitectureDialog() {
   const { dialog } = require("electron");
-  const target = evaluateTarget(process.platform, process.arch);
-  const message = target.reason || "Unsupported DepthLens Pro native target.";
-  log.error("UNSUPPORTED_ARCH_BLOCKED", { platform: process.platform, arch: process.arch, reason: message });
+  const message = "DepthLens Pro currently supports Apple Silicon macOS, Windows ARM, and Linux ARM only.";
+  log.error("UNSUPPORTED_ARCH_BLOCKED", { platform: process.platform, arch: process.arch });
   dialog.showMessageBoxSync({
     type: "error",
-    title: "DepthLens Pro — Unsupported Platform",
+    title: "DepthLens Pro — Unsupported Architecture",
     message,
     detail: `${message}\n\nDetected platform: ${process.platform}\nDetected architecture: ${process.arch}`,
     buttons: ["Quit"],
@@ -647,8 +644,6 @@ async function startBackend() {
       PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
       DEPTHLENSPRO_MODEL_DIR: path.join(cwd, "models"),
       DEPTHLENS_ONNX_DIR: path.join(cwd, "models", "onnx"),
-      DEPTHLENS_PACKAGED_APP: app.isPackaged ? "1" : "0",
-      DEPTHLENS_USER_DATA_DIR: app.getPath("userData"),
       SSL_CERT_FILE: process.env.SSL_CERT_FILE || "",
       REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE || process.env.SSL_CERT_FILE || "",
     },
@@ -783,27 +778,10 @@ function createMainWindow() {
 }
 
 // ── IPC Handlers ──────────────────────────────────────────
-
-function storageFilePath() { return path.join(app.getPath("userData"), "renderer-state.json"); }
-function readRendererStore() {
-  try { return JSON.parse(fs.readFileSync(storageFilePath(), "utf8")); }
-  catch (_) { return {}; }
-}
-function writeRendererStore(data) {
-  fs.mkdirSync(app.getPath("userData"), { recursive: true });
-  atomicWriteFile(storageFilePath(), JSON.stringify(data, null, 2) + "\n");
-}
-
 ipcMain.handle("get-backend-url", () => backendUrl);
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("get-platform", () => process.platform);
 ipcMain.handle("get-backend-live-path", () => "/live");
-ipcMain.handle("storage-path", () => app.getPath("userData"));
-ipcMain.handle("settings-get", (_event, key) => { const store = readRendererStore(); return key ? store.settings?.[key] : (store.settings || {}); });
-ipcMain.handle("settings-set", (_event, key, value) => { const store = readRendererStore(); store.settings = store.settings || {}; store.settings[key] = value; writeRendererStore(store); return true; });
-ipcMain.handle("benchmarks-history", () => readRendererStore().benchmarkRuns || []);
-ipcMain.handle("models-status", async () => ({ backendUrl, endpoint: `${backendUrl}/api/models/status` }));
-ipcMain.handle("cache-clear", () => { const store = readRendererStore(); store.cacheClearedAt = new Date().toISOString(); writeRendererStore(store); return true; });
 
 ipcMain.handle("show-save-dialog", async (event, options) => {
   const { dialog } = require("electron");

@@ -50,7 +50,7 @@ const DEFAULT_SETTINGS = {
   motion: "full", panelPhysics: true, animatedBorders: true, reduceMotionOverride: false,
   backendUrl: "", autoCheckEngine: true, diagnosticsRefresh: "normal", refreshDiagnosticsOnOpen: true, showAdvancedDiagnostics: false, warnOnDegradedEngine: true, allowFallbackEngine: true, autoRetryEngineChecks: true,
   useInferenceCache: true, showCacheBadges: true, maxInteractiveDim: "default",
-  warnLargeFiles: true, autoClearQueueAfterBatch: false, autoClearResultsOnClose: false, stripFilenamesFromExports: false, pauseWebcamWhenHidden: true, stopCameraOnTabSwitch: false, lowLatencyMode: true,
+  warnLargeFiles: true, autoClearQueueAfterBatch: false, autoClearResultsOnClose: false, stripFilenamesFromExports: false, pauseWebcamWhenHidden: true, stopCameraOnTabSwitch: false,
   toastLevel: "all", toastDuration: "normal", dedupeWarnings: true, endpointTimingLogs: false, verboseConsoleLogs: false,
   rememberLastTab: true, skipWelcome: false, closePanelsOnOutsideClick: true, navDragSensitivity: "normal"
 };
@@ -175,23 +175,6 @@ function requestSignal(signal, timeoutMs) {
   return signal ? anySignal([signal, timeout]) : timeout;
 }
 
-
-function apiErrorRemediation(code) {
-  return ({
-    MODEL_FILE_MISSING: "run setup/build again so required model assets are installed",
-    MODEL_CHECKSUM_FAILED: "model asset validation failed; re-run setup",
-    ONNX_PROVIDER_UNAVAILABLE: "choose Auto/CPU or reinstall ONNX Runtime dependencies",
-    DETECTOR_MODEL_MISSING: "open detector diagnostics and re-run setup",
-    GT_REQUIRED: "upload a matching ground-truth depth file",
-    REALTIME_BACKPRESSURE: "frame was dropped because realtime inference is busy",
-    UNSUPPORTED_ARCH: "use macOS arm64, Windows x64/arm64, or Linux x64/arm64",
-    SETUP_INCOMPLETE: "run the documented setup command before launching the app",
-    INVALID_METRICS_MODE: "choose none, fast, or full metrics",
-    INVALID_OUTPUTS: "choose supported output types",
-    INFERENCE_DEPENDENCY_UNAVAILABLE: "run setup and check /api/capabilities",
-  })[code] || "";
-}
-
 async function apiFetch(path, options = {}) {
   const base = await resolveApiBaseUrl();
   const url = buildApiUrl(base, path);
@@ -202,13 +185,9 @@ async function apiFetch(path, options = {}) {
       try {
         const err = await res.clone().json();
         const rawDetail = err.detail || err.error || detail;
-        if (typeof rawDetail === "object") {
-          const code = rawDetail.error_code || rawDetail.code;
-          const remediation = apiErrorRemediation(code);
-          detail = `${rawDetail.message || code || JSON.stringify(rawDetail)}${remediation ? ` — ${remediation}` : ""}`;
-        } else {
-          detail = rawDetail;
-        }
+        detail = typeof rawDetail === "object"
+          ? (rawDetail.message || rawDetail.error_code || JSON.stringify(rawDetail))
+          : rawDetail;
       } catch {}
       throw new Error(`${detail} (${url})`);
     }
@@ -293,7 +272,7 @@ const state = {
     lastResult: null,
     lastCacheMetricsAt: 0,
     smoothingAlpha: 0.25,
-    previousDepthImageData: null, latestFrame: null, droppedFrames: 0, adaptiveEvents: 0,
+    previousDepthImageData: null,
   },
   reconstruct: {
     file: null,
@@ -2068,16 +2047,16 @@ async function runCaptureDetectionOnce() {
     const payload = await response.json();
     renderCaptureDetections(payload.detections || []);
   } catch (err) {
-    if (err?.name !== "AbortError") renderCaptureDetections(null, err.message);
+    if (err?.name !== "AbortError") renderCaptureDetections(null);
   } finally {
     cap.detecting = false;
     if (withCaptureModalOpen()) scheduleCaptureDetection(900);
   }
 }
 
-function renderCaptureDetections(detections, reason = "") {
+function renderCaptureDetections(detections) {
   if (!el.captureDetections) return;
-  if (detections === null) { el.captureDetections.textContent = reason ? `Detector unavailable · ${reason}` : "Detector unavailable · open diagnostics or run setup"; return; }
+  if (detections === null) { el.captureDetections.textContent = "Detector unavailable"; return; }
   const visible = (detections || []).filter(d => Number(d.score) >= 0.35).slice(0, 3);
   state.reconstruct.capture.lastDetections = visible;
   if (!visible.length) { el.captureDetections.textContent = withCaptureModalOpen() ? "No object detected" : "Detecting…"; return; }
@@ -3095,15 +3074,15 @@ function webcamSupported() {
   return Boolean(navigator.mediaDevices?.getUserMedia && window.HTMLCanvasElement && window.File);
 }
 function getWebcamTargetFps() {
-  const fps = Number(el.webcamTargetFps?.value || (settings.lowLatencyMode ? 3 : 2));
+  const fps = Number(el.webcamTargetFps?.value || 2);
   return [1,2,3,5].includes(fps) ? fps : 2;
 }
 function getWebcamMaxDim() {
-  const maxDim = Number(el.webcamMaxDim?.value || (settings.lowLatencyMode ? 256 : 384));
+  const maxDim = Number(el.webcamMaxDim?.value || 384);
   return [256,384,512].includes(maxDim) ? maxDim : 384;
 }
 function getWebcamSmoothingAlpha() {
-  const alpha = Number(el.webcamSmoothing?.value || (settings.lowLatencyMode ? 0 : 0.25));
+  const alpha = Number(el.webcamSmoothing?.value || 0.25);
   return Number.isFinite(alpha) ? Math.max(0, Math.min(0.95, alpha)) : 0.25;
 }
 function fmtMs(value) {
@@ -3192,7 +3171,7 @@ async function startWebcam() {
       running: true, paused: false, hiddenPaused: false, inFlight: false,
       processed: 0, skipped: 0, errors: 0, consecutiveErrors: 0,
       latencies: [], e2eLatencies: [], startedAt: performance.now(),
-      previousDepthImageData: null, latestFrame: null, droppedFrames: 0, adaptiveEvents: 0,
+      previousDepthImageData: null,
     });
     state.webcam.smoothingAlpha = getWebcamSmoothingAlpha();
     setWebcamStatus("Running", "Scheduled");
@@ -3256,14 +3235,7 @@ function scheduleNextWebcamFrame(delayMs = null) {
   clearTimeout(state.webcam.loopTimer);
   if (!state.webcam.running) return;
   const interval = 1000 / getWebcamTargetFps();
-  const delay = delayMs ?? interval;
-  state.webcam.loopTimer = setTimeout(() => {
-    if (el.webcamVideo?.requestVideoFrameCallback) {
-      el.webcamVideo.requestVideoFrameCallback(() => processWebcamFrame());
-    } else {
-      processWebcamFrame();
-    }
-  }, delay);
+  state.webcam.loopTimer = setTimeout(processWebcamFrame, delayMs ?? interval);
 }
 async function processWebcamFrame() {
   const wc = state.webcam;
@@ -3287,20 +3259,17 @@ async function processWebcamFrame() {
   setWebcamStatus("Running", "Processing");
   try {
     const maxDim = getWebcamMaxDim();
-    const captureStarted = performance.now();
-    const blob = await captureVideoFrameBlob(maxDim);
-    wc.captureLatencyMs = performance.now() - captureStarted;
-    const rt = await inferRealtimeDepth(blob, selModel(), selCmap(), selDevice(), wc.abort.signal, maxDim);
+    const file = await captureVideoFrameFile(maxDim);
+    const result = await inferOne(file, selModel(), selCmap(), selDevice(), wc.abort.signal, "fast", "color", null, false, maxDim);
     const e2e = performance.now() - wc.lastLoopStartedAt;
-    wc.lastResult = rt;
+    wc.lastResult = result;
     wc.processed++;
     wc.consecutiveErrors = 0;
-    if (Number.isFinite(Number(rt.latency_ms))) wc.latencies.push(Number(rt.latency_ms));
+    if (Number.isFinite(Number(result.latency_ms))) wc.latencies.push(Number(result.latency_ms));
     wc.e2eLatencies.push(e2e);
     wc.latencies = wc.latencies.slice(-60);
     wc.e2eLatencies = wc.e2eLatencies.slice(-60);
-    if (e2e > (1000 / Math.max(1, getWebcamTargetFps())) * 1.5) wc.adaptiveEvents = (wc.adaptiveEvents || 0) + 1;
-    await setWebcamDepthPreview(rt);
+    await setWebcamDepthPreview(result);
     setWebcamStatus("Running", "Scheduled");
     if (wc.processed % 10 === 0 || performance.now() - wc.lastCacheMetricsAt > 30_000) {
       wc.lastCacheMetricsAt = performance.now();
@@ -3324,39 +3293,9 @@ async function processWebcamFrame() {
     wc.inFlight = false;
     wc.abort = null;
     updateWebcamTelemetry();
-    const targetInterval = 1000 / Math.max(1, getWebcamTargetFps());
-    const elapsed = performance.now() - (wc.lastLoopStartedAt || performance.now());
-    scheduleNextWebcamFrame(Math.max(0, targetInterval - elapsed));
+    scheduleNextWebcamFrame();
   }
 }
-
-async function inferRealtimeDepth(blob, model, colormap, device, signal, maxDim) {
-  if (!engineReady()) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
-  const started = performance.now();
-  const url = `/api/realtime/depth?model=${encodeURIComponent(model || "midas_small")}&device=${encodeURIComponent(device || "auto")}&colormap=${encodeURIComponent(colormap || "inferno")}&max_dim=${encodeURIComponent(maxDim || 256)}`;
-  const res = await apiFetch(url, { method: "POST", body: blob, headers: { "Content-Type": blob.type || "image/jpeg" }, signal: requestSignal(signal, 30_000) });
-  const out = await res.blob();
-  const objectUrl = URL.createObjectURL(out);
-  return { depth_blob: out, depth_url: objectUrl, depth_map: null, latency_ms: Number(res.headers.get("X-DepthLens-Latency-Ms")) || Math.round(performance.now() - started), engine_used: res.headers.get("X-DepthLens-Engine") || "realtime", transport_latency_ms: Math.round(performance.now() - started) };
-}
-
-function captureVideoFrameBlob(maxDim) {
-  return new Promise((resolve, reject) => {
-    const video = el.webcamVideo;
-    const canvas = el.webcamCaptureCanvas;
-    if (!video || !canvas) { reject(new Error("Webcam capture elements are missing")); return; }
-    const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
-    if (!vw || !vh) { reject(new Error("Webcam metadata is unavailable")); return; }
-    const scale = Math.min(1, maxDim / Math.max(vw, vh));
-    canvas.width = Math.max(1, Math.round(vw * scale));
-    canvas.height = Math.max(1, Math.round(vh * scale));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) { reject(new Error("Canvas 2D context is unavailable")); return; }
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Unable to encode webcam frame")), "image/jpeg", 0.7);
-  });
-}
-
 function captureVideoFrameFile(maxDim) {
   return new Promise((resolve, reject) => {
     const video = el.webcamVideo;
@@ -3421,15 +3360,6 @@ async function imageDataFromUrl(src) {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 async function setWebcamDepthPreview(result) {
-  if (result?.depth_url) {
-    if (state.webcam.lastDepthDataUrl && state.webcam.lastDepthDataUrl.startsWith("blob:")) URL.revokeObjectURL(state.webcam.lastDepthDataUrl);
-    state.webcam.lastDepthBase64 = null;
-    state.webcam.lastDepthDataUrl = result.depth_url;
-    if (el.webcamDepthImg) el.webcamDepthImg.src = result.depth_url;
-    if (el.webcamDepthPlaceholder) el.webcamDepthPlaceholder.hidden = true;
-    syncWebcamControls();
-    return;
-  }
   const rawDataUrl = safeDataImagePng(result?.depth_map);
   if (!rawDataUrl) throw new Error("Backend response did not include a depth map");
   state.webcam.lastDepthBase64 = result.depth_map;
@@ -3604,11 +3534,8 @@ function valColor(key,val) {
 function metricUnavailableReason(metrics, key, mode, needsGT) {
   const unavailable = metrics?.unavailable || {};
   if (unavailable[key] === "not_requested_fast_mode") return "Not requested in fast mode";
+  if (unavailable[key] === "needs_gt_depth_upload" || needsGT) return "Needs GT depth upload";
   if (unavailable[key] === "not_implemented") return "Not implemented yet";
-  if (unavailable[key] === "optional_dependency_missing") return "Optional dependency missing";
-  if (unavailable[key] === "insufficient_valid_pixels") return "Insufficient valid GT pixels";
-  if (unavailable[key] === "needs_gt_depth_upload" || unavailable[key] === "gt_not_uploaded") return "Needs GT depth upload";
-  if (needsGT) return "Needs GT depth upload";
   if (unavailable[key]) return String(unavailable[key]).replace(/_/g," ");
   if (mode === "fast") return "Not requested in fast mode";
   return "—";
@@ -3642,7 +3569,7 @@ function renderMetricsAccordion(resultOrMetrics) {
       const raw=metrics?.[m.key];
       const isNull=raw===null||raw===undefined;
       let valText,cls;
-      if (m.needsGT && isNull) { valText=hasGt ? metricUnavailableReason(metrics,m.key,mode,false) : "Needs GT depth upload"; cls="na"; }
+      if (m.needsGT && isNull) { valText=hasGt ? metricUnavailableReason(metrics,m.key,mode,true) : "Needs GT depth upload"; cls="na"; }
       else if (isNull)         { valText=metricUnavailableReason(metrics,m.key,mode,false); cls="na"; }
       else if (m.pct)          { valText=`${(raw*100).toFixed(1)}%`; cls=valColor(m.key,raw); }
       else                     { valText=`${raw}${m.unit||""}`; cls=valColor(m.key,raw); }

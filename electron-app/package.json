@@ -6,22 +6,22 @@
   "scripts": {
     "start": "electron .",
     "build:mac": "npm run clean:dist && npm run build:mac:arm64 && npm run scan:apps",
-    "build:win": "npm run build:win:arm64 && npm run build:win:x64",
-    "build:all": "npm run build:all:supported",
+    "build:win": "npm run build:win:arm64",
+    "build:all": "npm run build:mac:arm64 && npm run build:win:arm64 && npm run build:linux:arm64",
     "start:dev": "electron .",
     "backend:smoke": "npm run smoke:backend",
     "verify:resources": "node scripts/verify-resources.js",
     "backend:live": "node -e \"fetch('http://127.0.0.1:8765/live').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
     "backend:health": "node -e \"fetch('http://127.0.0.1:8765/health').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
     "backend:devices": "node -e \"fetch('http://127.0.0.1:8765/devices').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
-    "build:linux": "npm run build:linux:arm64 && npm run build:linux:x64",
+    "build:linux": "npm run build:linux:arm64",
     "build:mac:arm64": "npm run verify:resources:native && npm run build:mac:arm64:raw && npm run verify:packaged:mac",
-    "build:win:arm64": "npm run verify:resources:native && npm run build:win:arm64:raw && npm run verify:packaged:win:arm64",
-    "build:linux:arm64": "npm run verify:resources:native && npm run build:linux:arm64:raw && npm run verify:packaged:linux:arm64",
-    "build:mac:x64": "node scripts/unsupported-arch.js x64 darwin",
-    "build:mac:universal": "node scripts/unsupported-arch.js universal darwin",
-    "build:win:x64": "npm run verify:resources:native && npm run build:win:x64:raw && npm run verify:packaged:win:x64",
-    "build:linux:x64": "npm run verify:resources:native && npm run build:linux:x64:raw && npm run verify:packaged:linux:x64",
+    "build:win:arm64": "npm run verify:resources:native && npm run build:win:arm64:raw && npm run verify:packaged:win",
+    "build:linux:arm64": "npm run verify:resources:native && npm run build:linux:arm64:raw && npm run verify:packaged:linux",
+    "build:mac:x64": "node scripts/unsupported-arch.js",
+    "build:mac:universal": "node scripts/unsupported-arch.js",
+    "build:win:x64": "node scripts/unsupported-arch.js",
+    "build:linux:x64": "node scripts/unsupported-arch.js",
     "kill:backend": "node scripts/backend-lifecycle.js kill",
     "smoke:backend": "node scripts/backend-lifecycle.js smoke",
     "clean:dist": "node scripts/clean-dist.js",
@@ -37,24 +37,14 @@
     "setup:linux": "cd .. && scripts/setup-linux.sh",
     "setup:win": "powershell -ExecutionPolicy Bypass -File ../scripts/setup-windows.ps1",
     "verify:onnx": "../venv/bin/python ../backend/scripts/export_onnx.py --validate-only --all",
-    "verify:resources:native": "node scripts/verify-resources.js --root-kind repo --mode native --onnx require-all --models all ..",
-    "verify:packaged": "node scripts/verify-packaged-resources.js --mode native --onnx require-all --models all",
-    "verify:packaged:mac": "node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --onnx require-all --models all",
-    "verify:packaged:win": "npm run verify:packaged:win:arm64 && npm run verify:packaged:win:x64",
-    "verify:packaged:linux": "npm run verify:packaged:linux:arm64 && npm run verify:packaged:linux:x64",
+    "verify:resources:native": "node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
+    "verify:packaged": "node scripts/verify-packaged-resources.js --mode native --onnx optional",
+    "verify:packaged:mac": "node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --onnx optional",
+    "verify:packaged:win": "node scripts/verify-packaged-resources.js --platform win32 --arch arm64 --mode native --onnx optional",
+    "verify:packaged:linux": "node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx optional",
     "build:mac:arm64:raw": "electron-builder --mac dmg --arm64",
     "build:win:arm64:raw": "electron-builder --win nsis --arm64",
-    "build:linux:arm64:raw": "electron-builder --linux AppImage --arm64",
-    "build:all:supported": "npm run build:mac:arm64 && npm run build:win:arm64 && npm run build:win:x64 && npm run build:linux:arm64 && npm run build:linux:x64",
-    "verify:packaged:win:arm64": "node scripts/verify-packaged-resources.js --platform win32 --arch arm64 --mode native --onnx require-all --models all",
-    "verify:packaged:win:x64": "node scripts/verify-packaged-resources.js --platform win32 --arch x64 --mode native --onnx require-all --models all",
-    "verify:packaged:linux:arm64": "node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx require-all --models all",
-    "verify:packaged:linux:x64": "node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --onnx require-all --models all",
-    "build:win:x64:raw": "electron-builder --win nsis --x64",
-    "build:linux:x64:raw": "electron-builder --linux AppImage --x64",
-    "setup:native": "cd .. && ./scripts/setup",
-    "build:native": "cd .. && ./scripts/build",
-    "launch:native": "cd .. && ./scripts/launch"
+    "build:linux:arm64:raw": "electron-builder --linux AppImage --arm64"
   },
   "build": {
     "forceCodeSigning": false,
@@ -83,8 +73,7 @@
         {
           "target": "nsis",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],
@@ -136,8 +125,7 @@
         {
           "target": "AppImage",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],
