@@ -13,6 +13,9 @@ ruff check .
 mypy backend/
 pytest backend/tests -q
 
+python -m venv venv
+mkdir -p models/onnx
+
 (
   cd electron-app
   npm test

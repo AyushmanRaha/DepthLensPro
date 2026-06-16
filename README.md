@@ -1025,49 +1025,56 @@ These are standard monocular depth estimation benchmark metrics used in papers l
 
 ## Testing & CI
 
-### Run Local Checks
+### Local Developer Validation
+
+Run the same lightweight validation used by this branch before pushing:
 
 ```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
-
-cd electron-app
-npm test
-cd ..
+bash scripts/ci-local.sh
 ```
 
-Or as a single pipeline:
+The local CI script sets test-safe environment flags, then runs:
 
-```bash
-black --check . && ruff check . && mypy backend/ && pytest && cd electron-app && npm test && cd ..
-```
+1. `black --check .`
+2. `ruff check .`
+3. `mypy backend/`
+4. `pytest backend/tests -q`
+5. `cd electron-app && npm test`
+6. `cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --onnx off ..`
+7. `docker compose config` only when Docker is installed
+
+If Docker is unavailable, `scripts/ci-local.sh` prints a skip message for the Docker Compose config check and continues. It also creates the lightweight repo placeholders required by Electron resource verification (`venv`, `models`, and `models/onnx`) without downloading model weights.
 
 ### Useful Test Commands
 
 ```bash
-# Backend tests only
-pytest backend/tests/
-
-# One test file with verbose output
-pytest backend/tests/test_routes.py -v
+# Backend quality gates
+black --check .
+ruff check .
+mypy backend/
+pytest backend/tests -q
 
 # Electron lightweight security and resource tests
-cd electron-app && npm test
+cd electron-app && npm ci && npm test
+
+# Repo-root resource verification with ONNX intentionally disabled
+cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --onnx off ..
 ```
 
-### CI Pipeline
+### GitHub CI
 
-GitHub Actions runs on pushes and pull requests to `main` or `master`:
+The `CI` workflow (`.github/workflows/ci.yml`) runs on pushes to `main`, `master`, `chore/**`, `feature/**`, and `fix/**`; pull requests targeting `main` or `master`; and manual `workflow_dispatch` runs.
 
-```
-Checkout → Python 3.12 setup → Install backend deps
-  → Black check → Ruff check → mypy backend/
-    → pytest → Electron lightweight tests
-```
+Jobs:
 
-The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, or real model weights.
+| Job | What it validates |
+|---|---|
+| `backend-quality` | Checks out the repo, sets up Python 3.12, installs `backend/requirements.txt`, then runs `black --check .`, `ruff check .`, `mypy backend/`, and `pytest backend/tests -q`. |
+| `electron-smoke` | Checks out the repo, sets up Node.js 24, runs `npm ci`, creates CI-only resource placeholders (`venv`, `models`, `models/onnx`), runs `npm test`, and verifies repo resources with ONNX disabled. |
+
+The Electron smoke job keeps ONNX model files optional: CI verifies the directory structure needed for packaging, but does not require or download `.onnx` binaries unless a workflow explicitly opts into required ONNX checks.
+
+The test suite covers API behaviour, cache serialisation safety, ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies without requiring a GPU, Redis instance, Docker daemon, Playwright browsers, external services, or real model weights.
 
 #### What the Tests Stub
 
@@ -1077,32 +1084,21 @@ The test suite covers API behaviour, cache serialisation safety (no pickle deser
 - **Model downloads** — prevented via `DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1`
 - **Warmup** — skipped via `TESTING=1`
 
----
-
 ## Production & Packaging
 
-### Native ARM64 Builds
+### Supported Native Packages
 
-```bash
-# macOS Apple Silicon
-scripts/build-native-macos.sh --without-onnx
+Native packaged builds are intentionally ARM-only in `electron-app/package.json`:
 
-# Windows ARM64
-.\scripts\build-native-windows.ps1 --without-onnx
+| Platform | Supported target | Build command | Expected artifact |
+|---|---|---|---|
+| macOS | Apple Silicon / ARM64 only | `scripts/build-native-macos.sh --without-onnx` | `electron-app/dist/*.dmg` |
+| Windows | Windows ARM64 only | `.\scripts\build-native-windows.ps1 --without-onnx` | `electron-app/dist/*.exe` |
+| Linux | Linux ARM64 only | `scripts/build-native-linux.sh --without-onnx` | `electron-app/dist/*.AppImage` |
 
-# Linux ARM64
-scripts/build-native-linux.sh --without-onnx
-```
+Intel/x64 and universal desktop builds are unsupported and intentionally fail through the `unsupported-arch.js` package scripts.
 
-Each native build script:
-
-1. Runs `setup-{platform}.sh` / `setup-windows.ps1` (creates venv, installs deps, checks Node)
-2. Cleans previous `dist/` output
-3. Runs `verify-resources.js` to confirm all required files are present before packaging
-4. Invokes `electron-builder` for the target platform and architecture
-5. Runs `verify-packaged-resources.js` to confirm the packaged app contains backend, frontend, venv, and models directories
-
-Pass `--with-onnx` and `--onnx-models midas_small` to export and bundle ONNX weights in the package.
+Each native build script creates or refreshes the local Python environment, installs Electron dependencies, verifies repo resources, runs the supported Electron Builder target, and verifies packaged resources. Pass `--with-onnx` and `--onnx-models midas_small` only when you explicitly want to export and bundle ONNX weights. ONNX files are optional for CI and default release packaging.
 
 ### Docker Backend
 
@@ -1121,7 +1117,33 @@ docker compose up --build -d     # background
 
 The Docker image uses Python 3.12 slim, installs dependencies into an isolated venv, and runs as a non-root `depthlens` user. The two-stage build keeps the final image free of build-time dependencies.
 
----
+### Continuous Delivery Workflows
+
+This branch adds safe Continuous Delivery automation, not automatic production deployment.
+
+| Workflow | Triggers | Output | Publishing behavior |
+|---|---|---|---|
+| `Docker image` (`.github/workflows/docker-image.yml`) | Pushes to `main`/`master` that touch Docker/backend workflow files, version tags `v*`, pull requests touching those files, or manual `workflow_dispatch` | Builds `ghcr.io/<owner>/depthlenspro-backend` | Pull requests build and inspect only. Pushes/tags log in with `GITHUB_TOKEN` and push `latest`/tag/SHA images to GitHub Container Registry. |
+| `Release` (`.github/workflows/release.yml`) | Version tags `v*` or manual `workflow_dispatch` with a version input | macOS ARM64 DMG, Windows ARM64 installer, Linux ARM64 AppImage | Artifacts upload only after builds succeed. Manual runs default to draft releases; tag runs create a GitHub release after all supported artifacts build. |
+
+The release workflow does not require code signing or notarization secrets. If signing is added later, guard it behind documented secrets and keep unsigned CI packaging available for validation.
+
+### Release Process
+
+1. Create a focused branch and open a pull request.
+2. Run `bash scripts/ci-local.sh` locally.
+3. Wait for GitHub CI to pass (`backend-quality` and `electron-smoke`).
+4. Merge only after checks are green.
+5. Create and push a version tag, or start the Release workflow manually. Example tag flow:
+
+```bash
+git checkout main
+git pull --ff-only
+git tag v4.0.1
+git push origin v4.0.1
+```
+
+For manual releases, run the `Release` workflow from GitHub Actions and keep the default draft setting unless you are ready to publish.
 
 ## Troubleshooting
 
@@ -1284,6 +1306,13 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
 
 ---
 
+
+### CI/CD Troubleshooting
+
+- **Cannot push workflow edits from local Git:** GitHub rejects changes under `.github/workflows/` when the Personal Access Token lacks `workflow` scope. Push with a token or GitHub App that has workflow permission, or edit the workflow files through GitHub Web.
+- **Docker missing during local validation:** `bash scripts/ci-local.sh` skips `docker compose config` when the Docker CLI is not installed, then continues with the non-Docker checks.
+- **Electron resource verification fails in CI:** inspect the `electron-smoke` log for the missing path. Repo-mode native verification requires `backend/`, `backend/app.py`, `frontend/`, `frontend/index.html`, a platform Python under `venv`, `models/`, and `models/onnx/`. ONNX binaries remain optional when the verifier runs with `--onnx off` or `--onnx optional`.
+
 ## Security
 
 DepthLens Pro is designed as a local-first desktop ML tool. The security model assumes the inference server runs on `127.0.0.1` and is accessed only by the local Electron renderer — not exposed to the network.
@@ -1400,25 +1429,22 @@ DepthLensPro/
 
 ## Contributing
 
-Contributions are welcome. Before opening a pull request, run the full check suite:
+Use the same developer workflow as CI/CD expects:
 
-```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
-
-cd electron-app
-npm test
-cd ..
-```
+1. Create a branch for one focused change.
+2. Make the smallest reviewable edits.
+3. Run `bash scripts/ci-local.sh`.
+4. Push the branch.
+5. Open a pull request.
+6. Wait for green GitHub checks, especially `backend-quality` and `electron-smoke`.
+7. Merge only after the PR is green.
 
 ### PR Checklist
 
 - Keep the change focused on one concern
 - Add or update tests for all behaviour changes; aim for the same coverage the existing suite achieves without real GPU or model downloads
 - Preserve existing API response shapes unless a breaking change is explicitly discussed first
-- Update this README and relevant docs when setup, routes, runtime behaviour, or security properties change
+- Update this README and relevant docs when setup, routes, runtime behaviour, CI/CD, or security properties change
 - Avoid unrelated formatting-only changes in the same PR
 - Run packaged-resource verification when touching Electron packaging scripts
 

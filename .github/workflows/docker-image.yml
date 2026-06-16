@@ -3,8 +3,8 @@ name: Docker image
 on:
   push:
     branches:
-      - main
-      - master
+      - "main"
+      - "master"
     tags:
       - "v*"
     paths:
@@ -14,14 +14,14 @@ on:
       - ".github/workflows/docker-image.yml"
   pull_request:
     branches:
-      - main
-      - master
+      - "main"
+      - "master"
     paths:
       - "Dockerfile"
       - "docker-compose.yml"
       - "backend/**"
       - ".github/workflows/docker-image.yml"
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
