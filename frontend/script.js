@@ -221,16 +221,10 @@ async function apiFetch(path, options = {}) {
       try {
         const err = await res.clone().json();
         const rawDetail = err.detail || err.error || detail;
-        const structured = typeof rawDetail === "object" ? rawDetail : null;
-        detail = structured
-          ? (structured.error_code === "MODEL_ASSETS_UNAVAILABLE" ? "Model assets missing — run setup or verify model assets." : (structured.message || structured.error_code || JSON.stringify(structured)))
+        detail = typeof rawDetail === "object"
+          ? (rawDetail.message || rawDetail.error_code || JSON.stringify(rawDetail))
           : rawDetail;
-        const apiError = new Error(`${detail} (${url})`);
-        if (structured) apiError.detail = structured;
-        throw apiError;
-      } catch (parseErr) {
-        if (parseErr.detail) throw parseErr;
-      }
+      } catch {}
       throw new Error(`${detail} (${url})`);
     }
     return res;
@@ -243,7 +237,6 @@ async function apiFetch(path, options = {}) {
     const wrapped = new Error(msg);
     wrapped.name = err.name || "ApiError";
     wrapped.cause = err;
-    if (err.detail) wrapped.detail = err.detail;
     throw wrapped;
   }
 }
@@ -1237,7 +1230,6 @@ function engineReadinessText() {
   const readiness = state.engineStatus.readiness || readinessDetails || state.engineStatus.health?.readiness;
 
   if (inferenceReady) return "Inference runtime ready";
-  if (readiness?.model_assets_ready === false) return readiness.recommended_action || "Model assets missing — run setup or verify model assets.";
   if (readiness?.required) return readinessSummary(readiness);
   if (state.engineStatus.cls === "offline") return "Inference runtime unavailable";
   return "Checking inference runtime";
@@ -1316,12 +1308,11 @@ function engineModulePillsHtml() {
     return `<span class="engine-module-pill muted">Waiting for runtime check</span>`;
   }
 
-  const asset = readiness?.model_assets_ready === false ? [`<span class="engine-module-pill bad">model assets: missing</span>`] : [];
-  return asset.concat(entries.map(([name, info]) => {
+  return entries.map(([name, info]) => {
     const ok = Boolean(info?.available);
     const label = `${name}: ${ok ? "ok" : (info?.status || "missing")}`;
     return `<span class="engine-module-pill ${ok ? "" : "bad"}">${esc(label)}</span>`;
-  })).join("");
+  }).join("");
 }
 
 function renderEngineStatusPanel() {
@@ -1545,7 +1536,6 @@ function readinessSummary(payload) {
   const failed = Object.entries(payload?.required || {})
     .filter(([, item]) => !item?.available)
     .map(([name, item]) => `${name}: ${item?.error || item?.status || "unavailable"}`);
-  if (payload?.model_assets_ready === false) return payload.recommended_action || "Model assets missing — run setup or verify model assets.";
   return failed.length ? failed.join(" · ") : "Inference runtime ready";
 }
 
