@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import time
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from fastapi.responses import JSONResponse
 from backend.api.live import router as live_router
 from backend.api.routes import router
 from backend.config import settings
+from backend.services import observability
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -148,7 +150,26 @@ app.include_router(live_router)
 app.include_router(router)
 
 
+@app.middleware("http")
+async def _observability_middleware(request: Request, call_next: Any) -> Any:
+    started = time.perf_counter()
+    observability.increment_active_http()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = int(getattr(response, "status_code", 500))
+        return response
+    finally:
+        route_obj = request.scope.get("route")
+        route_path = getattr(route_obj, "path", None) or request.url.path
+        observability.observe_http_request(
+            request.method, str(route_path), status_code, time.perf_counter() - started
+        )
+        observability.decrement_active_http()
+
+
 @app.exception_handler(Exception)
 async def _err(req: Request, exc: Exception) -> JSONResponse:
     log.exception("Unhandled: %s", req.url)
+    observability.record_crash("api", "UNHANDLED_EXCEPTION", exc, route=str(req.url.path))
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})

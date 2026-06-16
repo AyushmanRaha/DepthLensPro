@@ -218,6 +218,8 @@ const state = {
   compareAbort: null,
   healthAbort: null,
   benchmarkAbort: null,
+  performanceView: "benchmark",
+  observability: { snapshot: null, loading: false, lastUpdatedAt: null, abort: null, chart: null },
   pollTimers: {},
   pollMode: null,
   pollControllers: {},
@@ -431,6 +433,24 @@ const el = {
   benchMemory:         $("#benchMemory"),
   benchProvider:       $("#benchProvider"),
   benchStatus:         $("#benchStatus"),
+  performanceSubnav:   $$("[data-performance-view]"),
+  performanceViewBenchmark: $("#performanceViewBenchmark"),
+  performanceViewObservability: $("#performanceViewObservability"),
+  observabilityRefreshBtn: $("#observabilityRefreshBtn"),
+  observabilityExportBtn: $("#observabilityExportBtn"),
+  observabilityCopyMetricsBtn: $("#observabilityCopyMetricsBtn"),
+  observabilityTotalRequests: $("#observabilityTotalRequests"),
+  observabilityHttpP95: $("#observabilityHttpP95"),
+  observabilityInferenceRuns: $("#observabilityInferenceRuns"),
+  observabilityInferenceP95: $("#observabilityInferenceP95"),
+  observabilityCacheHitRatio: $("#observabilityCacheHitRatio"),
+  observabilityCrashCount: $("#observabilityCrashCount"),
+  observabilityTraceBody: $("#observabilityTraceBody"),
+  observabilityBenchmarkBody: $("#observabilityBenchmarkBody"),
+  observabilityCrashBody: $("#observabilityCrashBody"),
+  observabilityUpdatedAt: $("#observabilityUpdatedAt"),
+  observabilityStatus: $("#observabilityStatus"),
+  observabilityChart: $("#observabilityChart"),
 
   // Experiments
   experimentName:         $("#experimentName"),
@@ -951,6 +971,7 @@ function updateChartTheme() {
   if (compareChart && state.compareView.results.length) {
     renderCompareChart(state.compareView.results, state.compareView.metricKey, { preserveInstance: true });
   }
+  if (state.observability.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update("none"); }
   if (benchmarkChart) {
     applyChartPalette(benchmarkChart, c);
     const ds = benchmarkChart.data?.datasets?.[0];
@@ -2747,6 +2768,8 @@ function switchPanel(name) {
   if (settings.rememberLastTab) { try { localStorage.setItem(LAST_TAB_KEY, panelName); } catch {} }
   if (settings.stopCameraOnTabSwitch && prevPanel === "webcam" && panelName !== "webcam") stopWebcam({ quiet: true });
 
+  if (panelName === "performance" && state.performanceView === "observability") loadObservability({ quiet: true });
+
   if (panelName === "guide") {
     refreshOpenGuideHeights();
   }
@@ -3758,6 +3781,7 @@ function renderBenchmarkChart(data) {
   if (!ctx) return;
   const labels = results.map(r => r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch");
   const dataValues = values.map(v => Number.isFinite(v) ? v : null);
+  if (state.observability.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update("none"); }
   if (benchmarkChart) {
     benchmarkChart.data.labels = labels;
     benchmarkChart.data.datasets[0].data = dataValues;
@@ -3852,6 +3876,72 @@ el.benchmarkRunBtn?.addEventListener("click", () => {
   clearTimeout(window.__depthlensBenchmarkTimer);
   window.__depthlensBenchmarkTimer = setTimeout(runBenchmark, 250);
 });
+
+function fmtObsMs(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${Math.round(n)} ms` : "—";
+}
+function obsRowsEmpty(text) { return `<tr><td class="observability-empty" colspan="7">${esc(text)}</td></tr>`; }
+function switchPerformanceView(view) {
+  const next = view === "observability" ? "observability" : "benchmark";
+  state.performanceView = next;
+  el.performanceSubnav?.forEach(btn => { const active = btn.dataset.performanceView === next; btn.classList.toggle("active", active); btn.setAttribute("aria-selected", active ? "true" : "false"); });
+  if (el.performanceViewBenchmark) { el.performanceViewBenchmark.hidden = next !== "benchmark"; el.performanceViewBenchmark.classList.toggle("active", next === "benchmark"); }
+  if (el.performanceViewObservability) { el.performanceViewObservability.hidden = next !== "observability"; el.performanceViewObservability.classList.toggle("active", next === "observability"); }
+  if (next === "observability") loadObservability({ quiet: true });
+}
+async function loadObservability({ quiet = false, signal = null } = {}) {
+  state.observability.abort?.abort();
+  state.observability.abort = new AbortController();
+  const sig = signal ? anySignal([signal, state.observability.abort.signal, timeoutSignal(10000)]) : anySignal([state.observability.abort.signal, timeoutSignal(10000)]);
+  state.observability.loading = true;
+  if (el.observabilityStatus) el.observabilityStatus.textContent = "Loading";
+  try {
+    const res = await apiFetch("/api/observability", { signal: sig });
+    const snap = await res.json();
+    state.observability.snapshot = snap; state.observability.lastUpdatedAt = new Date();
+    renderObservability(snap);
+  } catch (err) {
+    if (!quiet && err.name !== "AbortError") toast(`Observability unavailable · ${err.message}`, "warning", 6000);
+    if (el.observabilityStatus) el.observabilityStatus.textContent = "Offline";
+  } finally { state.observability.loading = false; }
+}
+function renderObservability(snapshot) {
+  el.observabilityTotalRequests.textContent = snapshot?.http?.total_requests ?? "0";
+  el.observabilityHttpP95.textContent = fmtObsMs(snapshot?.http?.p95_latency_ms);
+  el.observabilityInferenceRuns.textContent = snapshot?.inference?.total ?? "0";
+  el.observabilityInferenceP95.textContent = fmtObsMs(snapshot?.inference?.p95_latency_ms);
+  el.observabilityCacheHitRatio.textContent = snapshot?.cache?.hit_ratio_percent == null ? "—" : `${snapshot.cache.hit_ratio_percent}%`;
+  el.observabilityCrashCount.textContent = snapshot?.crashes?.total ?? "0";
+  if (el.observabilityUpdatedAt) el.observabilityUpdatedAt.textContent = snapshot?.generated_at ? `Updated ${new Date(snapshot.generated_at).toLocaleString()}` : "Not loaded";
+  if (el.observabilityStatus) el.observabilityStatus.textContent = snapshot?.status || "ok";
+  renderObservabilityChart(snapshot); renderTraceRows(snapshot); renderBenchmarkHistoryRows(snapshot); renderCrashRows(snapshot);
+}
+function renderObservabilityChart(snapshot) {
+  if (!el.observabilityChart || !window.Chart) return;
+  const c = chartColors(); const recent = snapshot?.inference?.recent || [];
+  const data = recent.map(e => Number(e.latency_ms)).filter(Number.isFinite).slice(-30);
+  if (!state.observability.chart) { state.observability.chart = new Chart(el.observabilityChart.getContext("2d"), { type:"line", data:{ labels:data.map((_,i)=>i+1), datasets:[{ label:"Inference latency (ms)", data, borderColor:c.line, backgroundColor:c.fill, tension:.35, fill:true }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ display:false }, y:{ display:true, grid:{ color:c.grid }, ticks:{ color:c.tick, font:{ family:"JetBrains Mono", size:9 }, maxTicksLimit:4 } } } } }); }
+  else { state.observability.chart.data.labels = data.map((_,i)=>i+1); state.observability.chart.data.datasets[0].data = data; applyChartPalette(state.observability.chart, c); state.observability.chart.update("none"); }
+}
+function renderTraceRows(snapshot) {
+  const rows = (snapshot?.traces?.recent || []).slice(-10).reverse();
+  el.observabilityTraceBody.innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(new Date(r.timestamp).toLocaleTimeString())}</td><td>${esc(r.component)}</td><td>${esc(r.span)}</td><td>${esc(fmtObsMs(r.duration_ms))}</td><td>${esc(r.outcome)}</td></tr>`).join("") : obsRowsEmpty("No traces yet");
+}
+function renderBenchmarkHistoryRows(snapshot) {
+  const rows = (snapshot?.benchmarks?.history || []).slice(-10).reverse();
+  el.observabilityBenchmarkBody.innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(new Date(r.timestamp).toLocaleTimeString())}</td><td>${esc(r.display_name || r.model_id)}</td><td>${esc(r.device_type)}</td><td>${esc(fmtObsMs(r.pytorch_latency_ms))}</td><td>${esc(fmtObsMs(r.onnx_latency_ms))}</td><td>${esc(r.speedup ?? "—")}</td><td>${esc(r.onnx_status || r.outcome)}</td></tr>`).join("") : obsRowsEmpty("No benchmark history yet");
+}
+function renderCrashRows(snapshot) {
+  const rows = (snapshot?.crashes?.recent || []).slice(-10).reverse();
+  el.observabilityCrashBody.innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(new Date(r.timestamp).toLocaleTimeString())}</td><td>${esc(r.component)}</td><td>${esc(r.error_code)}</td><td>${esc(r.message || "—")}</td></tr>`).join("") : obsRowsEmpty("No crashes recorded");
+}
+function exportObservabilitySnapshot() { const blob = new Blob([JSON.stringify(state.observability.snapshot || {}, null, 2)], { type:"application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "depthlens-observability.json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+async function copyMetricsEndpoint() { const value = `${API || DEFAULT_API_BASE_URL}/metrics`; try { await navigator.clipboard.writeText(value); toast("Metrics endpoint copied", "success"); } catch { toast(value, "info"); } }
+el.performanceSubnav?.forEach(btn => btn.addEventListener("click", () => switchPerformanceView(btn.dataset.performanceView)));
+el.observabilityRefreshBtn?.addEventListener("click", () => loadObservability());
+el.observabilityExportBtn?.addEventListener("click", exportObservabilitySnapshot);
+el.observabilityCopyMetricsBtn?.addEventListener("click", copyMetricsEndpoint);
 
 
 // ══════════════════════════════════════════════════════════════
@@ -4317,6 +4407,7 @@ function startPollingLoops() {
   addPollingInterval("live", 10_000, signal => checkLive({ quiet: true, signal }));
   addPollingInterval("diagnostics", diagnosticsIntervalMs(), signal => checkDiagnostics({ quiet: true, signal }));
   addPollingInterval("cacheMetrics", Math.max(30_000, diagnosticsIntervalMs() * 0.75), signal => loadCacheMetrics({ signal }));
+  addPollingInterval("observability", 20_000, signal => { if (backendOnline && $(".nav-btn.active")?.dataset.panel === "performance" && state.performanceView === "observability" && !document.hidden) return loadObservability({ quiet: true, signal }); });
 }
 
 document.addEventListener("visibilitychange", () => {

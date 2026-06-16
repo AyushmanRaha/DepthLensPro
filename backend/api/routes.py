@@ -11,13 +11,14 @@ import time
 from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.live import SERVICE_VERSION
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
+from backend.services import observability
 
 
 def _available_devices() -> dict[str, Any]:
@@ -135,9 +136,7 @@ def _dependency_unavailable(exc: Exception) -> HTTPException:
 
 MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
 MAX_UPLOAD_SIZE_MB = 20
-BENCHMARK_TIMEOUT_MESSAGE = (
-    "Benchmark timed out · depth engine remains available"
-)
+BENCHMARK_TIMEOUT_MESSAGE = "Benchmark timed out · depth engine remains available"
 DISK_USAGE_LIMIT_PERCENT = 90.0
 DISK_TELEMETRY_PATH = "/"
 _PROBE_TTL_SECONDS = 10.0
@@ -501,6 +500,18 @@ def _telemetry_status(*checks: dict[str, Any]) -> str:
     return "degraded" if any(check.get("status") == "degraded" for check in checks) else "ok"
 
 
+@router.get("/metrics")
+async def prometheus_metrics() -> Response:
+    content, media_type = observability.prometheus_text()
+    return Response(content=content, media_type=media_type)
+
+
+@router.get("/api/observability")
+@router.get("/observability")
+async def observability_snapshot() -> dict[str, Any]:
+    return observability.snapshot()
+
+
 @router.get("/health")
 async def health() -> dict[str, Any]:
     started = time.perf_counter()
@@ -630,11 +641,15 @@ async def benchmark(
     try:
         from backend.services.benchmarks import BENCHMARK_TIMEOUT_SECONDS
 
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             run_in_threadpool(run_benchmark, model=model, device=device, iterations=iterations),
             timeout=BENCHMARK_TIMEOUT_SECONDS,
         )
+        return result
     except asyncio.TimeoutError as exc:
+        observability.record_benchmark(
+            model, None, device, device, iterations, None, None, None, None, None, 1, "error"
+        )
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise HTTPException(
             504,
@@ -646,6 +661,7 @@ async def benchmark(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
+        observability.record_crash("benchmark", "BENCHMARK_FAILED", exc, route="/api/benchmark")
         log.exception("Benchmark runtime unavailable")
         raise _dependency_unavailable(exc) from exc
 
@@ -716,8 +732,20 @@ async def estimate(
         else _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
     )
     cached = _cache_service().get(ck) if ck is not None else None
+    if ck is not None:
+        observability.record_cache_event("hit" if cached is not None else "miss", "route")
     if cached is not None:
         log.info("Cache hit: %r", file.filename)
+        observability.record_inference(
+            model,
+            cached.get("engine_used", "cache"),
+            resolved,
+            cached.get("latency_ms"),
+            cached=True,
+            outcome="ok",
+            metrics_mode=metrics,
+            outputs_count=len(parse_outputs(outputs)),
+        )
         return JSONResponse({**cached, "cached": True})
 
     try:
@@ -748,6 +776,16 @@ async def estimate(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
+        observability.record_crash("inference", "INFERENCE_FAILED", exc, route="/estimate")
+        observability.record_inference(
+            model,
+            "unknown",
+            resolved,
+            None,
+            cached=False,
+            outcome="error",
+            error_code="INFERENCE_FAILED",
+        )
         log.exception("Inference failed")
         raise HTTPException(
             500,
@@ -756,6 +794,21 @@ async def estimate(
 
     if ck is not None:
         _cache_service().set(ck, result)
+        observability.record_cache_event("set", "route")
+    observability.record_inference(
+        model,
+        result.get("engine_used", "pytorch"),
+        resolved,
+        result.get("latency_ms"),
+        pixels=(
+            int(result.get("resolution", {}).get("width", 0))
+            * int(result.get("resolution", {}).get("height", 0))
+        ),
+        cached=False,
+        outcome="ok",
+        metrics_mode=metrics,
+        outputs_count=len(parse_outputs(outputs)),
+    )
     log.info(
         "✅ %r | %s | %s | %s ms",
         file.filename,
@@ -764,7 +817,6 @@ async def estimate(
         result["latency_ms"],
     )
     return JSONResponse(result)
-
 
 
 @router.post("/api/detect")
@@ -793,6 +845,13 @@ async def detect(
             threshold=threshold,
             max_detections=max_detections,
         )
+        observability.record_inference(
+            "object_detection",
+            "detector",
+            resolved,
+            result.get("latency_ms") or result.get("total_latency_ms"),
+            outcome="ok",
+        )
         return JSONResponse(result)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -802,13 +861,26 @@ async def detect(
         ):
             raise HTTPException(
                 503,
-                {"error_code": "DETECTOR_UNAVAILABLE", "message": "Local object detector is unavailable"},
+                {
+                    "error_code": "DETECTOR_UNAVAILABLE",
+                    "message": "Local object detector is unavailable",
+                },
             ) from exc
+        observability.record_crash("detector", "DETECTION_FAILED", exc, route="/detect")
+        observability.record_inference(
+            "object_detection",
+            "detector",
+            resolved,
+            None,
+            outcome="error",
+            error_code="DETECTION_FAILED",
+        )
         log.exception("Object detection failed")
         raise HTTPException(
             500,
             {"error_code": "DETECTION_FAILED", "message": "Object detection failed"},
         ) from exc
+
 
 @router.post("/api/reconstruct")
 @router.post("/reconstruct")
@@ -879,12 +951,30 @@ async def reconstruct(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
+        observability.record_crash(
+            "reconstruction", "RECONSTRUCTION_FAILED", exc, route="/reconstruct"
+        )
+        observability.record_inference(
+            model,
+            "reconstruction",
+            resolved,
+            None,
+            outcome="error",
+            error_code="RECONSTRUCTION_FAILED",
+        )
         log.exception("Reconstruction failed")
         raise HTTPException(
             500,
             {"error_code": "RECONSTRUCTION_FAILED", "message": "Point cloud generation failed"},
         ) from exc
 
+    observability.record_inference(
+        model,
+        result.get("engine_used", "reconstruction"),
+        resolved,
+        result.get("latency_ms") or result.get("total_latency_ms"),
+        outcome="ok",
+    )
     log.info(
         "✅ reconstruct %r | %s | %s | %s pts | %s | %s ms",
         file.filename,
@@ -937,26 +1027,52 @@ async def batch(
     resolved = _validated_device_or_422(device)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str | None]] = []
-    for upload in files:
-        try:
-            if not (upload.content_type or "").startswith("image/"):
-                raise ValueError("Image file required")
-            raw = await upload.read()
-            if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-                raise ValueError(f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
-            ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
-            cached = _cache_service().get(ck)
-            if cached is not None:
-                results.append({**cached, "cached": True})
-                continue
+    with observability.trace_span(
+        "api",
+        "batch",
+        {"model_id": model, "device_type": observability.normalize_device_type(resolved)},
+    ):
+        for upload in files:
+            try:
+                if not (upload.content_type or "").startswith("image/"):
+                    raise ValueError("Image file required")
+                raw = await upload.read()
+                if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+                    raise ValueError(f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+                ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
+                cached = _cache_service().get(ck)
+                if cached is not None:
+                    observability.record_cache_event("hit", "route")
+                    observability.record_inference(
+                        model,
+                        cached.get("engine_used", "cache"),
+                        resolved,
+                        cached.get("latency_ms"),
+                        cached=True,
+                        outcome="ok",
+                        metrics_mode=metrics,
+                    )
+                    results.append({**cached, "cached": True})
+                    continue
+                observability.record_cache_event("miss", "route")
 
-            res = await process_image_async(
-                raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
-            )
-            _cache_service().set(ck, res)
-            results.append(res)
-        except Exception as exc:
-            errors.append({"filename": upload.filename, "error": str(exc)})
+                res = await process_image_async(
+                    raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
+                )
+                _cache_service().set(ck, res)
+                observability.record_cache_event("set", "route")
+                results.append(res)
+            except Exception as exc:
+                observability.record_crash("inference", "BATCH_ITEM_FAILED", exc, route="/batch")
+                observability.record_inference(
+                    model,
+                    "unknown",
+                    resolved,
+                    None,
+                    outcome="error",
+                    error_code="BATCH_ITEM_FAILED",
+                )
+                errors.append({"filename": upload.filename, "error": str(exc)})
     return JSONResponse(
         {
             "results": results,
@@ -972,16 +1088,24 @@ async def batch(
 async def cache_metrics() -> dict[str, Any]:
     """Expose live Redis/fallback cache metrics for frontend dashboards."""
 
-    return cast(dict[str, Any], _cache_service().metrics())
+    data = cast(dict[str, Any], _cache_service().metrics())
+    observability.record_cache_event(
+        "metrics", str(data.get("backend", "unknown")), data.get("keyspace_size")
+    )
+    return data
 
 
 @router.delete("/cache")
 async def clear_cache() -> dict[str, int]:
-    return {"cleared": int(_cache_service().clear())}
+    cleared = int(_cache_service().clear())
+    observability.record_cache_event("clear", "route", 0)
+    return {"cleared": cleared}
 
 
 @router.post("/cache/clear")
 async def clear_cache_post() -> dict[str, int]:
     """Clear the active inference cache from browser clients that prefer POST."""
 
-    return {"cleared": int(_cache_service().clear())}
+    cleared = int(_cache_service().clear())
+    observability.record_cache_event("clear", "route", 0)
+    return {"cleared": cleared}

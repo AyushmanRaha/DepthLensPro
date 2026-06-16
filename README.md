@@ -133,6 +133,7 @@ The full `(model, colormap, device, metrics_mode, outputs, max_dim, image_conten
 | 📷 **Live webcam depth** | Process webcam frames locally at a controlled FPS with optional temporal smoothing |
 | 📊 **Model comparison** | Run all supported models on the same image and compare outputs side-by-side |
 | ⚡ **PyTorch vs ONNX benchmark** | Measure latency, throughput, memory, provider status, and speedup |
+| 📡 **Local observability** | Prometheus metrics, inference telemetry, traces, crash analytics, and benchmark history in the Performance panel |
 | 🧪 **Experiment exports** | Save validation runs as JSON or CSV for reproducible reporting |
 | 📏 **Ground truth evaluation** | Compare predictions against PNG/TIFF/NPY depth labels with median-scale alignment |
 | 🧊 **3D point clouds** | Export approximate coloured point clouds as PLY or OBJ |
@@ -141,6 +142,12 @@ The full `(model, colormap, device, metrics_mode, outputs, max_dim, image_conten
 ---
 
 ## Feature Tour
+
+### Phase 7 / Observability — Local Runtime Telemetry
+
+Observability lives inside the existing **Performance** panel as a second sub-view next to Benchmark. It exposes local-only runtime snapshots, Prometheus metrics, inference latency history, bounded trace spans, sanitized crash analytics, cache events, and benchmark history without adding a new top-level header tab.
+
+The backend provides `GET /metrics` for Prometheus exposition plus `GET /api/observability` and `GET /observability` for JSON snapshots used by the UI. Telemetry is bounded in memory and avoids raw images, base64 image payloads, filenames, image hashes, cache keys, local paths, and high-cardinality user data in labels or history.
 
 ### 1. Workspace — Generate Depth Maps
 
@@ -651,6 +658,13 @@ DEPTHLENS_WARMUP_DEVICE=auto
 DEPTHLENS_MAX_DIM=1536
 DEPTHLENS_DEFAULT_METRICS=fast
 DEPTHLENS_DEFAULT_OUTPUTS=color
+DEPTHLENS_OBSERVABILITY_ENABLED=true
+DEPTHLENS_PROMETHEUS_ENABLED=true
+DEPTHLENS_TELEMETRY_MAX_EVENTS=200
+DEPTHLENS_TRACE_HISTORY_LIMIT=200
+DEPTHLENS_CRASH_HISTORY_LIMIT=100
+DEPTHLENS_BENCHMARK_HISTORY_LIMIT=50
+DEPTHLENS_TRACE_SAMPLE_RATE=1.0
 ```
 
 ### Server
@@ -689,6 +703,13 @@ DEPTHLENS_DEFAULT_OUTPUTS=color
 | `DEPTHLENS_DEFAULT_METRICS` | `fast` | `none`, `fast`, or `full` |
 | `DEPTHLENS_DEFAULT_OUTPUTS` | `color` | `color`, `gray`, or `color,gray` |
 | `INFERENCE_MAX_CONCURRENCY` | `2` | Max concurrent inference operations (asyncio semaphore) |
+| `DEPTHLENS_OBSERVABILITY_ENABLED` | `true` | Enable local observability snapshots and instrumentation |
+| `DEPTHLENS_PROMETHEUS_ENABLED` | `true` | Enable `/metrics` Prometheus exposition when `prometheus-client` is available |
+| `DEPTHLENS_TELEMETRY_MAX_EVENTS` | `200` | Bounded recent HTTP/inference event history size |
+| `DEPTHLENS_TRACE_HISTORY_LIMIT` | `200` | Bounded trace span history size |
+| `DEPTHLENS_CRASH_HISTORY_LIMIT` | `100` | Bounded sanitized crash history size |
+| `DEPTHLENS_BENCHMARK_HISTORY_LIMIT` | `50` | Bounded benchmark history size |
+| `DEPTHLENS_TRACE_SAMPLE_RATE` | `1.0` | Trace sampling ratio from `0.0` to `1.0` |
 | `ORT_INTRA_OP_NUM_THREADS` | CPU-dependent / Docker `2` | ONNX Runtime intra-op thread pool |
 | `ORT_INTER_OP_NUM_THREADS` | `1` | ONNX Runtime inter-op thread pool |
 
@@ -701,6 +722,10 @@ DEPTHLENS_DEFAULT_OUTPUTS=color
 | `DEPTHLENS_ONNX_DIR` | unset | Direct ONNX directory override |
 | `ONNX_WEIGHTS_DIR` | unset | Legacy ONNX directory (lowest priority) |
 | `DEPTHLENS_AUTO_EXPORT_ONNX` | `false` | Auto-export ONNX during benchmark when weights are missing |
+
+### Observability Privacy
+
+Phase 7 telemetry is local-only: DepthLens Pro does not send analytics to cloud services or external telemetry endpoints. Histories are bounded in process memory, Prometheus labels intentionally avoid high-cardinality user data, and telemetry avoids raw images, base64 payloads, uploaded filenames, image hashes, cache keys, local full paths, and private exception details.
 
 ### CI / Test Flags
 
@@ -736,6 +761,9 @@ http://127.0.0.1:8765
 | `GET` | `/benchmark` | PyTorch vs ONNX benchmark |
 | `GET` | `/api/benchmark` | Frontend-compatible benchmark alias |
 | `GET` | `/cache/metrics` | Cache telemetry (hits, misses, keyspace size, backend type) |
+| `GET` | `/metrics` | Prometheus metrics exposition for local scraping |
+| `GET` | `/api/observability` | JSON observability snapshot for the Performance panel |
+| `GET` | `/observability` | Observability snapshot alias |
 | `DELETE` | `/cache` | Clear all cache entries |
 | `POST` | `/estimate` | Single-image depth estimation |
 | `POST` | `/batch` | Batch depth estimation (up to 10 images) |

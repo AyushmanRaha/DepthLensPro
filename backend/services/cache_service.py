@@ -13,6 +13,7 @@ from json import JSONDecodeError
 from typing import Any, cast
 
 from backend.config import settings
+from backend.services import observability
 
 log = logging.getLogger("depthlens")
 
@@ -126,6 +127,8 @@ def _mark_redis_failure(exc: BaseException) -> None:
     with _METRIC_LOCK:
         _REDIS_FAILURES += 1
 
+    observability.record_cache_event("redis_error", "redis")
+    observability.record_cache_event("fallback", "memory")
     log.warning("Redis cache unavailable; using in-memory fallback: %s", exc)
 
 
@@ -216,6 +219,7 @@ def _memory_get(cache_key: str) -> dict[str, Any] | None:
         _cleanup_expired_locked(now)
         item = _MEMORY_CACHE.get(cache_key)
         if item is None:
+            observability.record_cache_event("miss", "memory", len(_MEMORY_CACHE))
             with _METRIC_LOCK:
                 _MEMORY_MISSES += 1
             return None
@@ -223,6 +227,7 @@ def _memory_get(cache_key: str) -> dict[str, Any] | None:
         expires_at, value = item
         if expires_at <= now:
             _MEMORY_CACHE.pop(cache_key, None)
+            observability.record_cache_event("miss", "memory", len(_MEMORY_CACHE))
             with _METRIC_LOCK:
                 _MEMORY_MISSES += 1
             return None
@@ -231,6 +236,7 @@ def _memory_get(cache_key: str) -> dict[str, Any] | None:
         _MEMORY_CACHE[cache_key] = (expires_at, value)
         with _METRIC_LOCK:
             _MEMORY_HITS += 1
+        observability.record_cache_event("hit", "memory", len(_MEMORY_CACHE))
         return value
 
 
@@ -241,12 +247,14 @@ def _memory_set(cache_key: str, value: dict[str, Any]) -> None:
         _MEMORY_CACHE.pop(cache_key, None)
         _MEMORY_CACHE[cache_key] = (now + CACHE_TTL_SECONDS, value)
         _enforce_memory_limit_locked()
+        observability.record_cache_event("set", "memory", len(_MEMORY_CACHE))
 
 
 def _memory_clear() -> int:
     with _MEMORY_LOCK:
         count = len(_MEMORY_CACHE)
         _MEMORY_CACHE.clear()
+        observability.record_cache_event("clear", "memory", 0)
         return count
 
 
@@ -291,6 +299,7 @@ def set(cache_key: str, value: dict[str, Any]) -> None:
         payload = _serialize(value)
         memory_value = _deserialize(payload)
     except _DESERIALIZE_ERRORS as exc:
+        observability.record_cache_event("serialization_rejected", "unknown")
         log.warning("Skipping non-JSON-safe cache payload for %s: %s", cache_key, exc)
         return
 
@@ -301,6 +310,7 @@ def set(cache_key: str, value: dict[str, Any]) -> None:
 
     try:
         client.setex(_key(cache_key), CACHE_TTL_SECONDS, payload)
+        observability.record_cache_event("set", "redis")
     except _redis_error_types() as exc:
         _mark_redis_failure(exc)
         _memory_set(cache_key, memory_value)
@@ -369,6 +379,7 @@ def metrics() -> dict[str, Any]:
 
     client = _redis_client()
     if client is None:
+        observability.record_cache_event("metrics", "memory", memory_size)
         return data
 
     try:
@@ -378,6 +389,7 @@ def metrics() -> dict[str, Any]:
         redis_keyspace_size = size()
     except _redis_error_types() as exc:
         _mark_redis_failure(exc)
+        observability.record_cache_event("metrics", "memory", memory_size)
         return data
 
     data.update(
@@ -392,4 +404,5 @@ def metrics() -> dict[str, Any]:
             "redis_keyspace_size": redis_keyspace_size,
         }
     )
+    observability.record_cache_event("metrics", "redis", data.get("keyspace_size"))
     return data
