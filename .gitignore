@@ -59,6 +59,7 @@ electron/node_modules/
 htmlcov/
 
 # Model and benchmark artifacts
+models/torch-cache/
 models/onnx/*.onnx
 backend/onnx_weights/*.onnx
 *.onnx.tmp

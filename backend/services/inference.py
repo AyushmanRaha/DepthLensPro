@@ -22,6 +22,7 @@ from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services import observability
+from backend.services.model_assets import ModelAssetsUnavailableError, should_treat_hub_error_as_assets_unavailable
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
@@ -93,19 +94,25 @@ def _load_model(
         # not hold device state.  Keep the cache model-scoped intentionally; if a
         # future transform depends on CUDA/MPS/XPU state, change this key to
         # include ``device_str`` alongside the model cache key below.
-        if model_id not in TRANSFORMS:
-            transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-                "intel-isl/MiDaS", "transforms", trust_repo=True
-            )
-            TRANSFORMS[model_id] = (
-                transforms.small_transform
-                if model_id == "midas_small"
-                else transforms.dpt_transform
-            )
+        try:
+            if model_id not in TRANSFORMS:
+                transforms = torch.hub.load(  # type: ignore[no-untyped-call]
+                    "intel-isl/MiDaS", "transforms", trust_repo=True
+                )
+                TRANSFORMS[model_id] = (
+                    transforms.small_transform
+                    if model_id == "midas_small"
+                    else transforms.dpt_transform
+                )
 
-        device = torch.device(device_str)
-        log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
-        model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+            device = torch.device(device_str)
+            log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
+            model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+        except Exception as exc:
+            log.exception("PyTorch MiDaS assets unavailable for %s", model_id)
+            if should_treat_hub_error_as_assets_unavailable(exc):
+                raise ModelAssetsUnavailableError(cause=exc) from exc
+            raise
         model.to(device).eval()
 
         if device.type == "mps":

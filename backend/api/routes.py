@@ -19,6 +19,7 @@ from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
 from backend.services import observability
+from backend.services.model_assets import ModelAssetsUnavailableError, model_assets_status
 
 
 def _available_devices() -> dict[str, Any]:
@@ -121,6 +122,11 @@ def parse_outputs(*args: Any, **kwargs: Any) -> list[str]:
 
 log = logging.getLogger("depthlens")
 router = APIRouter()
+
+
+def _model_assets_response(exc: ModelAssetsUnavailableError) -> HTTPException:
+    log.warning("Model assets unavailable: %s", exc)
+    return HTTPException(503, exc.to_response())
 
 
 def _dependency_unavailable(exc: Exception) -> HTTPException:
@@ -614,6 +620,13 @@ async def list_devices() -> dict[str, Any]:
     return {"devices": devs, "primary_device": primary, "cached": meta.get("cached", False)}
 
 
+@router.get("/model-assets")
+async def model_assets(deep: bool = False) -> dict[str, Any]:
+    """Expose lightweight model asset preflight diagnostics."""
+
+    return await run_in_threadpool(model_assets_status, deep=deep)
+
+
 @router.get("/onnx/status")
 async def onnx_status(device: str = "auto") -> dict[str, Any]:
     """Expose static ONNX weight and runtime provider diagnostics."""
@@ -775,6 +788,9 @@ async def estimate(
         ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except ModelAssetsUnavailableError as exc:
+        observability.record_inference(model, "unknown", resolved, None, cached=False, outcome="error", error_code=exc.error_code)
+        raise _model_assets_response(exc) from exc
     except Exception as exc:
         observability.record_crash("inference", "INFERENCE_FAILED", exc, route="/estimate")
         observability.record_inference(
@@ -951,6 +967,9 @@ async def reconstruct(
         ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except ModelAssetsUnavailableError as exc:
+        observability.record_inference(model, "reconstruction", resolved, None, outcome="error", error_code=exc.error_code)
+        raise _model_assets_response(exc) from exc
     except Exception as exc:
         observability.record_crash(
             "reconstruction", "RECONSTRUCTION_FAILED", exc, route="/reconstruct"
