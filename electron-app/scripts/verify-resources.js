@@ -49,8 +49,8 @@ function usage() {
     "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
     "",
     "Examples:",
-    "  node scripts/verify-resources.js --root-kind repo --mode native --onnx require-all --models all ..",
-    "  node scripts/verify-resources.js --root-kind packaged --mode native --onnx require-all --models all 'dist/mac-arm64/DepthLens Pro.app/Contents/Resources'",
+    "  node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
+    "  node scripts/verify-resources.js --root-kind packaged --mode native --onnx optional 'dist/mac-arm64/DepthLens Pro.app/Contents/Resources'",
   ].join("\n");
 }
 
@@ -130,17 +130,17 @@ function remediation(result) {
   if (result.rootKind === "packaged") {
     return [
       "Packaged app resources are incomplete. Rebuild with the supported root native build script:",
-      "  macOS/Linux: ./scripts/build",
+      "  macOS ARM:   scripts/build-native-macos.sh",
       "  Windows ARM: .\\scripts\\build-native-windows.ps1",
-      "  Linux:       ./scripts/build",
+      "  Linux ARM:   scripts/build-native-linux.sh",
       "If this path is an installed app, replace the stale installed copy with the newly built artifact before launching it.",
     ].join("\n");
   }
   return [
     "Repo-root resources are incomplete. Run setup before packaging:",
-    "  macOS/Linux: ./scripts/setup",
-    "  Windows:     .\\scripts\\setup.ps1",
-    "Then rebuild with ./scripts/build or .\\scripts\\build.ps1. Native/release builds require all ONNX binaries.",
+    "  macOS/Linux: npm run setup",
+    "  Windows:     npm run setup:win",
+    "Then rebuild with the supported native build script. ONNX binaries remain optional unless --onnx required or --onnx require-all is used.",
   ].join("\n");
 }
 

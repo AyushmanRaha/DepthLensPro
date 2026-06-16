@@ -11,12 +11,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
   showOpenDialog: (options) => ipcRenderer.invoke("show-open-dialog", options),
   platform: process.platform,
   arch: process.arch,
-  storage: {
-    path: () => ipcRenderer.invoke("storage-path"),
-    settingsGet: (key) => ipcRenderer.invoke("settings-get", key),
-    settingsSet: (key, value) => ipcRenderer.invoke("settings-set", key, value),
-    benchmarksHistory: () => ipcRenderer.invoke("benchmarks-history"),
-    modelsStatus: () => ipcRenderer.invoke("models-status"),
-    cacheClear: () => ipcRenderer.invoke("cache-clear"),
-  },
 });
