@@ -700,6 +700,7 @@ async function startBackend() {
       PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
       DEPTHLENSPRO_MODEL_DIR: path.join(cwd, "models"),
       DEPTHLENS_ONNX_DIR: path.join(cwd, "models", "onnx"),
+      TORCH_HOME: path.join(cwd, "models", "torch-cache"),
       SSL_CERT_FILE: process.env.SSL_CERT_FILE || "",
       REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE || process.env.SSL_CERT_FILE || "",
     },

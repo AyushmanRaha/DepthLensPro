@@ -438,7 +438,7 @@ npm --version
 git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
 
-# Install Python + Node dependencies.
+# Install Python + Node dependencies and cache RGB detector weights once.
 # ONNX export is intentionally skipped here to keep first-run fast.
 npm run setup
 
@@ -469,7 +469,7 @@ Expected `/live` response:
 }
 ```
 
-> **First model use:** PyTorch/Torch Hub downloads model weights on first inference if they are not already in your local Torch Hub cache (`~/.cache/torch/hub`). This is a one-time download per model. Your uploaded images are still processed locally at all times.
+> **Setup-time detector cache:** The setup step downloads and caches the RGB Camera View / 3D tab object-detector weights once under `models/torch-cache`. This cache is separate from optional ONNX files in `models/onnx`, and your uploaded images are still processed locally at all times.
 
 ---
 
@@ -499,7 +499,7 @@ Platform support is explicit and architecture-specific:
 | Linux arm64 | Supported | `npm run build:linux:arm64` |
 | Linux x64 | Supported | `npm run build:linux:x64` |
 
-The native workflow is implemented by verbose scripts such as `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, `scripts/setup-linux.sh`, and `scripts/build-native-linux.sh`, and is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. Standard builds do **not** require ONNX files. ONNX builds use separate commands and require all three models: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
+The native workflow is implemented by verbose scripts such as `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, `scripts/setup-linux.sh`, and `scripts/build-native-linux.sh`, and is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. The same setup commands (`npm run setup:mac`, `npm run setup:linux`, `npm run setup:win`, or `npm run setup`) also cache RGB object detector weights under `models/torch-cache` for offline / packaged use. Standard builds do **not** require ONNX files. ONNX remains optional and separate; ONNX builds use separate commands and require all three models in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
 
 #### macOS — standard build
 
@@ -615,7 +615,7 @@ Platform-specific outputs:
 | Windows | `electron-app/dist/win-arm64-unpacked/` or `electron-app/dist/win-x64-unpacked/` and NSIS installer |
 | Linux | `electron-app/dist/*arm64*.AppImage`, `electron-app/dist/*x64*.AppImage`, and unpacked resources when retained by electron-builder |
 
-The build scripts verify repo resources before packaging and packaged resources after packaging. Standard verification treats ONNX as optional; ONNX verification fails early if any required model is missing, empty, invalid, or not bundled.
+The build scripts verify repo resources before packaging and packaged resources after packaging. Standard verification treats ONNX as optional; ONNX verification fails early if any required model is missing, empty, invalid, or not bundled. Because setup stores detector weights under `models/torch-cache` and Electron packages `models` as extra resources, the packaged backend can use the setup-created detector cache instead of downloading at runtime.
 
 ---
 
@@ -699,7 +699,7 @@ The Dockerfile uses a two-stage build: a `builder` stage installs all Python whe
 
 ### E. Optional ONNX Acceleration
 
-ONNX Runtime is entirely optional. The app works without ONNX files by falling back to PyTorch.
+ONNX Runtime is entirely optional and separate from the RGB object detector cache. The app works without ONNX files by falling back to PyTorch; the RGB detector weights are cached by the normal setup step under `models/torch-cache`.
 
 Generate ONNX files locally:
 
@@ -1306,6 +1306,29 @@ Then restart:
 npm run stop:backend
 npm run backend:dev
 ```
+
+---
+
+
+### RGB Camera Detection Reports Missing Detector Weights
+
+The RGB Camera View / 3D tab uses TorchVision detector weights cached by the setup step under `models/torch-cache`. This cache is not an ONNX cache; ONNX remains optional under `models/onnx`.
+
+If `/api/detect` or RGB Camera View reports missing detector weights, rerun the setup step with network access for your platform:
+
+```bash
+npm run setup:mac
+npm run setup:linux
+npm run setup:win
+```
+
+Only skip detector weights if RGB object detection is not needed:
+
+```bash
+python scripts/doctor.py --without-detector-weights
+```
+
+When skipped, setup completes but RGB Camera detection may fail until detector weights are cached.
 
 ---
 

@@ -62,3 +62,46 @@ def test_onnx_export_command_models() -> None:
     assert "--models" in cmd
     assert "midas_small,dpt_hybrid" in cmd
     assert "--force" in cmd
+
+
+def test_detector_cache_verification_fails_when_checkpoints_missing(tmp_path) -> None:
+    ok, message = doctor.verify_detector_cache(tmp_path / "torch-cache")
+    assert ok is False
+    assert "missing" in message
+
+
+def test_detector_cache_verification_fails_without_pth(tmp_path) -> None:
+    checkpoints = tmp_path / "torch-cache" / "hub" / "checkpoints"
+    checkpoints.mkdir(parents=True)
+    (checkpoints / "README.txt").write_text("not weights")
+    ok, message = doctor.verify_detector_cache(tmp_path / "torch-cache")
+    assert ok is False
+    assert "No .pth" in message
+
+
+def test_detector_cache_verification_passes_with_pth(tmp_path) -> None:
+    checkpoints = tmp_path / "torch-cache" / "hub" / "checkpoints"
+    checkpoints.mkdir(parents=True)
+    (checkpoints / "fake-detector.pth").write_bytes(b"fake")
+    ok, message = doctor.verify_detector_cache(tmp_path / "torch-cache")
+    assert ok is True
+    assert "Detector weights cached" in message
+
+
+def test_detector_weight_argument_parsing() -> None:
+    with_weights = doctor.parse_args(["--with-detector-weights"])
+    assert with_weights.with_detector_weights is True
+    assert with_weights.without_detector_weights is False
+
+    without_weights = doctor.parse_args(["--without-detector-weights"])
+    assert without_weights.with_detector_weights is False
+    assert without_weights.without_detector_weights is True
+
+
+def test_detector_weight_argument_conflict_errors() -> None:
+    try:
+        doctor.parse_args(["--with-detector-weights", "--without-detector-weights"])
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:  # pragma: no cover
+        raise AssertionError("conflicting detector weight flags should error")

@@ -31,6 +31,7 @@ PYTHON_310_WARNING = (
 )
 SUPPORTED_ARCHES = {"arm64", "aarch64", "x86_64", "amd64"}
 ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
+DETECTOR_TORCH_CACHE = ROOT / "models" / "torch-cache"
 
 
 def parse_onnx_model_list(value: str | None) -> list[str]:
@@ -44,6 +45,41 @@ def parse_onnx_model_list(value: str | None) -> list[str]:
     if invalid:
         raise argparse.ArgumentTypeError(f"Unsupported ONNX model(s): {', '.join(invalid)}. Expected one of: {', '.join(ONNX_MODEL_IDS)} or all")
     return raw
+
+
+def verify_detector_cache(cache_root: Path = DETECTOR_TORCH_CACHE) -> tuple[bool, str]:
+    """Verify TorchVision detector checkpoints exist in the setup-created cache."""
+    checkpoints = cache_root / "hub" / "checkpoints"
+    if not checkpoints.is_dir():
+        return False, f"Detector checkpoint directory is missing: {checkpoints}"
+    if not any(path.is_file() and path.suffix == ".pth" for path in checkpoints.iterdir()):
+        return False, f"No .pth detector checkpoint files found in: {checkpoints}"
+    return True, f"Detector weights cached under {cache_root.relative_to(ROOT) if cache_root.is_relative_to(ROOT) else cache_root}"
+
+
+def should_prefetch_detector_weights(args: argparse.Namespace) -> bool:
+    """Return whether normal setup should cache RGB detector weights."""
+    if args.with_detector_weights and args.without_detector_weights:
+        raise SystemExit("Choose either --with-detector-weights or --without-detector-weights, not both.")
+    if args.without_detector_weights:
+        return False
+    if args.doctor_only:
+        return False
+    if os.environ.get("CI") == "1" or os.environ.get("TESTING") == "1":
+        return bool(args.with_detector_weights)
+    return True
+
+
+def prefetch_detector_weights(py: Path, env: dict[str, str]) -> None:
+    print("Caching RGB object detector weights for offline / packaged use...")
+    detector_env = env.copy()
+    detector_env.pop("DEPTHLENS_DISABLE_MODEL_DOWNLOADS", None)
+    detector_env["TORCH_HOME"] = str(DETECTOR_TORCH_CACHE)
+    _run([str(py), str(ROOT / "scripts" / "prefetch-detector-weights.py")], env=detector_env)
+    ok, message = verify_detector_cache()
+    if not ok:
+        raise SystemExit(message)
+    print(message)
 
 
 def should_export_onnx(args: argparse.Namespace, *, stdin_is_tty: bool | None = None) -> bool:
@@ -263,11 +299,19 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
         raise SystemExit(pip_check.stdout)
     if not args.doctor_only:
         _run(["npm", "install"], cwd=ROOT / "electron-app")
+    DETECTOR_TORCH_CACHE.mkdir(parents=True, exist_ok=True)
     (ROOT / "models" / "onnx").mkdir(parents=True, exist_ok=True)
     for keep in [ROOT / "models" / ".gitkeep", ROOT / "models" / "onnx" / ".gitkeep"]:
         if not keep.exists():
             keep.touch()
-    print("Ensured models/onnx directory structure.")
+    print("Ensured models/onnx and models/torch-cache directory structure.")
+    if should_prefetch_detector_weights(args):
+        try:
+            prefetch_detector_weights(py, env)
+        except subprocess.CalledProcessError as exc:
+            raise SystemExit("RGB detector weights could not be cached. Re-run setup with network access, or pass --without-detector-weights to skip RGB object detection support.") from exc
+    else:
+        print("WARNING: RGB Camera detection may fail until detector weights are cached.")
     export_onnx = should_export_onnx(args)
     if export_onnx:
         _run(onnx_export_command(py, args), env=env)
@@ -302,6 +346,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--doctor-only", action="store_true", help="check/create venv and verify tools without installing app dependencies")
     p.add_argument("--enforce-arch", action="store_true", help="fail if the current machine cannot build the supported native app")
     p.add_argument("--with-onnx", action="store_true", help="export/validate requested ONNX models during setup")
+    p.add_argument("--with-detector-weights", action="store_true", help="cache RGB object detector weights during setup even when CI/TESTING is set")
+    p.add_argument("--without-detector-weights", action="store_true", help="skip RGB object detector weight caching")
     p.add_argument("--without-onnx", action="store_true", help="skip ONNX export explicitly")
     p.add_argument("--onnx-models", default="midas_small", help="comma-separated ONNX models: midas_small, dpt_hybrid, dpt_large, or all")
     p.add_argument("--onnx-strict", action="store_true", help="fail setup if any requested ONNX model is missing or invalid")
@@ -311,6 +357,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parse_onnx_model_list(args.onnx_models)
     if args.with_onnx and args.without_onnx:
         p.error("choose either --with-onnx or --without-onnx, not both")
+    if args.with_detector_weights and args.without_detector_weights:
+        p.error("choose either --with-detector-weights or --without-detector-weights, not both")
     return args
 
 
