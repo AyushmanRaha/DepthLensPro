@@ -1065,7 +1065,6 @@
               </div>
               <div class="reconstruct-capture-footer">
                 <p class="reconstruct-capture-status" id="reconstructCaptureStatus" aria-live="polite">Camera not opened</p>
-                <p class="muted">Local camera stream · not uploaded until you generate/capture locally</p>
               </div>
             </section>
             </div>
@@ -1170,12 +1169,7 @@
             <p class="guide-section-kicker">DepthLens Pro field manual</p>
             <h2 class="guide-hero-title" id="guideHeroTitle">Learn the renderer, workflows, metrics, and 3D depth language in one place.</h2>
             <p class="guide-hero-copy">Use this self-contained guide when you are choosing a model, tuning real-time webcam depth, comparing engines, validating against ground truth, or exporting a point cloud. Nothing in this tab calls the backend; it is a local reference for confident, repeatable depth work.</p>
-            <div class="guide-quick-grid" aria-label="Guide highlights">
-              <span>Scrollable header tabs</span>
-              <span>Local-first inference flow</span>
-              <span>Metric and glossary reference</span>
-              <span>3D reconstruction checklist</span>
-            </div>
+
           </section>
 
           <section class="card guide-card" aria-labelledby="guideHeading">
@@ -1341,7 +1335,9 @@
                 <p class="lightbox-title" id="lightboxTitle">Depth Inspector</p>
                 <p class="lightbox-subtitle">Interactive depth blend + full diagnostic metrics</p>
               </div>
-              <button class="lightbox-close" id="lightboxClose" aria-label="Close preview"></button>
+              <button class="lightbox-close" id="lightboxClose" type="button" aria-label="Close preview">
+                <span aria-hidden="true">×</span>
+              </button>
             </div>
 
             <div class="lightbox-body">
