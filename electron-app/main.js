@@ -424,29 +424,18 @@ function getPythonCandidates() {
   const candidates = [];
 
   if (process.platform === "win32") {
-    if (isDev) {
-      candidates.push(path.join(root, ".venv", "Scripts", "python.exe"));
-      candidates.push(path.join(root, "venv", "Scripts", "python.exe"));
-    } else {
-      candidates.push(path.join(root, "venv", "Scripts", "python.exe"));
-      candidates.push(path.join(process.resourcesPath || root, "venv", "Scripts", "python.exe"));
-    }
+    candidates.push(path.join(root, "venv", "Scripts", "python.exe"));
+    candidates.push(path.join(root, "venv", "Scripts", "python3.exe"));
+    candidates.push(path.join(process.resourcesPath || root, "venv", "Scripts", "python.exe"));
     if (isDev) {
       candidates.push("py");
       candidates.push("python");
     }
   } else {
-    if (isDev) {
-      candidates.push(path.join(root, ".venv", "bin", "python3"));
-      candidates.push(path.join(root, ".venv", "bin", "python"));
-      candidates.push(path.join(root, "venv", "bin", "python3"));
-      candidates.push(path.join(root, "venv", "bin", "python"));
-    } else {
-      candidates.push(path.join(root, "venv", "bin", "python3"));
-      candidates.push(path.join(root, "venv", "bin", "python"));
-      candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python3"));
-      candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python"));
-    }
+    candidates.push(path.join(root, "venv", "bin", "python3"));
+    candidates.push(path.join(root, "venv", "bin", "python"));
+    candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python3"));
+    candidates.push(path.join(process.resourcesPath || root, "venv", "bin", "python"));
     if (isDev) {
       candidates.push("python3");
       candidates.push("python");

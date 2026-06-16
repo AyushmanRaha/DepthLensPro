@@ -11,7 +11,6 @@ from typing import Any
 
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
-from backend.services.model_assets import model_assets_status
 from backend.services.onnx_diagnostics import onnx_status_payload
 
 REQUIRED_RUNTIME_MODULES = ("fastapi", "uvicorn", "numpy", "torch", "cv2", "PIL")
@@ -82,15 +81,10 @@ def readiness_payload() -> dict[str, Any]:
     required_ok = all(item.get("available") for item in required.values())
     torch_details = _torch_runtime_details(required.get("torch", {}))
     onnx_status = onnx_status_payload(settings.DEPTHLENS_WARMUP_DEVICE)
-    assets = model_assets_status()
-    inference_ready = required_ok and bool(assets.get("model_assets_ready"))
 
     return {
-        "status": "ready" if inference_ready else ("degraded" if required_ok else "unavailable"),
-        "runtime_imports_ready": required_ok,
-        "model_assets_ready": bool(assets.get("model_assets_ready")),
-        "standard_build_ready": bool(assets.get("standard_build_ready")),
-        "inference_ready": inference_ready,
+        "status": "ready" if required_ok else "degraded",
+        "inference_ready": required_ok,
         "required": required,
         "optional": optional,
         "torch_runtime": torch_details,
@@ -103,10 +97,6 @@ def readiness_payload() -> dict[str, Any]:
             for model, item in onnx_status["models"].items()
         },
         "onnx": onnx_status,
-        "model_assets": assets,
-        "can_run_inference_offline": bool(assets.get("can_run_inference_offline")),
-        "fatal_reason": assets.get("fatal_reason"),
-        "recommended_action": assets.get("recommended_action"),
         "models": [{"id": model_id, **meta} for model_id, meta in SUPPORTED_MODELS.items()],
         "colormaps": list(COLORMAP_NAMES),
         "settings": {

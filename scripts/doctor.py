@@ -32,7 +32,6 @@ PYTHON_310_WARNING = (
 SUPPORTED_ARCHES = {"arm64", "aarch64", "x86_64", "amd64"}
 ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
 DETECTOR_TORCH_CACHE = ROOT / "models" / "torch-cache"
-MIDAS_MODELS = ("MiDaS_small", "DPT_Hybrid", "DPT_Large")
 
 
 def parse_onnx_model_list(value: str | None) -> list[str]:
@@ -81,33 +80,6 @@ def prefetch_detector_weights(py: Path, env: dict[str, str]) -> None:
     if not ok:
         raise SystemExit(message)
     print(message)
-
-
-
-def should_prefetch_midas_assets(args: argparse.Namespace) -> bool:
-    if args.without_midas_assets:
-        return False
-    if args.doctor_only:
-        return False
-    if os.environ.get("CI") == "1" or os.environ.get("TESTING") == "1":
-        return bool(args.with_midas_assets)
-    return True
-
-
-def prefetch_midas_assets(py: Path, env: dict[str, str]) -> None:
-    print("Caching PyTorch MiDaS assets for standard depth inference...")
-    midas_env = env.copy()
-    midas_env.pop("DEPTHLENS_DISABLE_MODEL_DOWNLOADS", None)
-    midas_env["TORCH_HOME"] = str(DETECTOR_TORCH_CACHE)
-    code = """
-import torch
-repo='intel-isl/MiDaS'
-torch.hub.load(repo, 'transforms', trust_repo=True)
-for model in ['MiDaS_small', 'DPT_Hybrid', 'DPT_Large']:
-    torch.hub.load(repo, model, trust_repo=True).eval()
-print('MiDaS assets cached')
-"""
-    _run([str(py), "-c", code], env=midas_env)
 
 
 def should_export_onnx(args: argparse.Namespace, *, stdin_is_tty: bool | None = None) -> bool:
@@ -333,13 +305,6 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
         if not keep.exists():
             keep.touch()
     print("Ensured models/onnx and models/torch-cache directory structure.")
-    if should_prefetch_midas_assets(args):
-        try:
-            prefetch_midas_assets(py, env)
-        except subprocess.CalledProcessError as exc:
-            raise SystemExit("PyTorch MiDaS assets could not be cached. Re-run setup with network access, or install optional ONNX weights.") from exc
-    else:
-        print("WARNING: PyTorch MiDaS assets may be downloaded lazily, or unavailable offline if downloads are disabled.")
     if should_prefetch_detector_weights(args):
         try:
             prefetch_detector_weights(py, env)
@@ -382,8 +347,6 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--enforce-arch", action="store_true", help="fail if the current machine cannot build the supported native app")
     p.add_argument("--with-onnx", action="store_true", help="export/validate requested ONNX models during setup")
     p.add_argument("--with-detector-weights", action="store_true", help="cache RGB object detector weights during setup even when CI/TESTING is set")
-    p.add_argument("--with-midas-assets", action="store_true", help="cache PyTorch MiDaS assets during setup even when CI/TESTING is set")
-    p.add_argument("--without-midas-assets", action="store_true", help="skip PyTorch MiDaS asset caching")
     p.add_argument("--without-detector-weights", action="store_true", help="skip RGB object detector weight caching")
     p.add_argument("--without-onnx", action="store_true", help="skip ONNX export explicitly")
     p.add_argument("--onnx-models", default="midas_small", help="comma-separated ONNX models: midas_small, dpt_hybrid, dpt_large, or all")

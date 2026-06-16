@@ -438,11 +438,9 @@ npm --version
 git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
 
-# Install Python + Node dependencies and cache PyTorch MiDaS/RGB detector assets once.
+# Install Python + Node dependencies and cache RGB detector weights once.
 # ONNX export is intentionally skipped here to keep first-run fast.
 npm run setup
-# Optional diagnostic if depth inference reports missing assets
-npm run verify:model-assets
 
 # Terminal 1 — start local FastAPI backend
 npm run backend:dev
@@ -471,7 +469,7 @@ Expected `/live` response:
 }
 ```
 
-> **Setup-time model cache:** The setup step downloads and caches PyTorch MiDaS assets for standard depth inference and RGB Camera View / 3D tab detector weights once under `models/torch-cache`. This cache is separate from optional ONNX files in `models/onnx`, and your uploaded images are still processed locally at all times.
+> **Setup-time detector cache:** The setup step downloads and caches the RGB Camera View / 3D tab object-detector weights once under `models/torch-cache`. This cache is separate from optional ONNX files in `models/onnx`, and your uploaded images are still processed locally at all times.
 
 ---
 
@@ -501,7 +499,7 @@ Platform support is explicit and architecture-specific:
 | Linux arm64 | Supported | `npm run build:linux:arm64` |
 | Linux x64 | Supported | `npm run build:linux:x64` |
 
-The native workflow is implemented by verbose scripts such as `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, `scripts/setup-linux.sh`, and `scripts/build-native-linux.sh`, and is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. The same setup commands (`npm run setup:mac`, `npm run setup:linux`, `npm run setup:win`, or `npm run setup`) also cache RGB object detector weights under `models/torch-cache` for offline / packaged use. Standard builds do **not** require ONNX files. ONNX remains optional and separate; when ONNX files are absent, standard depth inference requires the setup-created PyTorch MiDaS cache under `models/torch-cache`. ONNX builds use separate commands and require all three models in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
+The native workflow is implemented by verbose scripts such as `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, `scripts/setup-linux.sh`, and `scripts/build-native-linux.sh`, and is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. The same setup commands (`npm run setup:mac`, `npm run setup:linux`, `npm run setup:win`, or `npm run setup`) also cache RGB object detector weights under `models/torch-cache` for offline / packaged use. Standard builds do **not** require ONNX files. ONNX remains optional and separate; ONNX builds use separate commands and require all three models in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
 
 #### macOS — standard build
 
@@ -852,13 +850,12 @@ http://127.0.0.1:8765
 |---|---|---|
 | `GET` | `/` | Service name and API version |
 | `GET` | `/live` | Lightweight liveness check — fast, no dependencies |
-| `GET` | `/ready` | Runtime dependency and model asset readiness — distinguishes imports from ONNX/PyTorch MiDaS cache availability |
+| `GET` | `/ready` | Runtime dependency readiness — checks importability |
 | `GET` | `/health` | Full diagnostics: devices, cache, ONNX, memory, disk |
 | `GET` | `/devices` | Available compute devices |
 | `GET` | `/models` | Supported model registry (canonical IDs, specs, input sizes) |
 | `GET` | `/colormaps` | Supported colormap names |
 | `GET` | `/onnx/status` | ONNX weight paths, provider availability, checker state |
-| `GET` | `/model-assets` | Lightweight standard-build preflight for optional ONNX files and PyTorch MiDaS cache |
 | `GET` | `/benchmark` | PyTorch vs ONNX benchmark |
 | `GET` | `/api/benchmark` | Frontend-compatible benchmark alias |
 | `GET` | `/cache/metrics` | Cache telemetry (hits, misses, keyspace size, backend type) |
@@ -1283,7 +1280,7 @@ npm run stop:backend    # terminate a stale backend process
 
 ### `/live` Works but `/ready` Fails
 
-`/live` only confirms the HTTP process is responding. `/ready` checks whether required Python modules (`fastapi`, `uvicorn`, `numpy`, `torch`, `cv2`, `PIL`) can be imported and whether a first inference is likely to have model assets available. Imports can be OK while `model_assets_ready=false`.
+`/live` only confirms the HTTP process is responding. `/ready` checks whether all required Python modules (`fastapi`, `uvicorn`, `numpy`, `torch`, `cv2`, `PIL`) can be imported without error.
 
 ```bash
 npm run setup                       # reinstall dependencies
@@ -1334,18 +1331,6 @@ python scripts/doctor.py --without-detector-weights
 When skipped, setup completes but RGB Camera detection may fail until detector weights are cached.
 
 ---
-
-
-### `MODEL_ASSETS_UNAVAILABLE`
-
-ONNX weights are optional for standard builds. If ONNX files are missing, DepthLens Pro falls back to PyTorch MiDaS. That fallback still needs the MiDaS Torch Hub repo/model assets cached locally, normally by:
-
-```bash
-npm run setup
-npm run verify:model-assets
-```
-
-If GitHub or model CDN access is blocked, run setup once in an environment with access and copy the resulting `models/torch-cache` directory into the same path on the offline machine. Do not commit files from `models/torch-cache`, ONNX binaries, or downloaded model weights.
 
 ### ONNX Benchmark Is Unavailable
 
