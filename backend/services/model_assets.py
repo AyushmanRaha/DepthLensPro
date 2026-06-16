@@ -15,6 +15,12 @@ ACTION = "Run npm run setup, then npm run verify:model-assets. If network access
 STANDARD_BUILD_NOTE = "ONNX is optional; PyTorch MiDaS assets are required when ONNX weights are absent."
 MIDAS_REPO_MARKERS = ("hubconf.py", "midas", "transforms.py")
 
+PYTORCH_CHECKPOINTS = {
+    "midas_small": "midas_v21_small_256.pt",
+    "dpt_hybrid": "dpt_hybrid_384.pt",
+    "dpt_large": "dpt_large_384.pt",
+}
+
 
 class ModelAssetsUnavailableError(RuntimeError):
     """Raised when neither optional ONNX nor PyTorch MiDaS assets can run inference."""
@@ -24,16 +30,18 @@ class ModelAssetsUnavailableError(RuntimeError):
     action = ACTION
     standard_build_note = STANDARD_BUILD_NOTE
 
-    def __init__(self, message: str | None = None, *, cause: BaseException | None = None) -> None:
+    def __init__(self, message: str | None = None, *, cause: BaseException | None = None, missing_models: list[str] | None = None) -> None:
         super().__init__(message or self.message)
         self.__cause__ = cause
+        self.missing_models = missing_models or []
 
-    def to_response(self) -> dict[str, str]:
+    def to_response(self) -> dict[str, Any]:
         return {
             "error_code": self.error_code,
             "message": self.message,
             "action": self.action,
             "standard_build_note": self.standard_build_note,
+            "missing_models": self.missing_models,
         }
 
 
@@ -62,8 +70,36 @@ def _repo_cached(cache_root: Path | None = None) -> tuple[bool, Path | None]:
     return False, None
 
 
+def _model_cache_status(cache_root: Path | None = None) -> dict[str, Any]:
+    root = cache_root or torch_home()
+    repo_ok, repo_path = _repo_cached(root)
+    checkpoint_root = root / "hub" / "checkpoints"
+    models: dict[str, Any] = {}
+    for model_id, spec in MODEL_REGISTRY.items():
+        checkpoint = checkpoint_root / PYTORCH_CHECKPOINTS[model_id]
+        ready = repo_ok and checkpoint.is_file() and checkpoint.stat().st_size > 0
+        models[spec.pytorch_model_name] = {
+            "model_id": model_id,
+            "ready": bool(ready),
+            "repo_cached": repo_ok,
+            "checkpoint": os.fspath(checkpoint),
+            "checkpoint_exists": checkpoint.is_file(),
+            "size_bytes": checkpoint.stat().st_size if checkpoint.is_file() else None,
+        }
+    return {
+        "models": models,
+        "all_ready": all(item["ready"] for item in models.values()),
+        "any_ready": any(item["ready"] for item in models.values()),
+        "missing_models": [name for name, item in models.items() if not item["ready"]],
+        "repo_ok": repo_ok,
+        "repo_path": repo_path,
+    }
+
 def _check_import(name: str) -> dict[str, Any]:
-    spec = importlib.util.find_spec(name)
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, ValueError):
+        spec = None
     return {"available": spec is not None, "origin": getattr(spec, "origin", None) if spec else None}
 
 
@@ -74,17 +110,22 @@ def model_assets_status(*, deep: bool = False) -> dict[str, Any]:
     any_onnx_ready = any(bool(item.get("exists")) and int(item.get("size_bytes") or 0) > 0 for item in onnx_models.values())
     all_onnx_ready = all(bool(item.get("exists")) and int(item.get("size_bytes") or 0) > 0 for item in onnx_models.values())
     hub_root = torch_home()
-    repo_ok, repo_path = _repo_cached(hub_root)
+    cache_status = _model_cache_status(hub_root)
+    repo_ok = cache_status["repo_ok"]
+    repo_path = cache_status["repo_path"]
     downloads_disabled = model_downloads_disabled()
-    # A cached hub repo is the cheap, offline signal that torch.hub can import transforms/model code.
-    pytorch_assets_ready = repo_ok
-    can_run_offline = any_onnx_ready or pytorch_assets_ready
-    model_assets_ready = any_onnx_ready or pytorch_assets_ready
+    pytorch_assets_ready = cache_status["all_ready"]
+    model_assets_ready = pytorch_assets_ready or any_onnx_ready
     inference_ready = required_imports_ready and model_assets_ready
-    standard_build_ready = required_imports_ready and (pytorch_assets_ready or any_onnx_ready or not downloads_disabled)
+    standard_build_ready = pytorch_assets_ready
+    warnings = []
+    if not any_onnx_ready:
+        warnings.append("ONNX weights are missing; ONNX is optional and PyTorch MiDaS assets are used for the standard build.")
+    if not pytorch_assets_ready:
+        warnings.append("PyTorch MiDaS assets are missing or incomplete for one or more required models.")
     fatal_reason = None
     if required_imports_ready and not model_assets_ready and downloads_disabled:
-        fatal_reason = "ONNX weights are absent and the PyTorch MiDaS torch hub cache is missing while model downloads are disabled."
+        fatal_reason = "ONNX weights are absent and required PyTorch MiDaS assets are missing while model downloads are disabled."
     elif not required_imports_ready:
         fatal_reason = "One or more required runtime imports are unavailable."
     status = "ready" if inference_ready else ("unavailable" if fatal_reason else "degraded")
@@ -96,7 +137,17 @@ def model_assets_status(*, deep: bool = False) -> dict[str, Any]:
         "inference_ready": bool(inference_ready),
         "imports": imports,
         "python_executable": sys.executable,
+        "onnx_available": any_onnx_ready,
+        "onnx_optional": True,
         "onnx": {"any_ready": any_onnx_ready, "all_ready": all_onnx_ready, "models": onnx_models, "optional": True},
+        "torch_home": os.fspath(hub_root),
+        "torch_hub_cache_exists": (hub_root / "hub").is_dir(),
+        "midas_repo_cached": repo_ok,
+        "pytorch_models": cache_status["models"],
+        "can_run_midas_small": cache_status["models"]["MiDaS_small"]["ready"],
+        "can_run_dpt_hybrid": cache_status["models"]["DPT_Hybrid"]["ready"],
+        "can_run_dpt_large": cache_status["models"]["DPT_Large"]["ready"],
+        "missing_models": cache_status["missing_models"],
         "pytorch_hub": {
             "torch_home": os.fspath(hub_root),
             "hub_dir": os.fspath(hub_root / "hub"),
@@ -105,14 +156,15 @@ def model_assets_status(*, deep: bool = False) -> dict[str, Any]:
             "candidate_paths": [os.fspath(p) for p in _midas_repo_candidates(hub_root)],
             "downloads_disabled": downloads_disabled,
             "assets_likely_available": pytorch_assets_ready,
+            "models": cache_status["models"],
         },
-        "can_run_inference_offline": bool(can_run_offline),
+        "can_run_inference_offline": bool(model_assets_ready),
         "fatal_reason": fatal_reason,
         "recommended_action": None if inference_ready else ACTION,
         "standard_build_note": STANDARD_BUILD_NOTE,
+        "warnings": warnings,
         "deep": deep,
     }
-
 
 def should_treat_hub_error_as_assets_unavailable(exc: BaseException) -> bool:
     text = f"{type(exc).__name__}: {exc}".lower()

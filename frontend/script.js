@@ -223,10 +223,10 @@ async function apiFetch(path, options = {}) {
         const rawDetail = err.detail || err.error || detail;
         const structured = typeof rawDetail === "object" ? rawDetail : null;
         detail = structured
-          ? (structured.error_code === "MODEL_ASSETS_UNAVAILABLE" ? "Model assets missing — run setup or verify model assets." : (structured.message || structured.error_code || JSON.stringify(structured)))
+          ? (structured.error_code === "MODEL_ASSETS_UNAVAILABLE" ? "Model assets missing or incomplete — run setup or verify model assets." : (structured.message || structured.error_code || JSON.stringify(structured)))
           : rawDetail;
         const apiError = new Error(`${detail} (${url})`);
-        if (structured) apiError.detail = structured;
+        if (structured) { apiError.detail = structured; apiError.error_code = structured.error_code; apiError.missing_models = structured.missing_models || []; }
         throw apiError;
       } catch (parseErr) {
         if (parseErr.detail) throw parseErr;
@@ -244,6 +244,8 @@ async function apiFetch(path, options = {}) {
     wrapped.name = err.name || "ApiError";
     wrapped.cause = err;
     if (err.detail) wrapped.detail = err.detail;
+    if (err.error_code) wrapped.error_code = err.error_code;
+    if (err.missing_models) wrapped.missing_models = err.missing_models;
     throw wrapped;
   }
 }
@@ -1237,7 +1239,7 @@ function engineReadinessText() {
   const readiness = state.engineStatus.readiness || readinessDetails || state.engineStatus.health?.readiness;
 
   if (inferenceReady) return "Inference runtime ready";
-  if (readiness?.model_assets_ready === false) return readiness.recommended_action || "Model assets missing — run setup or verify model assets.";
+  if (readiness?.model_assets_ready === false) return readiness.recommended_action || "Model assets missing or incomplete — run setup or verify model assets.";
   if (readiness?.required) return readinessSummary(readiness);
   if (state.engineStatus.cls === "offline") return "Inference runtime unavailable";
   return "Checking inference runtime";
@@ -1545,7 +1547,7 @@ function readinessSummary(payload) {
   const failed = Object.entries(payload?.required || {})
     .filter(([, item]) => !item?.available)
     .map(([name, item]) => `${name}: ${item?.error || item?.status || "unavailable"}`);
-  if (payload?.model_assets_ready === false) return payload.recommended_action || "Model assets missing — run setup or verify model assets.";
+  if (payload?.model_assets_ready === false) return payload.recommended_action || "Model assets missing or incomplete — run setup or verify model assets.";
   return failed.length ? failed.join(" · ") : "Inference runtime ready";
 }
 
@@ -3779,7 +3781,10 @@ async function runComparison() {
       results.push(r); renderCompareCard(r);
     } catch(err) {
       clearInterval(tick);
-      if (err.name!=="AbortError") toast(`${model} failed · ${err.message}`,"error");
+      if (err.name!=="AbortError") {
+        renderCompareErrorCard(model, err);
+        toast(`${model} failed · ${err.message}`,"error");
+      }
     }
   }
   el.compareProgressFill.style.width="100%"; el.compareProgressPct.textContent="100%";
@@ -3799,6 +3804,19 @@ async function runComparison() {
     setTimeout(()=>{ el.compareProgressBlock.hidden=true; },2500);
     el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
   }
+}
+
+function renderCompareErrorCard(model, err) {
+  $(".compare-placeholder")?.remove();
+  const card=document.createElement("div"); card.className="compare-card compare-error";
+  const missing = err.detail?.missing_models || err.missing_models || [];
+  const asset = err.detail?.error_code === "MODEL_ASSETS_UNAVAILABLE" || err.error_code === "MODEL_ASSETS_UNAVAILABLE";
+  const message = asset ? "Model assets missing or incomplete — run setup or verify model assets." : (err.message || "Depth inference failed");
+  card.innerHTML=`
+    <div class="compare-card-header">${esc(model)} <span class="latency-badge">Unavailable</span></div>
+    <div class="compare-warning">${esc(message)}</div>
+    ${missing.length ? `<div class="compare-warning">Missing: ${esc(missing.join(", "))}</div>` : ""}`;
+  el.compareResults.appendChild(card);
 }
 
 function renderCompareCard(r) {

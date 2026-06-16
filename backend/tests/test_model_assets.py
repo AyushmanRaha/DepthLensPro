@@ -18,6 +18,10 @@ def test_model_assets_onnx_missing_not_fatal_with_midas_cache(monkeypatch: Any, 
     repo = torch_home / "hub" / "intel-isl_MiDaS_master"
     (repo / "midas").mkdir(parents=True)
     (repo / "hubconf.py").write_text("# fake")
+    ckpt = torch_home / "hub" / "checkpoints"
+    ckpt.mkdir(parents=True)
+    for name in ("midas_v21_small_256.pt", "dpt_hybrid_384.pt", "dpt_large_384.pt"):
+        (ckpt / name).write_bytes(b"fake")
     monkeypatch.setenv("TORCH_HOME", str(torch_home))
     monkeypatch.setenv("DEPTHLENS_ONNX_DIR", str(tmp_path / "missing-onnx"))
     monkeypatch.setenv("DEPTHLENS_DISABLE_MODEL_DOWNLOADS", "1")

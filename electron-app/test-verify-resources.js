@@ -28,6 +28,13 @@ function makeTree(root, { platform = process.platform, models = true, onnxDir = 
   else touch(path.join(root, "venv", "bin", "python3"));
   if (models) mkdir(path.join(root, "models"));
   if (models && onnxDir) mkdir(path.join(root, "models", "onnx"));
+  if (models) {
+    mkdir(path.join(root, "models", "torch-cache", "hub", "intel-isl_MiDaS_master", "midas"));
+    touch(path.join(root, "models", "torch-cache", "hub", "intel-isl_MiDaS_master", "hubconf.py"));
+    touch(path.join(root, "models", "torch-cache", "hub", "checkpoints", "midas_v21_small_256.pt"));
+    touch(path.join(root, "models", "torch-cache", "hub", "checkpoints", "dpt_hybrid_384.pt"));
+    touch(path.join(root, "models", "torch-cache", "hub", "checkpoints", "dpt_large_384.pt"));
+  }
   if (models && onnxDir && onnxFile) touch(path.join(root, "models", "onnx", "midas_small.onnx"));
 }
 

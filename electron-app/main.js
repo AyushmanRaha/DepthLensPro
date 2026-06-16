@@ -506,6 +506,7 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
   const frontendIndex = path.join(frontendDir, "index.html");
   const modelsDir = path.join(cwd, "models");
   const onnxDir = path.join(modelsDir, "onnx");
+  const torchHome = path.join(modelsDir, "torch-cache");
   return {
     backendUrl,
     pythonPath,
@@ -515,6 +516,9 @@ function createStartupDetails(pythonPath, backendDir, cwd, command) {
     frontendIndex,
     modelsDir,
     onnxDir,
+    torchHome,
+    torchCacheExists: pathExists(torchHome),
+    midasRepoExists: pathExists(path.join(torchHome, "hub", "intel-isl_MiDaS_master", "hubconf.py")) || pathExists(path.join(torchHome, "hub", "intel-isl_MiDaS_main", "hubconf.py")),
     cwd,
     command,
     isPackaged: app.isPackaged,
@@ -666,6 +670,7 @@ async function startBackend() {
   log.info(`Backend URL: ${backendUrl}`);
   log.info(`Backend dir: ${backendDir}`);
   log.info(`Backend cwd: ${cwd}`);
+  log.info("MODEL_RESOURCE_PATHS", { pythonPath, torchHome: details.torchHome, modelsDir: details.modelsDir, onnxDir: details.onnxDir, torchCacheExists: details.torchCacheExists, midasRepoExists: details.midasRepoExists });
   log.info(`Starting backend command: ${command}`);
 
   const initialLiveProbe = await probeLive(backendUrl, 1200, 0);
@@ -711,7 +716,7 @@ async function startBackend() {
       PYTHONPATH: [cwd, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
       DEPTHLENSPRO_MODEL_DIR: path.join(cwd, "models"),
       DEPTHLENS_ONNX_DIR: path.join(cwd, "models", "onnx"),
-      TORCH_HOME: path.join(cwd, "models", "torch-cache"),
+      TORCH_HOME: details.torchHome,
       SSL_CERT_FILE: process.env.SSL_CERT_FILE || "",
       REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE || process.env.SSL_CERT_FILE || "",
     },

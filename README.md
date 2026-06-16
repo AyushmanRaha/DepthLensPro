@@ -124,6 +124,60 @@ The full `(model, colormap, device, metrics_mode, outputs, max_dim, image_conten
 
 ---
 
+## Model asset setup and verification
+
+DepthLens Pro uses **PyTorch MiDaS assets for the standard build** and treats ONNX as optional acceleration. A normal non-ONNX setup must have all three Torch Hub models cached so Workspace, Compare, and reconstruction work without a first-run network surprise:
+
+- `MiDaS_small`
+- `DPT_Hybrid`
+- `DPT_Large`
+
+The cache location is `models/torch-cache` by default and is exposed as `TORCH_HOME`. The cross-platform manager prints each step, retries failed downloads, enforces a subprocess timeout, and exits non-zero with next-step instructions instead of hanging silently.
+
+Common commands:
+
+```bash
+python scripts/manage_model_assets.py paths
+python scripts/manage_model_assets.py install --models small
+python scripts/manage_model_assets.py install --models all
+python scripts/manage_model_assets.py verify --models all
+python scripts/manage_model_assets.py verify --models all --json
+```
+
+Platform setup/build examples:
+
+```bash
+# macOS
+scripts/setup-macos.sh --without-onnx --models all
+npm run verify:model-assets
+npm run verify:resources
+scripts/build-native-macos.sh --without-onnx
+
+# Linux
+scripts/setup-linux.sh --without-onnx --models all
+npm run verify:model-assets
+npm run verify:resources
+npm run build:linux
+
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1 -WithoutOnnx -Models all
+npm run verify:model-assets
+npm run verify:resources
+npm run build:win
+```
+
+Use `--models small` for a fast/minimal setup. It installs only `MiDaS_small` and is useful for quick local smoke tests, but Compare requires the full `all` group. Use `--skip-models` only when intentionally testing dependency setup without inference assets. The `--without-onnx` flag means ONNX files are not required; it does **not** skip PyTorch MiDaS assets.
+
+Release packaging follows the full offline strategy: native resource verification fails if the Torch Hub MiDaS repo or any required checkpoint is missing. ONNX `.onnx` files remain optional unless an ONNX-specific build command requests them.
+
+Readiness endpoints are intentionally distinct:
+
+- `/live` only means the backend HTTP process is alive.
+- `/ready` reports Python imports, model asset readiness, and `inference_ready`.
+- `/model-assets?deep=true` exposes model-cache diagnostics without raw stack traces.
+
+If you see `MODEL_ASSETS_UNAVAILABLE`, run `npm run verify:model-assets` first. If downloads are blocked by network policy or GitHub access, copy a pre-cached `models/torch-cache` directory from a trusted setup machine and rerun verification.
+
 ## Highlights
 
 | Capability | What it means |
