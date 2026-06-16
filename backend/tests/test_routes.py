@@ -511,3 +511,69 @@ def test_route_async_offload_allows_two_concurrent_requests(monkeypatch: Any) ->
     asyncio.run(run_two())
 
     assert max_active == 2
+
+
+def test_detect_rejects_non_image_upload_before_service_call(monkeypatch: Any) -> None:
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("detector should not be called")
+
+    monkeypatch.setattr("backend.api.routes.detect_objects", fail_if_called)
+    response = client.post(
+        "/api/detect",
+        files={"file": ("notes.txt", b"not image", "text/plain")},
+    )
+
+    assert response.status_code == 415
+
+
+def test_detect_uses_monkeypatched_detector(monkeypatch: Any) -> None:
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+
+    def fake_detect(**kwargs: Any) -> dict[str, Any]:
+        assert kwargs["device"] == "cpu"
+        assert kwargs["threshold"] == 0.35
+        return {
+            "detections": [{"label": "cup", "score": 0.91, "box": [1, 2, 3, 4]}],
+            "model": "fake-detector",
+            "device_used": "cpu",
+            "latency_ms": 1.2,
+            "resolution": {"width": 8, "height": 8},
+        }
+
+    monkeypatch.setattr("backend.api.routes.detect_objects", fake_detect)
+    response = client.post(
+        "/api/detect",
+        files={"file": ("frame.jpg", _png_bytes(), "image/jpeg")},
+        data={"threshold": "0.35", "max_detections": "3"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["detections"][0]["label"] == "cup"
+    assert payload["device_used"] == "cpu"
+
+
+def test_detect_invalid_params_return_422(monkeypatch: Any) -> None:
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+    files = {"file": ("frame.jpg", _png_bytes(), "image/jpeg")}
+
+    assert client.post("/api/detect", files=files, data={"threshold": "0.01"}).status_code == 422
+    assert client.post("/api/detect", files=files, data={"max_detections": "21"}).status_code == 422
+
+
+def test_detect_generic_failure_is_sanitized(monkeypatch: Any) -> None:
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+
+    def fail_detect(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("/tmp/private/model/path failed")
+
+    monkeypatch.setattr("backend.api.routes.detect_objects", fail_detect)
+    response = client.post(
+        "/api/detect",
+        files={"file": ("frame.jpg", _png_bytes(), "image/jpeg")},
+    )
+
+    assert response.status_code == 500
+    payload = response.json()["detail"]
+    assert payload == {"error_code": "DETECTION_FAILED", "message": "Object detection failed"}
+    assert "private" not in str(payload)
