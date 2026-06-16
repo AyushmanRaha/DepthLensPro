@@ -29,7 +29,7 @@ PYTHON_310_WARNING = (
     "on Python 3.11-3.12. If pip install fails, install Python 3.12 from "
     "python.org and re-run."
 )
-SUPPORTED_ARCHES = {"arm64", "aarch64"}
+SUPPORTED_ARCHES = {"arm64", "aarch64", "x86_64", "amd64"}
 ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
 
 
@@ -237,8 +237,12 @@ def cert_env(py: Path) -> dict[str, str]:
 
 def setup(args: argparse.Namespace) -> dict[str, str]:
     arch = platform.machine().lower()
-    if args.enforce_arch and arch not in SUPPORTED_ARCHES:
-        raise SystemExit(f"Unsupported native app architecture {platform.machine()}. Supported native builds are ARM64/aarch64.")
+    system = platform.system()
+    if args.enforce_arch:
+        if system == "Darwin" and arch not in {"arm64", "aarch64"}:
+            raise SystemExit(f"Unsupported macOS native app architecture {platform.machine()}. Supported macOS native builds are Apple Silicon arm64 only.")
+        if system in {"Windows", "Linux"} and arch not in SUPPORTED_ARCHES:
+            raise SystemExit(f"Unsupported native app architecture {platform.machine()}. Supported Windows/Linux native builds are arm64/aarch64 and x64/x86_64.")
     selected_cmd, selected, failures = find_python()
     if selected.version and selected.version[:2] == (3, 10):
         print(f"WARNING: {PYTHON_310_WARNING}")

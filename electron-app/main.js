@@ -205,13 +205,69 @@ function writeBackendPidFiles(metadata) {
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+const SETTINGS_SCHEMA_VERSION = 1;
+const SETTINGS_FILE = "settings.json";
+const SAFE_SETTING_KEYS = new Set([
+  "selectedModel", "selectedDevice", "selectedColormap", "targetFps", "webcamFrameMaxDimension",
+  "smoothingPreference", "recentBenchmarkSettings", "onnxPreference", "onnxStatus", "ui", "privacy"
+]);
+const DEFAULT_PERSISTED_SETTINGS = {
+  schemaVersion: SETTINGS_SCHEMA_VERSION,
+  selectedModel: "MiDaS_small",
+  selectedDevice: "auto",
+  selectedColormap: "inferno",
+  targetFps: 2,
+  webcamFrameMaxDimension: 384,
+  smoothingPreference: 0.25,
+  recentBenchmarkSettings: { model: "MiDaS_small", device: "auto", iterations: 3 },
+  onnxPreference: "auto",
+  onnxStatus: "unknown",
+  ui: {},
+  privacy: {},
+};
+function getSettingsPath() { return path.join(app.getPath("userData"), SETTINGS_FILE); }
+function sanitizeSettings(input = {}) {
+  const next = { ...DEFAULT_PERSISTED_SETTINGS, schemaVersion: SETTINGS_SCHEMA_VERSION };
+  if (input && typeof input === "object") {
+    for (const [key, value] of Object.entries(input)) {
+      if (SAFE_SETTING_KEYS.has(key)) next[key] = value;
+    }
+  }
+  next.targetFps = [1,2,3,5].includes(Number(next.targetFps)) ? Number(next.targetFps) : 2;
+  next.webcamFrameMaxDimension = [256,384,512].includes(Number(next.webcamFrameMaxDimension)) ? Number(next.webcamFrameMaxDimension) : 384;
+  next.smoothingPreference = Math.max(0, Math.min(0.95, Number(next.smoothingPreference) || 0));
+  return next;
+}
+function readPersistedSettings() {
+  const file = getSettingsPath();
+  try {
+    if (!fs.existsSync(file)) return { ...DEFAULT_PERSISTED_SETTINGS };
+    return sanitizeSettings(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch (err) {
+    const backup = `${file}.corrupt-${Date.now()}`;
+    try { fs.renameSync(file, backup); log.warn("SETTINGS_CORRUPT_BACKED_UP", { file, backup, error: err.message }); } catch (_) {}
+    return { ...DEFAULT_PERSISTED_SETTINGS, recoveredFromCorruption: true };
+  }
+}
+function writePersistedSettings(payload) {
+  const file = getSettingsPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const clean = sanitizeSettings(payload);
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(clean, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tmp, file);
+  try { fs.chmodSync(file, 0o600); } catch (_) {}
+  return clean;
+}
+
+
 function isSupportedArchitecture() {
-  return ["darwin:arm64", "win32:arm64", "linux:arm64"].includes(`${process.platform}:${process.arch}`);
+  return ["darwin:arm64", "win32:arm64", "win32:x64", "linux:arm64", "linux:x64"].includes(`${process.platform}:${process.arch}`);
 }
 
 function showUnsupportedArchitectureDialog() {
   const { dialog } = require("electron");
-  const message = "DepthLens Pro currently supports Apple Silicon macOS, Windows ARM, and Linux ARM only.";
+  const message = "DepthLens Pro supports macOS Apple Silicon arm64, Windows arm64/x64, and Linux arm64/x64. macOS x64 and universal builds are not supported.";
   log.error("UNSUPPORTED_ARCH_BLOCKED", { platform: process.platform, arch: process.arch });
   dialog.showMessageBoxSync({
     type: "error",
@@ -782,6 +838,8 @@ ipcMain.handle("get-backend-url", () => backendUrl);
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("get-platform", () => process.platform);
 ipcMain.handle("get-backend-live-path", () => "/live");
+ipcMain.handle("settings:load", () => readPersistedSettings());
+ipcMain.handle("settings:save", (_event, payload) => writePersistedSettings(payload));
 
 ipcMain.handle("show-save-dialog", async (event, options) => {
   const { dialog } = require("electron");

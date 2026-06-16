@@ -1,0 +1,10 @@
+const assert = require('assert');
+const { isSupportedTarget, assertSupportedTarget } = require('./src/platform-targets');
+assert.strictEqual(isSupportedTarget('darwin','arm64'), true);
+assert.strictEqual(isSupportedTarget('win32','arm64'), true);
+assert.strictEqual(isSupportedTarget('win32','x64'), true);
+assert.strictEqual(isSupportedTarget('linux','arm64'), true);
+assert.strictEqual(isSupportedTarget('linux','x64'), true);
+assert.strictEqual(isSupportedTarget('darwin','x64'), false);
+assert.throws(() => assertSupportedTarget('darwin','x64'), /macOS Intel x64 is not supported/);
+console.log('platform target tests passed');

@@ -1,0 +1,10 @@
+const fs = require('fs');
+const assert = require('assert');
+const main = fs.readFileSync('main.js','utf8');
+assert(main.includes('SETTINGS_SCHEMA_VERSION = 1'));
+assert(main.includes('writePersistedSettings'));
+assert(main.includes('SETTINGS_CORRUPT_BACKED_UP'));
+const preload = fs.readFileSync('preload.js','utf8');
+assert(preload.includes('loadSettings'));
+assert(preload.includes('saveSettings'));
+console.log('persistence bridge tests passed');

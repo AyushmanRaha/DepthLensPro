@@ -45,7 +45,7 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 | [Ground Truth Evaluation](#ground-truth-evaluation) | GT file support and benchmark metric flow |
 | [Understanding Depth Metrics](#understanding-depth-metrics) | What each metric measures and when to use it |
 | [Testing & CI](#testing--ci) | Local checks and GitHub Actions pipeline |
-| [Production & Packaging](#production--packaging) | ARM64 native builds and Docker deployment |
+| [Production & Packaging](#production--packaging) | Platform-specific 4-step builds, ONNX variants, and Docker deployment |
 | [Troubleshooting](#troubleshooting) | Common setup/runtime problems and fixes |
 | [Security](#security) | Local-first design, renderer isolation, and process safeguards |
 | [Project Structure](#project-structure) | Repository map |
@@ -67,6 +67,8 @@ Technically, the app combines:
 - **ONNX Runtime** for optional accelerated inference (CPUExecutionProvider, CUDAExecutionProvider, CoreMLExecutionProvider, and more)
 - **OpenCV / NumPy / Pillow** for image decoding, depth normalization, and GT processing
 - **Redis or in-memory LRU cache** for repeated inference acceleration
+- **Versioned Electron userData settings** with atomic writes, corruption recovery, and a browser localStorage fallback
+- **Central platform/resource/ONNX resolvers** for supported native packages and diagnostics
 - **Docker Compose** for containerized backend + Redis deployment
 
 > DepthLens Pro predicts **relative depth**, not real-world metric distance. It is useful for visual depth understanding and approximate geometry, not survey-grade measurement.
@@ -485,23 +487,124 @@ Expected `/live` response:
 
 ### A. Native Desktop App
 
-Native packaged builds are currently restricted to:
+Platform support is explicit and architecture-specific:
 
-- macOS Apple Silicon (arm64)
-- Windows ARM64
-- Linux ARM64
+| Platform / architecture | Status | Build command |
+|---|---|---|
+| macOS Apple Silicon arm64 | Supported | `npm run build:mac:arm64` |
+| macOS x64 | Not supported | `npm run build:mac:x64` exits with a clear error |
+| macOS universal | Not supported | `npm run build:mac:universal` exits with a clear error |
+| Windows arm64 | Supported | `npm run build:win:arm64` |
+| Windows x64 | Supported | `npm run build:win:x64` |
+| Linux arm64 | Supported | `npm run build:linux:arm64` |
+| Linux x64 | Supported | `npm run build:linux:x64` |
 
-Build commands:
+The native workflow is implemented by verbose scripts such as `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, `scripts/setup-linux.sh`, and `scripts/build-native-linux.sh`, and is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. Standard builds do **not** require ONNX files. ONNX builds use separate commands and require all three models: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
+
+#### macOS — standard build
 
 ```bash
-# macOS ARM64
+# 1. Clone
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# 2. Setup
+npm run setup:mac
+
+# 3. Build
 npm run build:mac:arm64
 
-# Linux ARM64
+# 4. Launch
+npm run launch:mac
+```
+
+#### macOS — ONNX build
+
+```bash
+# 1. Clone
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# 2. Setup with ONNX
+npm run setup:mac:onnx
+
+# 3. Build with ONNX
+npm run build:mac:arm64:onnx
+
+# 4. Launch
+npm run launch:mac
+```
+
+#### Windows — standard build
+
+```powershell
+# 1. Clone
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# 2. Setup
+npm run setup:win
+
+# 3. Build x64 or arm64
+npm run build:win:x64
+npm run build:win:arm64
+
+# 4. Launch
+npm run launch:win
+```
+
+#### Windows — ONNX build
+
+```powershell
+# 1. Clone
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# 2. Setup with ONNX
+npm run setup:win:onnx
+
+# 3. Build with ONNX for x64 or arm64
+npm run build:win:x64:onnx
+npm run build:win:arm64:onnx
+
+# 4. Launch
+npm run launch:win
+```
+
+#### Linux — standard build
+
+```bash
+# 1. Clone
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# 2. Setup
+npm run setup:linux
+
+# 3. Build x64 or arm64
+npm run build:linux:x64
 npm run build:linux:arm64
 
-# Windows ARM64
-npm run build:win:arm64
+# 4. Launch
+npm run launch:linux
+```
+
+#### Linux — ONNX build
+
+```bash
+# 1. Clone
+git clone https://github.com/AyushmanRaha/DepthLensPro.git
+cd DepthLensPro
+
+# 2. Setup with ONNX
+npm run setup:linux:onnx
+
+# 3. Build with ONNX for x64 or arm64
+npm run build:linux:x64:onnx
+npm run build:linux:arm64:onnx
+
+# 4. Launch
+npm run launch:linux
 ```
 
 Platform-specific outputs:
@@ -509,15 +612,10 @@ Platform-specific outputs:
 | Platform | Output |
 |---|---|
 | macOS | `electron-app/dist/mac-arm64/DepthLens Pro.app` and `.dmg` |
-| Windows | `electron-app/dist/win-arm64-unpacked/` and NSIS installer |
-| Linux | `electron-app/dist/*arm64*.AppImage` |
+| Windows | `electron-app/dist/win-arm64-unpacked/` or `electron-app/dist/win-x64-unpacked/` and NSIS installer |
+| Linux | `electron-app/dist/*arm64*.AppImage`, `electron-app/dist/*x64*.AppImage`, and unpacked resources when retained by electron-builder |
 
-The build scripts verify packaged resources before and after packaging using `scripts/verify-packaged-resources.js`. Unsupported targets (x64, universal) deliberately exit with an error:
-
-```bash
-npm run build:mac:x64         # ← exits 1 immediately
-npm run build:mac:universal   # ← exits 1 immediately
-```
+The build scripts verify repo resources before packaging and packaged resources after packaging. Standard verification treats ONNX as optional; ONNX verification fails early if any required model is missing, empty, invalid, or not bundled.
 
 ---
 
@@ -1096,17 +1194,34 @@ The test suite covers API behaviour, cache serialisation safety (no pickle deser
 
 ## Production & Packaging
 
-### Native ARM64 Builds
+### Native Platform Builds
+
+Use the root `npm run build:*` commands shown in the Installation Guide, or call the verbose platform scripts directly:
 
 ```bash
-# macOS Apple Silicon
-scripts/build-native-macos.sh --without-onnx
+# macOS Apple Silicon only
+scripts/build-native-macos.sh --arch arm64 --without-onnx
 
-# Windows ARM64
-.\scripts\build-native-windows.ps1 --without-onnx
+# Linux x64 / arm64
+scripts/build-native-linux.sh --arch x64 --without-onnx
+scripts/build-native-linux.sh --arch arm64 --without-onnx
+```
 
-# Linux ARM64
-scripts/build-native-linux.sh --without-onnx
+```powershell
+# Windows x64 / arm64
+.\scripts\build-native-windows.ps1 -Arch x64 -WithoutOnnx
+.\scripts\build-native-windows.ps1 -Arch arm64 -WithoutOnnx
+```
+
+ONNX variants download or generate all required ONNX files under `models/onnx` before packaging:
+
+```bash
+scripts/build-native-macos.sh --arch arm64 --with-onnx --onnx-models all
+scripts/build-native-linux.sh --arch x64 --with-onnx --onnx-models all
+```
+
+```powershell
+.\scripts\build-native-windows.ps1 -Arch x64 -WithOnnx -OnnxModels all
 ```
 
 Each native build script:
@@ -1374,6 +1489,8 @@ DepthLensPro/
 ├── electron-app/
 │   ├── assets/                      # App icons for all platforms
 │   ├── scripts/                     # Packaging, verification, lifecycle helpers
+│   ├── src/
+│   │   ├── platform-targets.js       # Central supported OS/architecture map, platform targets, settings bridge tests
 │   ├── src/
 │   │   ├── backend-process-policy.js # Backend ownership checks (command-line + PID metadata)
 │   │   └── security-policy.js        # Navigation allowlist, external URL classification

@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS = {
   rememberLastTab: true, skipWelcome: false, closePanelsOnOutsideClick: true, navDragSensitivity: "normal"
 };
 let settings = loadSettings();
+hydratePersistedSettings();
 
 function loadSettings() {
   try {
@@ -62,7 +63,42 @@ function loadSettings() {
     return { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }
-function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
+function persistedSettingsPayload() {
+  return {
+    selectedModel: selModel?.() || "MiDaS_small",
+    selectedDevice: selDevice?.() || "auto",
+    selectedColormap: selCmap?.() || "inferno",
+    targetFps: getWebcamTargetFps?.() || 2,
+    webcamFrameMaxDimension: getWebcamMaxDim?.() || 384,
+    smoothingPreference: getWebcamSmoothingAlpha?.() || 0.25,
+    recentBenchmarkSettings: { model: el.benchmarkModel?.value || "MiDaS_small", device: el.benchmarkDevice?.value || "auto", iterations: 3 },
+    onnxPreference: settings.onnxPreference || "auto",
+    onnxStatus: state?.engineStatus?.onnx?.status || "unknown",
+    ui: { palette: settings.palette, motion: settings.motion, compactUi: settings.compactUi },
+    privacy: { pauseWebcamWhenHidden: settings.pauseWebcamWhenHidden, stopCameraOnTabSwitch: settings.stopCameraOnTabSwitch }
+  };
+}
+async function hydratePersistedSettings() {
+  if (!window.electronAPI?.loadSettings) return;
+  try {
+    const persisted = await window.electronAPI.loadSettings();
+    if (!persisted || typeof persisted !== "object") return;
+    if (persisted.selectedModel) document.querySelector(`input[name="model"][value="${CSS.escape(persisted.selectedModel)}"]`)?.click?.();
+    if (persisted.selectedDevice) document.querySelector(`input[name="device"][value="${CSS.escape(persisted.selectedDevice)}"]`)?.click?.();
+    if (persisted.selectedColormap) document.querySelector(`input[name="colormap"][value="${CSS.escape(persisted.selectedColormap)}"]`)?.click?.();
+    if (el.webcamTargetFps && persisted.targetFps) el.webcamTargetFps.value = String(persisted.targetFps);
+    if (el.webcamMaxDim && persisted.webcamFrameMaxDimension) el.webcamMaxDim.value = String(persisted.webcamFrameMaxDimension);
+    if (el.webcamSmoothing && persisted.smoothingPreference !== undefined) el.webcamSmoothing.value = String(persisted.smoothingPreference);
+    if (persisted.ui && typeof persisted.ui === "object") settings = { ...settings, ...persisted.ui };
+    if (persisted.privacy && typeof persisted.privacy === "object") settings = { ...settings, ...persisted.privacy };
+    applySettings({ persist: true, notify: false });
+    updateWebcamTelemetry?.();
+  } catch (err) { console.warn(`[DepthLens] persisted settings unavailable: ${err.message || err}`); }
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
+  if (window.electronAPI?.saveSettings) window.electronAPI.saveSettings(persistedSettingsPayload()).catch(err => console.warn(`[DepthLens] settings save failed: ${err.message || err}`));
+}
 function applyPalette() {
   document.documentElement.setAttribute("data-palette", settings.palette || "depthlens");
   document.documentElement.style.setProperty("--accent-intensity", String(settings.accentIntensity || 1));
@@ -2047,7 +2083,7 @@ async function runCaptureDetectionOnce() {
     const payload = await response.json();
     renderCaptureDetections(payload.detections || []);
   } catch (err) {
-    if (err?.name !== "AbortError") renderCaptureDetections(null);
+    if (err?.name !== "AbortError") renderCaptureDetections({ error: err?.payload?.detail || err?.message || "detector_unavailable" });
   } finally {
     cap.detecting = false;
     if (withCaptureModalOpen()) scheduleCaptureDetection(900);
@@ -2056,6 +2092,11 @@ async function runCaptureDetectionOnce() {
 
 function renderCaptureDetections(detections) {
   if (!el.captureDetections) return;
+  if (detections && !Array.isArray(detections) && detections.error) {
+    const detail = typeof detections.error === "object" ? (detections.error.message || detections.error.error_code || "Detector unavailable") : detections.error;
+    el.captureDetections.textContent = String(detail).includes("offline") ? "Backend offline" : detail;
+    return;
+  }
   if (detections === null) { el.captureDetections.textContent = "Detector unavailable"; return; }
   const visible = (detections || []).filter(d => Number(d.score) >= 0.35).slice(0, 3);
   state.reconstruct.capture.lastDetections = visible;
@@ -3111,7 +3152,7 @@ function updateWebcamTelemetry() {
   const wc = state.webcam;
   const elapsed = wc.startedAt ? Math.max((performance.now() - wc.startedAt) / 1000, 0.001) : 0;
   const effective = wc.processed && elapsed ? wc.processed / elapsed : 0;
-  if (el.webcamTargetFpsMetric) el.webcamTargetFpsMetric.textContent = String(getWebcamTargetFps());
+  if (el.webcamTargetFpsMetric) el.webcamTargetFpsMetric.textContent = `${getWebcamTargetFps()} target / ${(wc.adaptiveFps || getWebcamTargetFps()).toFixed(1)} active`;
   if (el.webcamEffectiveFps) el.webcamEffectiveFps.textContent = effective.toFixed(2);
   if (el.webcamBackendLatency) el.webcamBackendLatency.textContent = fmtMs(wc.latencies.at(-1));
   if (el.webcamEndToEndLatency) el.webcamEndToEndLatency.textContent = fmtMs(wc.e2eLatencies.at(-1));
@@ -3168,7 +3209,7 @@ async function startWebcam() {
       await el.webcamVideo.play?.();
     }
     Object.assign(state.webcam, {
-      running: true, paused: false, hiddenPaused: false, inFlight: false,
+      running: true, paused: false, hiddenPaused: false, inFlight: false, adaptiveFps: getWebcamTargetFps(),
       processed: 0, skipped: 0, errors: 0, consecutiveErrors: 0,
       latencies: [], e2eLatencies: [], startedAt: performance.now(),
       previousDepthImageData: null,
@@ -3234,7 +3275,7 @@ function startWebcamLoop() {
 function scheduleNextWebcamFrame(delayMs = null) {
   clearTimeout(state.webcam.loopTimer);
   if (!state.webcam.running) return;
-  const interval = 1000 / getWebcamTargetFps();
+  const interval = 1000 / Math.max(0.5, state.webcam.adaptiveFps || getWebcamTargetFps());
   state.webcam.loopTimer = setTimeout(processWebcamFrame, delayMs ?? interval);
 }
 async function processWebcamFrame() {
@@ -3266,6 +3307,10 @@ async function processWebcamFrame() {
     wc.processed++;
     wc.consecutiveErrors = 0;
     if (Number.isFinite(Number(result.latency_ms))) wc.latencies.push(Number(result.latency_ms));
+    const latestLatency = Number(result.latency_ms) || e2e;
+    const target = getWebcamTargetFps();
+    if (latestLatency > (1000 / Math.max(target, 1)) * 1.4) wc.adaptiveFps = Math.max(0.5, (wc.adaptiveFps || target) * 0.75);
+    else wc.adaptiveFps = Math.min(target, (wc.adaptiveFps || target) + 0.15);
     wc.e2eLatencies.push(e2e);
     wc.latencies = wc.latencies.slice(-60);
     wc.e2eLatencies = wc.e2eLatencies.slice(-60);
@@ -3362,7 +3407,7 @@ async function imageDataFromUrl(src) {
 async function setWebcamDepthPreview(result) {
   const rawDataUrl = safeDataImagePng(result?.depth_map);
   if (!rawDataUrl) throw new Error("Backend response did not include a depth map");
-  state.webcam.lastDepthBase64 = result.depth_map;
+  state.webcam.lastDepthBase64 = null;
   const alpha = getWebcamSmoothingAlpha();
   state.webcam.smoothingAlpha = alpha;
   let displayUrl = rawDataUrl;
@@ -3384,7 +3429,6 @@ function webcamTimestamp() {
 }
 function downloadWebcamDepth() {
   const name = `webcam_depth_${webcamTimestamp()}.png`;
-  if (state.webcam.lastDepthBase64) { dlB64(name, state.webcam.lastDepthBase64); return; }
   if (!state.webcam.lastDepthDataUrl) return;
   const a = Object.assign(document.createElement("a"), { href: state.webcam.lastDepthDataUrl, download: name });
   document.body.appendChild(a); a.click(); a.remove();
