@@ -81,7 +81,7 @@ jobs:
 
       - name: Install Electron dependencies
         working-directory: electron-app
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Create packaging resource placeholders
         run: |
