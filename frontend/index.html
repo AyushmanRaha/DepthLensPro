@@ -1176,118 +1176,166 @@
             <h2 class="card-title" id="guideHeading"><span class="card-icon" aria-hidden="true"></span> Guide</h2>
             <div class="guide-accordion" id="guideAccordion">
               <article class="guide-section open">
-                <button class="guide-section-toggle" type="button" aria-expanded="true" aria-controls="guide-general">
-                  <span><span class="guide-section-kicker">Start here</span><span class="guide-section-title">General UI Guidelines</span></span>
+                <button class="guide-section-toggle" type="button" aria-expanded="true" aria-controls="guide-start-here">
+                  <span><span class="guide-section-kicker">Start here</span><span class="guide-section-title">What DepthLens Pro Does</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
-                <div class="guide-section-body" id="guide-general"><div class="guide-section-inner">
-                  <p>The header tabs switch workspaces; if they overflow, scroll the tab bar with a wheel, trackpad, touch, or drag gesture. The engine status orb reports backend health, the theme toggle switches dark/light presentation, and cards group controls by task.</p>
-                  <ol class="guide-step-list"><li>Start in Workspace for normal image depth inference.</li><li>Watch disabled buttons and progress bars: they prevent duplicate work while uploads or inference are in flight.</li><li>Use toasts for recovery hints; the app is local-first, so images stay in the local renderer/backend flow unless you export them.</li><li>Use GUIDE anytime nomenclature or metrics are unclear.</li></ol>
-                  <p class="guide-callout">Buttons, sliders, and guide controls are intentionally no-drag zones inside the Electron draggable header/body so clicks remain precise.</p>
+                <div class="guide-section-body" id="guide-start-here"><div class="guide-section-inner">
+                  <p>DepthLens Pro performs <strong>monocular depth estimation</strong>: it looks at one normal RGB image and predicts a relative near-to-far depth value for each pixel. The colored output is a depth map, not a second photograph.</p>
+                  <p>Use it for visual inspection, creative depth masks, comparing MiDaS/DPT models, local benchmarks, ground-truth validation, webcam previews, and approximate point-cloud exports.</p>
+                  <p class="guide-callout">Important limitation: the prediction is relative depth. It is not a tape measure, LiDAR scan, stereo camera result, survey-grade mesh, or guaranteed metric reconstruction.</p>
+                  <div class="guide-mini-table"><span>Good use</span><span>See which objects are nearer, create depth-aware visuals, compare models, benchmark runtimes, preview approximate 3D.</span><span>Wrong use</span><span>Measuring exact meters, safety-critical navigation, construction surveys, medical decisions, or replacing calibrated sensors.</span></div>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-first-workflow">
+                  <span><span class="guide-section-kicker">First run</span><span class="guide-section-title">First Successful Workflow</span></span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
+                </button>
+                <div class="guide-section-body" id="guide-first-workflow"><div class="guide-section-inner">
+                  <ol class="guide-step-list"><li>Check the engine status orb. Green/ready means the local backend is responding; offline or degraded means open the orb for diagnostics before starting.</li><li>Choose <strong>Auto</strong> device so the backend can pick the safest available CPU/GPU path.</li><li>Choose <strong>MiDaS Small</strong> for the first run because it is the fastest supported model and works well on CPU.</li><li>Pick a colormap such as Inferno, Magma, or Viridis.</li><li>Upload one PNG, JPG, WEBP, BMP, or other browser-supported image under the 20 MB backend limit.</li><li>Click <strong>Generate Depth Maps</strong> and wait for the progress card to finish.</li><li>Read the result card: dimensions, latency, engine used, cache state, and metrics describe what happened.</li><li>Download the color depth map, grayscale depth, or metadata if you need files for another tool.</li></ol>
+                  <p class="guide-callout">Recommended first settings: Auto device · MiDaS Small · Inferno or Viridis · one medium-size image · metrics on the default mode · ground truth off.</p>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-workspace">
-                  <span><span class="guide-section-kicker">Core workflow</span><span class="guide-section-title">Workspace: Queue, Device, Model, Colormap, GT, Dashboard</span></span>
+                  <span><span class="guide-section-kicker">Core workflow</span><span class="guide-section-title">Workspace: Queue, Models, Devices, Colormaps</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-workspace"><div class="guide-section-inner">
-                  <p>Workspace turns an image queue into depth maps. Pick <strong>Auto device selection</strong> for the best detected accelerator, <strong>CPU</strong> for compatibility, or a <strong>GPU</strong> path such as CUDA, MPS, XPU, or NPU / Neural Engine when available.</p>
-                  <ol class="guide-step-list"><li>Choose a compute device and model architecture.</li><li>Upload one or more images to the image queue.</li><li>Select a colormap to convert single-channel depth into readable color.</li><li>Optionally attach ground truth depth to compute GT-aware metrics.</li><li>Read the session dashboard for latency, cache hits, image dimensions, and metric summaries.</li></ol>
-                  <p><strong>MiDaS Small</strong> is best for quick CPU tests and webcam previews. <strong>DPT Hybrid</strong> balances quality and speed. <strong>DPT Large</strong> favors detail and usually needs a strong GPU for practical latency.</p>
+                  <p>The Workspace is the normal image-to-depth pipeline. The image queue accepts multiple images for batch mode; GT mode intentionally narrows the run to one image plus one GT file so benchmark metrics are paired correctly.</p>
+                  <ul class="guide-step-list"><li><strong>Image Queue:</strong> drag, browse, clear, or cancel. Buttons disable while work is running to prevent duplicate requests.</li><li><strong>Progress:</strong> bars and ETA text track upload/inference progress; cancelled requests stop UI processing when supported by the browser.</li><li><strong>Cache:</strong> repeated image-only requests can return cache hits when model, colormap, device, metrics, outputs, max dimension, and image content match. GT uploads bypass cache.</li><li><strong>Gallery:</strong> result cards show the original/depth preview, metrics, cache badges, and download actions.</li></ul>
+                  <div class="guide-mini-table"><span>MiDaS Small</span><span>Fastest; best for CPU, webcam, testing, and large batches where responsiveness matters.</span><span>DPT Hybrid</span><span>Balanced model; use when MiDaS Small is too coarse but DPT Large is too slow.</span><span>DPT Large</span><span>Most detailed supported model; slower and usually practical only with a strong accelerator.</span><span>Auto / CPU / accelerators</span><span>Auto is safest. CPU is most compatible. CUDA, MPS/CoreML-class paths, XPU, or NPU appear only when the runtime detects support.</span></div>
+                  <p class="guide-callout">If a device fails or disappears, switch back to Auto or CPU. Accelerator labels reflect local hardware, installed Python packages, and runtime provider availability.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-colormaps">
+                  <span><span class="guide-section-kicker">Visualization</span><span class="guide-section-title">Reading Depth Maps and Colormaps</span></span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
+                </button>
+                <div class="guide-section-body" id="guide-colormaps"><div class="guide-section-inner">
+                  <p>A colormap converts a single-channel depth plane into visible colors. The colors are a legend for depth values, not real-world object colors. Depth planes are normalized per image, so the brightest or hottest color means high relative value within that image.</p>
+                  <div class="guide-mini-table"><span>Inferno / Magma</span><span>High contrast and readable on dark backgrounds; good default inspection palettes.</span><span>Viridis</span><span>Perceptually uniform and more colorblind-friendly; good for reports.</span><span>Plasma / Turbo / Jet</span><span>Very punchy contrast; useful for spotting structure but can exaggerate boundaries.</span><span>Hot / Bone</span><span>Grayscale-like or heat-style views; useful when color should be less distracting.</span></div>
+                  <p class="guide-callout">Do not compare two separate images by color alone. Because normalization is per image, the same color may represent different absolute or relative ranges across scenes.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-ground-truth">
+                  <span><span class="guide-section-kicker">Validation</span><span class="guide-section-title">Ground Truth Evaluation</span></span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
+                </button>
+                <div class="guide-section-body" id="guide-ground-truth"><div class="guide-section-inner">
+                  <p>Ground truth depth is a reference depth label from a dataset, sensor, simulator, or calibrated pipeline. Use GT mode when you have a source image and its matching depth label and want benchmark-style error metrics.</p>
+                  <ul class="guide-step-list"><li>Supported GT files are PNG, TIFF/TIF, and numeric NPY, up to 20 MB.</li><li>Single-channel depth is preferred. Multi-channel image GT is converted to grayscale with a warning.</li><li>The backend resizes GT to prediction resolution with nearest-neighbor alignment to avoid inventing interpolated depths.</li><li>Median-scale alignment scales the prediction so its median valid depth matches the GT median, reducing monocular scale ambiguity before computing errors.</li><li>Optional GT scale and invalid-value settings help with units such as millimeters and sentinel pixels.</li></ul>
+                  <p class="guide-callout">Most bad GT scores come from mismatched image/GT pairs, wrong units, invalid pixels, unsupported files, or dimensions that do not correspond to the source image.</p>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-metrics">
+                  <span><span class="guide-section-kicker">Interpretation</span><span class="guide-section-title">Metrics: What the Numbers Mean</span></span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
+                </button>
+                <div class="guide-section-body" id="guide-metrics"><div class="guide-section-inner">
+                  <p>No single metric tells the whole story. Use visual inspection for artifacts and boundaries, latency for usability, and GT metrics only when the reference file truly matches the image.</p>
+                  <div class="guide-mini-table"><span>Latency</span><span>Milliseconds per request or inference; lower is more responsive.</span><span>Throughput</span><span>Frames/images per second; higher helps batches and webcam.</span><span>Cache hits</span><span>Returned from stored result instead of recomputing; useful but can hide runtime changes.</span><span>Errors</span><span>Failed requests, unsupported inputs, device failures, or model/runtime exceptions.</span><span>Abs Rel / Sq Rel</span><span>GT relative error; lower is better.</span><span>RMSE / log RMSE</span><span>GT absolute or logarithmic error; lower is better.</span><span>δ &lt; 1.25</span><span>Fraction of valid GT pixels within a ratio threshold; higher is better.</span><span>SSIM / PSNR</span><span>Proxy structure/signal measures for prediction visualization; higher usually means cleaner structure, not guaranteed accuracy.</span><span>SILog</span><span>Scale-invariant log-depth error; lower is better when exposed.</span><span>Gradient / edge / entropy / dynamic range</span><span>Describe depth-map structure and richness; useful for comparing outputs, not proof of correctness.</span></div>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-webcam">
-                  <span><span class="guide-section-kicker">Live mode</span><span class="guide-section-title">Webcam: Real-time Depth, FPS, Smoothing, Latency</span></span>
+                  <span><span class="guide-section-kicker">Live mode</span><span class="guide-section-title">Webcam: Real-Time Depth</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-webcam"><div class="guide-section-inner">
-                  <p>Webcam mode asks for camera permission, captures frames, and runs real-time monocular depth estimation. Target FPS caps protect the backend from overload, frame max dimension reduces compute, and smoothing stabilizes flicker at the cost of a little responsiveness.</p>
-                  <p class="guide-callout">Start with MiDaS Small, Auto/CPU, a modest max dimension, and low target FPS. Increase quality only after latency is stable.</p>
+                  <p>Webcam mode requests camera permission, captures JPEG frames locally, and sends them to the local backend at a controlled target FPS. Frame max dimension controls compute cost, and smoothing blends recent depth frames to reduce flicker.</p>
+                  <ul class="guide-step-list"><li><strong>Backend latency</strong> is model processing time. <strong>End-to-end latency</strong> also includes capture, encoding, request, decode, and display.</li><li>Skipped frames are normal when a previous frame is still processing; they protect the backend from queue buildup.</li><li>MiDaS Small is usually best for webcam because consistent low latency often looks better than slow high detail.</li><li>Local-first privacy still applies: frames are processed by the local app/backend unless you export or share them.</li></ul>
+                  <div class="guide-mini-table"><span>Stable CPU</span><span>MiDaS Small · Auto/CPU · 1–2 FPS · 256–384 px · smoothing 0.25–0.5.</span><span>Quality GPU</span><span>DPT Hybrid or Large · accelerator · 2–5 FPS · 384–512 px · modest smoothing.</span><span>Low-lag</span><span>MiDaS Small · fastest device · low max dimension · low smoothing · accept less detail.</span></div>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-compare">
-                  <span><span class="guide-section-kicker">Quality tradeoffs</span><span class="guide-section-title">Compare: Run All Models and Read Visual/Metric Results</span></span>
+                  <span><span class="guide-section-kicker">Model choice</span><span class="guide-section-title">Compare: Choosing the Right Model</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-compare"><div class="guide-section-inner">
-                  <p>Compare runs one image through the available model set so you can inspect depth boundaries, object separation, and speed. Use it when deciding whether a scene needs DPT Large detail or whether MiDaS Small/DPT Hybrid is sufficient.</p>
-                  <p>Charts help separate quality-vs-speed decisions: visual sharpness can improve while latency and memory cost rise. When ground truth is present, prefer lower Abs Rel/RMSE and higher δ &lt; 1.25 or SSIM.</p>
+                  <p>Compare runs one image through all supported models using the selected device and colormap. It is the fastest way to decide whether a scene benefits from a slower model.</p>
+                  <ol class="guide-step-list"><li>Upload one representative image.</li><li>Select a device and colormap.</li><li>Run Compare and inspect results side by side.</li><li>Look at object boundaries, thin structures, foreground/background separation, smoothness, and obvious artifacts.</li><li>Use charts for speed/metric tradeoffs, but choose the model that serves the actual workflow.</li></ol>
+                  <p class="guide-callout">A faster model can be better than a higher-detail model for webcam, iteration, batch triage, low-power laptops, or any task where stale results are worse than slightly softer depth.</p>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-performance">
-                  <span><span class="guide-section-kicker">Engine profiling</span><span class="guide-section-title">Performance: PyTorch vs ONNX Runtime Benchmark</span></span>
+                  <span><span class="guide-section-kicker">Diagnostics</span><span class="guide-section-title">Performance and Observability</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-performance"><div class="guide-section-inner">
-                  <p>Performance compares <strong>PyTorch</strong> execution with optional <strong>ONNX Runtime</strong>. ONNX can be unavailable if weights, dependencies, or a matching provider are missing. Provider means the runtime backend, such as CPU or CUDA; fallback means the app safely returns to another provider/path.</p>
-                  <div class="guide-mini-table"><span>Latency</span><span>Time for one inference; lower feels snappier.</span><span>Throughput</span><span>Images or frames per second; higher supports batch/live workloads.</span><span>Speedup</span><span>Relative improvement over a baseline.</span><span>RSS memory</span><span>Resident process memory while benchmarking.</span></div>
+                  <p>The Performance tab has Benchmark and Observability views. Benchmark compares PyTorch with optional ONNX Runtime using a deterministic synthetic 384×384 frame, so no image upload is needed.</p>
+                  <div class="guide-mini-table"><span>PyTorch</span><span>Default inference path using Torch Hub MiDaS/DPT models.</span><span>ONNX Runtime</span><span>Optional exported model path; requires local ONNX weights and compatible providers.</span><span>Provider</span><span>The execution backend such as CPU, CUDA, CoreML, OpenVINO, or another installed ORT provider.</span><span>Fallback</span><span>A safe return to PyTorch or CPU/provider path when ONNX/device support is missing.</span></div>
+                  <p>Observability shows local Prometheus-style metrics, runtime snapshots, inference latency history, bounded traces, crash analytics, cache events, and benchmark history. Use it to diagnose degraded readiness, slow requests, cache misses, unavailable ONNX files, or repeated errors.</p>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-experiments">
-                  <span><span class="guide-section-kicker">Validation</span><span class="guide-section-title">Experiments: GT Metrics, Exports, Reproducibility</span></span>
+                  <span><span class="guide-section-kicker">Reproducibility</span><span class="guide-section-title">Experiments and Repeatable Runs</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-experiments"><div class="guide-section-inner">
-                  <p>Experiments package repeated validation into named runs. Use GT runs when ground truth depth is aligned with each image; use image-only runs for qualitative batches. JSON exports preserve detailed metadata, while CSV exports are convenient for spreadsheets and reports.</p>
-                  <p>For reproducibility, record model, device, input size, colormap, timestamps, cache state, and any median-scale alignment used for relative-vs-GT comparisons.</p>
+                  <p>Experiments package repeated image-only or GT validation runs into named records. JSON exports keep detailed metadata; CSV exports are convenient for spreadsheets and reports.</p>
+                  <ul class="guide-step-list"><li>For image-only experiments, keep model, device, colormap, max dimension, and cache policy consistent.</li><li>For GT experiments, verify every image has the correct GT file, invalid-value policy, unit scale, and median-scale alignment metadata.</li><li>Record timestamps, input sizes, model IDs, device/provider, cache state, latency, metrics mode, and exported outputs.</li><li>Run a small pilot before a large batch to catch unit or pairing mistakes.</li></ul>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-reconstruct">
-                  <span><span class="guide-section-kicker">Geometry export</span><span class="guide-section-title">3D Reconstruction: Point Clouds, PLY/OBJ, Preview Controls</span></span>
+                  <span><span class="guide-section-kicker">3D</span><span class="guide-section-title">3D Reconstruction and Point Clouds</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-reconstruct"><div class="guide-section-inner">
-                  <p>Monocular depth is generally <strong>relative depth</strong>, not calibrated <strong>metric depth</strong>. Reconstruction converts one source image and its depth map into an approximate point cloud, useful for visualization and creative geometry—not survey-grade measurement.</p>
-                  <ul class="guide-step-list"><li><strong>PLY</strong> is a point-cloud friendly export; <strong>OBJ</strong> is broadly accepted by 3D tools.</li><li>Max points and preview points trade detail for responsiveness.</li><li>Grid sampling is evenly spaced; random sampling can preserve stochastic coverage.</li><li>Focal scale and depth scale shape perspective and z spacing.</li><li>Near/Far percentile clipping removes extreme depth outliers.</li><li>Coordinate system and RGB color inclusion determine orientation and whether points carry image color.</li></ul>
+                  <p>3D Reconstruction uses the source RGB image and predicted depth map to project colored points through a simple pinhole-camera approximation. It is useful for preview geometry, not measured shape.</p>
+                  <div class="guide-mini-table"><span>PLY / OBJ</span><span>PLY is point-cloud friendly; OBJ is widely accepted by 3D tools.</span><span>Max dimension</span><span>Reduces input size before depth/reconstruction to control memory and speed.</span><span>Max / preview points</span><span>Limit exported and viewer points; fewer points are faster, more points show more detail.</span><span>Grid / random</span><span>Grid is deterministic and even; random samples deterministic coverage with stochastic distribution.</span><span>Focal / depth scale</span><span>Focal changes perspective spread; depth scale stretches or compresses z spacing.</span><span>Near / far percentiles</span><span>Clip outlier depth values before projection.</span><span>Coordinates / RGB</span><span>Choose camera or Y-up orientation and whether points carry sampled image colors.</span></div>
+                  <p class="guide-callout">Do not treat point-cloud dimensions as real measurements unless you have external camera calibration and a metric depth source.</p>
                 </div></div>
               </article>
 
               <article class="guide-section">
-                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-glossary">
-                  <span><span class="guide-section-kicker">Reference</span><span class="guide-section-title">Technical Glossary / Nomenclature</span></span>
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-engine-settings">
+                  <span><span class="guide-section-kicker">Local app</span><span class="guide-section-title">Engine Status, Settings, and Local-First Privacy</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
-                <div class="guide-section-body" id="guide-glossary"><div class="guide-section-inner">
-                  <div class="guide-term-grid">
-                    <div class="guide-term"><strong>Monocular depth estimation</strong><span>Predicting scene depth from a single RGB image.</span></div>
-                    <div class="guide-term"><strong>Depth map / single-channel depth</strong><span>A per-pixel distance-like field, often displayed with a colormap.</span></div>
-                    <div class="guide-term"><strong>Relative vs metric depth</strong><span>Relative ranks near/far; metric has calibrated units.</span></div>
-                    <div class="guide-term"><strong>Inference</strong><span>The model forward pass that produces the depth prediction.</span></div>
-                    <div class="guide-term"><strong>Cache hit</strong><span>A reused previous result instead of recomputing.</span></div>
-                    <div class="guide-term"><strong>Ground truth depth</strong><span>Reference depth from sensor/simulation/dataset.</span></div>
-                    <div class="guide-term"><strong>Median-scale alignment</strong><span>Scaling prediction by median ratios before GT comparison.</span></div>
-                    <div class="guide-term"><strong>Abs Rel / RMSE</strong><span>Error metrics; lower usually indicates better depth accuracy.</span></div>
-                    <div class="guide-term"><strong>δ &lt; 1.25</strong><span>Accuracy threshold measuring pixels within a depth ratio tolerance.</span></div>
-                    <div class="guide-term"><strong>SSIM / PSNR</strong><span>Image similarity and signal quality measures.</span></div>
-                    <div class="guide-term"><strong>SILog</strong><span>Scale-invariant logarithmic depth error.</span></div>
-                    <div class="guide-term"><strong>Gradient mean / edge density</strong><span>Describe depth transitions and structural edges.</span></div>
-                    <div class="guide-term"><strong>Entropy / dynamic range</strong><span>Describe distribution richness and spread of predicted depths.</span></div>
-                    <div class="guide-term"><strong>CPU, GPU, CUDA, MPS, XPU, NPU</strong><span>Compute targets from universal CPU to vendor accelerators and Neural Engine class hardware.</span></div>
-                    <div class="guide-term"><strong>PyTorch / ONNX Runtime / provider / fallback</strong><span>Model engines, execution backends, and safe alternate paths.</span></div>
-                    <div class="guide-term"><strong>Point cloud, focal scale, depth scale</strong><span>3D points and controls that shape projection and depth spacing.</span></div>
-                  </div>
+                <div class="guide-section-body" id="guide-engine-settings"><div class="guide-section-inner">
+                  <p>The engine status orb summarizes the local FastAPI backend. Ready means inference endpoints respond. Degraded means the backend is reachable but diagnostics found missing or impaired capabilities. Offline means the renderer cannot reach the configured backend URL.</p>
+                  <ul class="guide-step-list"><li>The backend URL defaults to 127.0.0.1:8765, or an Electron-provided local port when packaged.</li><li>Settings can change theme, motion, compact/high-contrast UI, backend URL, diagnostic refresh, cache badges, large-file warnings, webcam privacy behavior, logs, and navigation persistence.</li><li>Clearing frontend metrics affects session UI counters; clearing backend cache affects stored inference results.</li><li>Images and webcam frames flow through the local renderer/backend. DepthLens Pro does not require cloud inference; privacy changes only when you export, copy, or share files yourself.</li></ul>
                 </div></div>
               </article>
 
               <article class="guide-section">
                 <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-troubleshooting">
-                  <span><span class="guide-section-kicker">Recovery</span><span class="guide-section-title">Troubleshooting and Best Practices</span></span>
+                  <span><span class="guide-section-kicker">Recovery</span><span class="guide-section-title">Troubleshooting Decision Tree</span></span>
                   <span class="guide-section-icon" aria-hidden="true"></span>
                 </button>
                 <div class="guide-section-body" id="guide-troubleshooting"><div class="guide-section-inner">
-                  <ul class="guide-step-list guide-warning"><li><strong>Backend offline/degraded:</strong> check the engine orb, refresh status, and confirm dependencies are installed.</li><li><strong>Unsupported device:</strong> switch to Auto or CPU; CUDA/MPS/XPU/NPU availability depends on hardware and runtime builds.</li><li><strong>Large files or slow inference:</strong> reduce image size, use MiDaS Small, or choose a faster device.</li><li><strong>GT mismatch:</strong> ensure ground truth dimensions and pairing match the source image.</li><li><strong>Webcam permission failure:</strong> allow camera access and close other apps using the camera.</li><li><strong>ONNX unavailable:</strong> use PyTorch or install/provide the correct ONNX weights/provider.</li></ul>
+                  <div class="guide-mini-table"><span>Backend offline</span><span>Open the orb, verify backend URL, restart the app/server, and check local firewall or port conflicts.</span><span>Model fails to load</span><span>Use MiDaS Small first; first PyTorch use may need cached weights. Check dependency diagnostics.</span><span>CUDA/MPS/XPU/NPU unavailable</span><span>Select Auto or CPU; install the matching runtime stack only if you need that accelerator.</span><span>ONNX unavailable</span><span>Run PyTorch, export/provide models/onnx weights, or inspect ONNX status/provider diagnostics.</span><span>Slow inference or frozen feel</span><span>Use MiDaS Small, lower max dimension, process fewer images, close live webcam, or wait for first model warmup.</span><span>Webcam denied or flickers</span><span>Grant camera permission, close other camera apps, lower FPS/max dimension, and increase smoothing.</span><span>Compare fails</span><span>Use one valid image under 20 MB, check engine readiness, and fall back to Auto/CPU.</span><span>GT metrics look wrong</span><span>Check the image/GT pair, dimensions, units, invalid pixels, and gt_scale for millimeter files.</span><span>Reconstruction distorted</span><span>Adjust focal/depth scale, percentile clipping, coordinate system, and remember depth is relative.</span><span>Point cloud too sparse/dense</span><span>Increase/decrease max points and preview points; use grid for even coverage.</span><span>Downloads missing</span><span>Ensure a result exists, popup/download permissions allow saving, and Electron save dialog completed.</span><span>Cache confusion</span><span>Look for cache badges, clear backend cache, or change settings to force a fresh run.</span><span>Large or unsupported files</span><span>Keep uploads under 20 MB and use browser-supported image types; GT supports PNG/TIFF/NPY.</span></div>
+                </div></div>
+              </article>
+
+              <article class="guide-section">
+                <button class="guide-section-toggle" type="button" aria-expanded="false" aria-controls="guide-glossary">
+                  <span><span class="guide-section-kicker">Reference</span><span class="guide-section-title">Glossary</span></span>
+                  <span class="guide-section-icon" aria-hidden="true"></span>
+                </button>
+                <div class="guide-section-body" id="guide-glossary"><div class="guide-section-inner">
+                  <div class="guide-term-grid">
+                    <div class="guide-term"><strong>Monocular depth estimation</strong><span>Predicting scene depth from one image.</span></div><div class="guide-term"><strong>RGB image</strong><span>A normal red/green/blue picture used as model input.</span></div><div class="guide-term"><strong>Depth map</strong><span>A per-pixel near/far prediction, usually shown with a colormap.</span></div><div class="guide-term"><strong>Relative depth</strong><span>Depth ordering without guaranteed real-world units.</span></div><div class="guide-term"><strong>Metric depth</strong><span>Depth in calibrated units such as meters.</span></div><div class="guide-term"><strong>Normalization</strong><span>Rescaling values into a display range, often per image.</span></div><div class="guide-term"><strong>Colormap</strong><span>A color legend applied to grayscale depth values.</span></div><div class="guide-term"><strong>Inference</strong><span>The model forward pass that produces depth.</span></div><div class="guide-term"><strong>Model</strong><span>The trained neural network used for prediction.</span></div><div class="guide-term"><strong>MiDaS</strong><span>A family of monocular depth models used by the app.</span></div><div class="guide-term"><strong>DPT</strong><span>Dense Prediction Transformer models with stronger detail and higher compute cost.</span></div><div class="guide-term"><strong>Transformer</strong><span>A neural architecture that models long-range image relationships.</span></div><div class="guide-term"><strong>CPU / GPU</strong><span>General processor / accelerator used for computation.</span></div><div class="guide-term"><strong>CUDA</strong><span>NVIDIA GPU compute runtime.</span></div><div class="guide-term"><strong>MPS</strong><span>Apple Metal Performance Shaders acceleration path.</span></div><div class="guide-term"><strong>XPU</strong><span>Vendor accelerator label, commonly Intel-style heterogeneous compute.</span></div><div class="guide-term"><strong>NPU / Neural Engine</strong><span>Dedicated neural-network accelerator when exposed by the runtime.</span></div><div class="guide-term"><strong>PyTorch</strong><span>Default ML runtime for model loading and inference.</span></div><div class="guide-term"><strong>ONNX Runtime</strong><span>Optional runtime for exported ONNX models.</span></div><div class="guide-term"><strong>Provider</strong><span>ONNX Runtime execution backend such as CPU or CUDA.</span></div><div class="guide-term"><strong>Fallback</strong><span>Using a safer alternate engine/device after a preferred path fails.</span></div><div class="guide-term"><strong>Cache</strong><span>Stored result reused for identical image-only requests.</span></div><div class="guide-term"><strong>Latency</strong><span>Time for a request or inference to complete.</span></div><div class="guide-term"><strong>Throughput</strong><span>How many frames or images are processed per second.</span></div><div class="guide-term"><strong>Ground truth</strong><span>Reference depth used for validation.</span></div><div class="guide-term"><strong>Median-scale alignment</strong><span>Scaling prediction by median GT/prediction ratio before scoring.</span></div><div class="guide-term"><strong>Abs Rel</strong><span>Mean absolute relative GT error; lower is better.</span></div><div class="guide-term"><strong>RMSE</strong><span>Root mean squared error; lower is better.</span></div><div class="guide-term"><strong>δ threshold</strong><span>Accuracy ratio test such as δ &lt; 1.25; higher is better.</span></div><div class="guide-term"><strong>SSIM</strong><span>Structural similarity proxy; higher indicates more similar structure.</span></div><div class="guide-term"><strong>PSNR</strong><span>Signal-to-noise style quality score in dB.</span></div><div class="guide-term"><strong>SILog</strong><span>Scale-invariant logarithmic error.</span></div><div class="guide-term"><strong>Point cloud</strong><span>A set of 3D points generated from RGB and depth.</span></div><div class="guide-term"><strong>PLY / OBJ</strong><span>Common 3D export formats; PLY suits points, OBJ is broadly supported.</span></div><div class="guide-term"><strong>Focal scale</strong><span>Controls the projection spread used for approximate 3D.</span></div><div class="guide-term"><strong>Depth scale</strong><span>Stretches or compresses reconstructed z depth.</span></div><div class="guide-term"><strong>Percentile clipping</strong><span>Removing extreme near/far depth outliers before reconstruction.</span></div><div class="guide-term"><strong>Reproducibility</strong><span>Recording settings and metadata so a run can be repeated.</span></div>
+                  </div>
                 </div></div>
               </article>
             </div>
