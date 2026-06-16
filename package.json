@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "doctor": "python3 scripts/doctor.py --doctor-only",
-    "setup": "python3 scripts/doctor.py",
+    "setup": "scripts/setup-linux.sh --models all",
     "setup:mac": "scripts/setup-macos.sh",
     "setup:linux": "scripts/setup-linux.sh",
     "setup:win": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
@@ -29,6 +29,12 @@
     "launch:win": "powershell -ExecutionPolicy Bypass -File scripts/launch-windows.ps1",
     "launch:linux": "scripts/launch-linux.sh",
     "verify:onnx:required": "cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --onnx require-all --models all ..",
-    "verify:model-assets": "python3 scripts/verify_model_assets.py"
+    "verify:model-assets": "node scripts/run_model_assets.js verify --models all",
+    "setup:models": "node scripts/run_model_assets.js install --models all",
+    "setup:models:small": "node scripts/run_model_assets.js install --models small",
+    "setup:models:all": "node scripts/run_model_assets.js install --models all",
+    "build:mac": "scripts/build-native-macos.sh --without-onnx",
+    "build:win": "powershell -ExecutionPolicy Bypass -File scripts/build-native-windows.ps1 -WithoutOnnx",
+    "build:linux": "scripts/build-native-linux.sh --without-onnx"
   }
 }
