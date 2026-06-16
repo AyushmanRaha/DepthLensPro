@@ -978,3 +978,10 @@ async def cache_metrics() -> dict[str, Any]:
 @router.delete("/cache")
 async def clear_cache() -> dict[str, int]:
     return {"cleared": int(_cache_service().clear())}
+
+
+@router.post("/cache/clear")
+async def clear_cache_post() -> dict[str, int]:
+    """Clear the active inference cache from browser clients that prefer POST."""
+
+    return {"cleared": int(_cache_service().clear())}

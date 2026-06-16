@@ -43,6 +43,69 @@ let inferenceReady = false;
 let readinessDetails = null;
 let runningInElectron = false;
 
+const SETTINGS_KEY = "depthlens_settings_v1";
+const LAST_TAB_KEY = "depthlens_last_tab_v1";
+const DEFAULT_SETTINGS = {
+  palette: "depthlens", accentIntensity: 1, glassIntensity: "normal", compactUi: false, highContrast: false, largerText: false, backgroundGrid: true,
+  motion: "full", panelPhysics: true, animatedBorders: true, reduceMotionOverride: false,
+  backendUrl: "", autoCheckEngine: true, diagnosticsRefresh: "normal", refreshDiagnosticsOnOpen: true, showAdvancedDiagnostics: false, warnOnDegradedEngine: true, allowFallbackEngine: true, autoRetryEngineChecks: true,
+  useInferenceCache: true, showCacheBadges: true, maxInteractiveDim: "default",
+  warnLargeFiles: true, autoClearQueueAfterBatch: false, autoClearResultsOnClose: false, stripFilenamesFromExports: false, pauseWebcamWhenHidden: true, stopCameraOnTabSwitch: false,
+  toastLevel: "all", toastDuration: "normal", dedupeWarnings: true, endpointTimingLogs: false, verboseConsoleLogs: false,
+  rememberLastTab: true, skipWelcome: false, closePanelsOnOutsideClick: true, navDragSensitivity: "normal"
+};
+let settings = loadSettings();
+
+function loadSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    return { ...DEFAULT_SETTINGS, ...(raw && typeof raw === "object" ? raw : {}) };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
+function applyPalette() {
+  document.documentElement.setAttribute("data-palette", settings.palette || "depthlens");
+  document.documentElement.style.setProperty("--accent-intensity", String(settings.accentIntensity || 1));
+  document.documentElement.style.setProperty("--accent-glow", `color-mix(in srgb, var(--accent) ${Math.round((settings.accentIntensity || 1) * 16)}%, transparent)`);
+}
+function applyUiDensity() {
+  const html = document.documentElement;
+  html.setAttribute("data-glass", settings.glassIntensity || "normal");
+  html.setAttribute("data-compact-ui", String(Boolean(settings.compactUi)));
+  html.setAttribute("data-high-contrast", String(Boolean(settings.highContrast)));
+  html.setAttribute("data-larger-text", String(Boolean(settings.largerText)));
+  html.setAttribute("data-background-grid", String(settings.backgroundGrid !== false));
+}
+function applyMotionSettings() {
+  const html = document.documentElement;
+  html.setAttribute("data-motion", settings.motion || "full");
+  html.setAttribute("data-reduce-motion", String(Boolean(settings.reduceMotionOverride) || settings.motion !== "full"));
+  html.setAttribute("data-animated-borders", String(settings.animatedBorders !== false));
+}
+function applySettings({ persist = false, notify = true } = {}) {
+  applyPalette(); applyUiDensity(); applyMotionSettings();
+  if (settings.backendUrl && !runningInElectron) { try { localStorage.setItem("depthlens_api_url", settings.backendUrl); } catch {} }
+  if (persist) saveSettings();
+  if (notify) document.dispatchEvent(new CustomEvent("depthlens-theme-changed", { detail: currentTheme }));
+  updateSettingsControlState();
+  try { updateChartTheme(); } catch {}
+}
+function getInteractiveMaxDim() {
+  const n = Number(settings.maxInteractiveDim);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function diagnosticsIntervalMs() { return ({ slow: 120000, fast: 30000, normal: 60000 })[settings.diagnosticsRefresh] || 60000; }
+function toastDurationMs(dur) {
+  if (typeof dur === "number") return dur;
+  return ({ short: 2200, long: 6500, normal: 3500 })[settings.toastDuration] || 3500;
+}
+function toastAllowed(type) {
+  if (settings.toastLevel === "silent") return false;
+  if (settings.toastLevel === "errors" || settings.toastLevel === "errorsOnly") return type === "error";
+  if (settings.toastLevel === "warnings") return type === "warning" || type === "error";
+  return true;
+}
+
 function normalizeApiBaseUrl(url) {
   return String(url || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
 }
@@ -265,6 +328,11 @@ const el = {
 
   // Header
   headerNavShell:          $("#headerNavShell"),
+  settingsMenuHost:        $("#settingsMenuHost"),
+  settingsMenuButton:      $("#settingsMenuButton"),
+  settingsPanel:           $("#settingsPanel"),
+  settingsPanelClose:      $("#settingsPanelClose"),
+  settingsPanelBody:       $("#settingsPanelBody"),
   engineStatusHost:        $("#engineStatusHost"),
   engineStatusButton:      $("#engineStatusButton"),
   engineStatusPanel:       $("#engineStatusPanel"),
@@ -483,6 +551,143 @@ const el = {
   bgCanvas:       $("#bgCanvas"),
 };
 
+
+// ══════════════════════════════════════════════════════════════
+// GLOBAL SETTINGS PANEL
+// ══════════════════════════════════════════════════════════════
+const SETTINGS_SECTIONS = [
+  ["appearance", "Appearance"], ["motion", "Motion & Physics"], ["engine", "Engine & Diagnostics"], ["performance", "Performance & Cache"],
+  ["privacy", "Privacy & Uploads"], ["notifications", "Notifications & Logs"], ["layout", "Layout & Navigation"], ["reset", "Reset"]
+];
+function controlRow(label, help, control) { return `<div class="settings-row"><div class="settings-copy"><strong>${esc(label)}</strong><span>${esc(help)}</span></div><div class="settings-control">${control}</div></div>`; }
+function sw(key) { return `<label class="settings-switch"><input type="checkbox" data-setting="${esc(key)}" ${settings[key] ? "checked" : ""}><span aria-hidden="true"></span></label>`; }
+function sel(key, opts) { return `<select data-setting="${esc(key)}">${opts.map(([v,l])=>`<option value="${esc(v)}" ${settings[key] == v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`; }
+function settingsAdvancedReadout() {
+  return JSON.stringify({ backendUrl: API || settings.backendUrl || DEFAULT_API_BASE_URL, backendOnline, inferenceReady, readiness: readinessDetails, engineStatus: state.engineStatus, cacheMetrics: state.cacheMetrics }, null, 2);
+}
+function renderSettingsPanel() {
+  if (!el.settingsPanelBody) return;
+  const theme = currentTheme || getSavedTheme();
+  const html = {
+    appearance: [
+      controlRow("Theme mode", "Synchronizes with the header toggle.", `<select data-setting="__theme"><option value="dark" ${theme === "dark" ? "selected" : ""}>Dark</option><option value="light" ${theme === "light" ? "selected" : ""}>Light</option></select>`),
+      controlRow("UI color palette", "DepthLens Cyan preserves the current default colors.", sel("palette", [["depthlens","DepthLens Cyan"],["violet","Violet Prism"],["emerald","Emerald Scan"],["amber","Amber Lab"],["rose","Rose Infrared"],["graphite","Mono Graphite"]])),
+      controlRow("Accent intensity", "Adjust global glow and focus strength.", `<input type="range" min="70" max="130" value="${Math.round((settings.accentIntensity||1)*100)}" data-setting="accentIntensity"><span>${Math.round((settings.accentIntensity||1)*100)}%</span>`),
+      controlRow("Glass intensity", "Changes panel opacity, blur, and glass depth.", sel("glassIntensity", [["subtle","Subtle"],["normal","Normal"],["strong","Strong"]])),
+      controlRow("Background grid", "Show the animated workspace grid canvas.", sw("backgroundGrid")),
+      controlRow("High contrast", "Strengthen borders, text, and focus clarity.", sw("highContrast")),
+      controlRow("Compact UI", "Reduce card padding and vertical spacing globally.", sw("compactUi")),
+      controlRow("Larger text", "Increase base text size modestly.", sw("largerText"))
+    ].join(""),
+    motion: [
+      controlRow("UI animations", "Control global transition and animation intensity.", sel("motion", [["full","Full"],["reduced","Reduced"],["off","Off"]])),
+      controlRow("3D panel physics", "Enable pointer tilt on settings and engine panels.", sw("panelPhysics")),
+      controlRow("Animated borders", "Enable rotating/conic border effects where used.", sw("animatedBorders")),
+      controlRow("Reduce motion override", "Force reduced motion even when the OS does not request it.", sw("reduceMotionOverride"))
+    ].join(""),
+    engine: [
+      controlRow("Backend URL", "Empty means auto/default behavior.", `<input type="text" data-setting="backendUrl" value="${esc(settings.backendUrl)}" placeholder="${esc(DEFAULT_API_BASE_URL)}"><button class="settings-action" data-action="apply-backend" type="button">Apply</button>`),
+      controlRow("Auto-check engine on launch", "Avoid aggressive boot diagnostics when disabled.", sw("autoCheckEngine")),
+      controlRow("Diagnostics refresh interval", "Controls visible polling cadence.", sel("diagnosticsRefresh", [["slow","Slow"],["normal","Normal"],["fast","Fast"]])),
+      controlRow("Refresh diagnostics when settings opens", "Run lightweight diagnostics when opening settings.", sw("refreshDiagnosticsOnOpen")),
+      controlRow("Show advanced diagnostics", "Display backend, readiness, engine, and cache details here.", sw("showAdvancedDiagnostics")),
+      controlRow("Warn before degraded engine", "Show a warning before inference when readiness is degraded.", sw("warnOnDegradedEngine")),
+      controlRow("Allow PyTorch fallback", "If disabled, fallback results are treated as warnings/failures in the UI.", sw("allowFallbackEngine")),
+      controlRow("Auto-retry failed engine checks", "Allow background retries after failed health checks.", sw("autoRetryEngineChecks")),
+      settings.showAdvancedDiagnostics ? `<pre class="settings-advanced">${esc(settingsAdvancedReadout())}</pre>` : ""
+    ].join(""),
+    performance: [
+      controlRow("Use inference cache", "Frontend policy flag for cache-aware requests and badges.", sw("useInferenceCache")),
+      controlRow("Show cache badges", "Hide cached labels/messages without disabling cache.", sw("showCacheBadges")),
+      controlRow("Maximum interactive image dimension", "Applies to Workspace, Compare, and Experiments estimates only.", sel("maxInteractiveDim", [["default","Default"],["768","768"],["1024","1024"],["1536","1536"],["2048","2048"]])),
+      controlRow("Clear frontend session metrics", "Reset totals and chart history without clearing files or results.", `<button class="settings-action" data-action="clear-session" type="button">Clear</button>`),
+      controlRow("Clear local UI preferences", "Reset only depthlens_settings_v1 after confirmation.", `<button class="settings-action" data-action="clear-settings" type="button">Clear</button>`),
+      controlRow("Clear backend cache", "Attempts POST /cache/clear if available.", `<button class="settings-action" data-action="clear-backend-cache" type="button">Clear</button>`)
+    ].join(""),
+    privacy: ["warnLargeFiles","autoClearQueueAfterBatch","autoClearResultsOnClose","stripFilenamesFromExports","pauseWebcamWhenHidden","stopCameraOnTabSwitch"].map(k=>controlRow(({warnLargeFiles:"Warn before processing large files",autoClearQueueAfterBatch:"Auto-clear queue after successful batch",autoClearResultsOnClose:"Auto-clear results on app close",stripFilenamesFromExports:"Strip filenames from exported metadata",pauseWebcamWhenHidden:"Pause webcam when app is hidden",stopCameraOnTabSwitch:"Stop camera on tab switch"})[k], "Privacy and upload behavior policy.", sw(k))).join(""),
+    notifications: [
+      controlRow("Toast level", "Filter notification visibility.", sel("toastLevel", [["all","All"],["warnings","Warnings only"],["errors","Errors only"],["silent","Silent"]])),
+      controlRow("Toast duration", "Default notification lifetime.", sel("toastDuration", [["short","Short"],["normal","Normal"],["long","Long"]])),
+      controlRow("Deduplicate repeated warnings", "Respect toastOnce duplicate suppression.", sw("dedupeWarnings")),
+      controlRow("Show endpoint timing logs", "Enable console endpoint timings.", sw("endpointTimingLogs")),
+      controlRow("Verbose console logging", "Enable additional diagnostic console logs.", sw("verboseConsoleLogs")),
+      controlRow("Copy diagnostics snapshot", "Copy settings, engine, cache, selections, and current tab JSON.", `<button class="settings-action" data-action="copy-diagnostics" type="button">Copy</button>`)
+    ].join(""),
+    layout: [
+      controlRow("Remember last opened tab", "Restore the last valid workspace panel on startup.", sw("rememberLastTab")),
+      controlRow("Skip welcome screen next time", "Bypass welcome and show the app shell on load.", sw("skipWelcome")),
+      controlRow("Close floating panels on outside click", "Applies to settings and engine panels.", sw("closePanelsOnOutsideClick")),
+      controlRow("Nav drag sensitivity", "Adjust horizontal tab drag threshold.", sel("navDragSensitivity", [["low","Low"],["normal","Normal"],["high","High"]]))
+    ].join(""),
+    reset: [
+      controlRow("Reset appearance", "Restore palette, accent, glass, grid, contrast, density, and text size.", `<button class="settings-action" data-action="reset-appearance" type="button">Reset</button>`),
+      controlRow("Reset all settings", "Restore DEFAULT_SETTINGS without deleting tab preferences.", `<button class="settings-action" data-action="reset-all" type="button">Reset</button>`),
+      controlRow("Restore current DepthLens defaults", "Set dark + DepthLens Cyan unless saved theme is light.", `<button class="settings-action" data-action="restore-depthlens" type="button">Restore</button>`)
+    ].join("")
+  };
+  el.settingsPanelBody.innerHTML = SETTINGS_SECTIONS.map(([id,title], i) => `<section class="settings-section ${i<2?'open':''}" data-section="${id}"><button class="settings-section-toggle" type="button" aria-expanded="${i<2?'true':'false'}" aria-controls="settings-section-${id}"><span>${esc(title)}</span><span class="settings-chevron" aria-hidden="true">›</span></button><div class="settings-section-body" id="settings-section-${id}"><div class="settings-section-inner">${html[id]}</div></div></section>`).join("");
+  bindSettingsControls(); refreshSettingsSectionHeights();
+}
+function refreshSettingsSectionHeights() { $$(".settings-section", el.settingsPanelBody).forEach(sec=>{ const body=$(".settings-section-body",sec); if(body) body.style.maxHeight = sec.classList.contains("open") ? (prefersReducedMotion()?"none":`${body.scrollHeight}px`) : "0px"; }); }
+function bindSettingsControls() {
+  if (!el.settingsPanelBody || el.settingsPanelBody.dataset.bound === "true") return;
+  el.settingsPanelBody.dataset.bound = "true";
+  el.settingsPanelBody.addEventListener("click", async event => {
+    const sectionBtn = event.target.closest?.(".settings-section-toggle");
+    if (sectionBtn) { const sec=sectionBtn.closest(".settings-section"); const open=!sec.classList.contains("open"); sec.classList.toggle("open",open); sectionBtn.setAttribute("aria-expanded",String(open)); refreshSettingsSectionHeights(); return; }
+    const action = event.target.closest?.("[data-action]")?.dataset.action;
+    if (!action) return;
+    if (action === "apply-backend") await applyBackendUrlSetting();
+    if (action === "clear-session") clearFrontendSessionMetrics();
+    if (action === "clear-settings") { if(confirm("Clear local settings and reapply defaults?")){ localStorage.removeItem(SETTINGS_KEY); settings=loadSettings(); applySettings({persist:true}); renderSettingsPanel(); } }
+    if (action === "clear-backend-cache") clearBackendCache();
+    if (action === "copy-diagnostics") copyDiagnosticsSnapshot();
+    if (action === "reset-appearance") resetSettingsSection("appearance");
+    if (action === "reset-all") resetSettingsSection("all");
+    if (action === "restore-depthlens") { settings.palette="depthlens"; currentTheme=getSavedTheme()==="light"?"light":"dark"; applyTheme(currentTheme,true); saveTheme(currentTheme); applySettings({persist:true}); renderSettingsPanel(); }
+  });
+  el.settingsPanelBody.addEventListener("input", handleSettingsInput);
+  el.settingsPanelBody.addEventListener("change", handleSettingsInput);
+}
+function handleSettingsInput(event) {
+  const node = event.target.closest?.("[data-setting]"); if (!node) return;
+  const key = node.dataset.setting;
+  if (key === "__theme") { currentTheme = node.value === "light" ? "light" : "dark"; applyTheme(currentTheme,true); saveTheme(currentTheme); updateChartTheme(); updateSettingsControlState(); return; }
+  let value = node.type === "checkbox" ? node.checked : node.value;
+  if (key === "accentIntensity") value = Number(value) / 100;
+  settings[key] = value;
+  applySettings({ persist:true });
+  if (["diagnosticsRefresh"].includes(key)) startPollingLoops();
+  if (key === "backendUrl") return;
+  updateSettingsControlState();
+}
+function setSettingsPanelOpen(open) {
+  state.settingsPanelOpen = Boolean(open);
+  if (!el.settingsPanel || !el.settingsMenuButton) return;
+  el.settingsMenuButton.setAttribute("aria-expanded", String(open));
+  if (open) { renderSettingsPanel(); el.settingsPanel.hidden=false; if(settings.refreshDiagnosticsOnOpen) Promise.allSettled([checkLive({quiet:true}), checkReadiness({quiet:true}), checkDiagnostics({quiet:true}), loadCacheMetrics()]).then(()=>renderSettingsPanel()); }
+  else { el.settingsPanel.hidden=true; }
+}
+function updateSettingsControlState() { if (!el.settingsPanelBody) return; const themeSel = $('[data-setting="__theme"]', el.settingsPanelBody); if (themeSel) themeSel.value = currentTheme || getSavedTheme(); const rng=$('[data-setting="accentIntensity"]', el.settingsPanelBody); if(rng?.nextElementSibling) rng.nextElementSibling.textContent=`${Math.round((settings.accentIntensity||1)*100)}%`; }
+function resetSettingsSection(section) { const keys = section === "appearance" ? ["palette","accentIntensity","glassIntensity","compactUi","highContrast","largerText","backgroundGrid"] : Object.keys(DEFAULT_SETTINGS); for (const k of keys) settings[k]=DEFAULT_SETTINGS[k]; applySettings({persist:true}); renderSettingsPanel(); }
+async function applyBackendUrlSetting() { apiResolved=false; apiResolutionPromise=null; API=null; if (settings.backendUrl && !runningInElectron) try{localStorage.setItem("depthlens_api_url", settings.backendUrl)}catch{}; await resolveApiBaseUrl(); await checkLive({quiet:false}); await checkReadiness({quiet:true}); renderEngineStatusPanel(); renderSettingsPanel(); }
+function clearFrontendSessionMetrics() { state.session={ total:0,cached:0,errors:0,latencies:[],totalInferenceMs:0 }; if (latencyChart) { latencyChart.data.labels=[]; latencyChart.data.datasets[0].data=[]; latencyChart.update("none"); } updateMetrics(); toast("Frontend session metrics cleared","success"); }
+async function clearBackendCache() { try { await apiFetch("/cache/clear", { method:"POST", signal:timeoutSignal(8000) }); state.cacheMetrics=null; await loadCacheMetrics(); toast("Backend cache cleared","success"); } catch(err) { toast(`Backend cache clear unavailable · ${err.message}`,"warning",6000); } }
+async function copyDiagnosticsSnapshot() { const snap={ settings, currentTheme, palette:settings.palette, api:API||settings.backendUrl||DEFAULT_API_BASE_URL, backendOnline, inferenceReady, engineStatus:state.engineStatus, selected:{model:selModel?.(), colormap:selCmap?.(), device:selDevice?.()}, cacheMetrics:state.cacheMetrics, currentTab:$(".nav-btn.active")?.dataset.panel||"main" }; try{ await navigator.clipboard.writeText(JSON.stringify(snap,null,2)); toast("Diagnostics snapshot copied","success"); }catch(err){ toast(`Diagnostics copy failed · ${err.message}`,"error"); } }
+function initSettingsPanel() {
+  if (!el.settingsMenuButton || el.settingsMenuButton.dataset.bound === "true") return;
+  el.settingsMenuButton.dataset.bound = "true"; renderSettingsPanel();
+  el.settingsMenuButton.addEventListener("click", e=>{ e.stopPropagation(); setSettingsPanelOpen(!state.settingsPanelOpen); });
+  el.settingsPanelClose?.addEventListener("click",()=>setSettingsPanelOpen(false));
+  document.addEventListener("click", e=>{ if(!state.settingsPanelOpen || !settings.closePanelsOnOutsideClick) return; if(el.settingsMenuHost?.contains(e.target)||el.settingsPanel?.contains(e.target)) return; setSettingsPanelOpen(false); });
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape" && state.settingsPanelOpen) setSettingsPanelOpen(false); });
+  el.settingsMenuButton.addEventListener("mousemove", e=>{ if(settings.panelPhysics) applyPointerPhysics(el.settingsMenuButton,e,{strength:10}); });
+  el.settingsMenuButton.addEventListener("mouseleave", ()=>resetPointerPhysics(el.settingsMenuButton));
+  el.settingsPanel?.addEventListener("mousemove", e=>{ if(settings.panelPhysics) applyPointerPhysics(el.settingsPanel,e,{strength:2.2,panel:true}); });
+  el.settingsPanel?.addEventListener("mouseleave", ()=>resetPointerPhysics(el.settingsPanel,{panel:true}));
+  window.addEventListener("resize", refreshSettingsSectionHeights);
+}
+
 // ══════════════════════════════════════════════════════════════
 // THEME TOGGLE LOGIC
 // ══════════════════════════════════════════════════════════════
@@ -493,6 +698,7 @@ function toggleTheme() {
   applyTheme(currentTheme, true);
   saveTheme(currentTheme);
   updateChartTheme();
+  updateSettingsControlState();
 }
 
 el.themeToggleBtn?.addEventListener("click", toggleTheme);
@@ -594,7 +800,13 @@ document.addEventListener("change", (e) => {
   const cv = el.bgCanvas, ctx = cv.getContext("2d");
   let W, H, pts = [];
   const N = 50;
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduce = prefersReducedMotion();
+  function accentRgb() {
+    const c = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    const m = c.match(/^#?([0-9a-f]{6})$/i);
+    if (!m) return [0,200,255];
+    return [parseInt(m[1].slice(0,2),16), parseInt(m[1].slice(2,4),16), parseInt(m[1].slice(4,6),16)];
+  }
 
   function mkP() {
     return {
@@ -614,7 +826,8 @@ document.addEventListener("change", (e) => {
 
   function draw() {
     ctx.clearRect(0,0,W,H);
-    ctx.strokeStyle = "rgba(0,200,255,.055)"; ctx.lineWidth=1;
+    const [ar,ag,ab] = accentRgb();
+    ctx.strokeStyle = `rgba(${ar},${ag},${ab},.055)`; ctx.lineWidth=1;
     for (let x=0;x<W;x+=64) { ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke(); }
     for (let y=0;y<H;y+=64) { ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke(); }
     for (let i=0;i<pts.length;i++) {
@@ -623,12 +836,12 @@ document.addEventListener("change", (e) => {
       for (let j=i+1;j<pts.length;j++) {
         const q=pts[j], d=Math.hypot(p.x-q.x,p.y-q.y);
         if (d<130) {
-          ctx.strokeStyle=`rgba(0,200,255,${0.11*(1-d/130)})`;
+          ctx.strokeStyle=`rgba(${ar},${ag},${ab},${0.11*(1-d/130)})`;
           ctx.lineWidth=0.55; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
         }
       }
       ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-      ctx.fillStyle=`rgba(0,200,255,${p.a*0.55})`; ctx.fill();
+      ctx.fillStyle=`rgba(${ar},${ag},${ab},${p.a*0.55})`; ctx.fill();
     }
     if (!reduce) requestAnimationFrame(draw);
   }
@@ -874,6 +1087,7 @@ function initCompareControls() {
 }
 
 function logEndpointTiming(label, started, ok, extra = "") {
+  if (!settings.endpointTimingLogs && !settings.verboseConsoleLogs) return;
   const ms = Math.round(performance.now() - started);
   console.debug(`[DepthLens] ${label} ${ok ? "ok" : "failed"} in ${ms}ms${extra ? ` · ${extra}` : ""}`);
 }
@@ -1116,7 +1330,7 @@ function setEngineStatusPanelOpen(open) {
 }
 
 function applyPointerPhysics(target, event, options = {}) {
-  if (!target) return;
+  if (!target || settings.motion === "off" || settings.reduceMotionOverride || (options.panel && settings.panelPhysics === false)) return;
 
   const rect = target.getBoundingClientRect();
   const px = (event.clientX - rect.left) / rect.width;
@@ -1180,7 +1394,7 @@ function initEngineStatusPanel() {
   });
 
   document.addEventListener("click", (event) => {
-    if (!state.engineStatus.panelOpen) return;
+    if (!state.engineStatus.panelOpen || !settings.closePanelsOnOutsideClick) return;
     if (el.engineStatusHost?.contains(event.target)) return;
     if (el.engineStatusPanel?.contains(event.target)) return;
     setEngineStatusPanelOpen(false);
@@ -2234,7 +2448,9 @@ function drawPointCloudFrame() {
   const { rotationX, rotationY, zoom, pointSize } = state.reconstruct.viewer;
   const cx = Math.cos(rotationX), sx = Math.sin(rotationX), cy = Math.cos(rotationY), sy = Math.sin(rotationY);
   const screenScale = Math.min(width, height) * 0.42 * zoom;
-  const fallback = dark ? [0, 200, 255] : [0, 112, 204];
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+  const am = accent.match(/^#?([0-9a-f]{6})$/i);
+  const fallback = am ? [parseInt(am[1].slice(0,2),16), parseInt(am[1].slice(2,4),16), parseInt(am[1].slice(4,6),16)] : (dark ? [0, 200, 255] : [0, 112, 204]);
   const projected = [];
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
@@ -2316,7 +2532,7 @@ function initReconstructionPanel() {
 // POLISHED UI MOTION + GUIDE ACCORDION
 // ══════════════════════════════════════════════════════════════
 function prefersReducedMotion() {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
+  return settings.reduceMotionOverride || settings.motion === "off" || settings.motion === "reduced" || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
 }
 
 function bindPointerGlow(selector, { tilt = 0 } = {}) {
@@ -2361,7 +2577,7 @@ function initScrollableNav() {
   let startX = 0;
   let startY = 0;
   let startScrollLeft = 0;
-  const dragThreshold = 8;
+  const dragThreshold = ({ low: 14, high: 4, normal: 8 })[settings.navDragSensitivity] || 8;
 
   shell.addEventListener("wheel", event => {
     if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
@@ -2496,6 +2712,7 @@ function initGuideAccordion() {
 function switchPanel(name) {
   const panelName = String(name || "").trim();
   if (!panelName) return false;
+  const prevPanel = $(".nav-btn.active")?.dataset.panel;
 
   const targetId = `panel-${panelName}`;
   const targetPanel = document.getElementById(targetId);
@@ -2526,6 +2743,9 @@ function switchPanel(name) {
     inline: "center",
     behavior: prefersReducedMotion() ? "auto" : "smooth",
   });
+
+  if (settings.rememberLastTab) { try { localStorage.setItem(LAST_TAB_KEY, panelName); } catch {} }
+  if (settings.stopCameraOnTabSwitch && prevPanel === "webcam" && panelName !== "webcam") stopWebcam({ quiet: true });
 
   if (panelName === "guide") {
     refreshOpenGuideHeights();
@@ -2620,6 +2840,7 @@ function addFiles(list) {
     if (state.gtMode && state.files.length + added >= 1) { toast("GT mode requires one image and one GT depth file", "warning"); break; }
     if (!ALLOWED.test(file.type)) { toast(`Skipped "${file.name}" — image file required`,"warning"); continue; }
     if (file.size > 20*1024*1024) { toast(`Skipped "${file.name}" — exceeds 20 MB`,"warning"); continue; }
+    if (settings.warnLargeFiles && file.size > 16*1024*1024 && !confirm(`Process large file "${file.name}" (${fmtSize(file.size)})?`)) continue;
     if (state.files.some(f=>f.file.name===file.name&&f.file.size===file.size)) continue;
     const entry = {id:uid(),file,thumb:null,status:"pending",result:null};
     state.files.push(entry);
@@ -2758,12 +2979,16 @@ async function runBatch() {
     },120);
 
     try {
-      const result=await inferOne(entry.file,model,colormap,device,state.abort.signal,state.gtMode?"full":"fast",state.gtMode?"color,gray":"color",state.gtMode?state.gtFile:null,state.gtMode);
+      if (settings.warnOnDegradedEngine && backendOnline && !inferenceReady) toastOnce("Depth engine readiness is degraded; inference may fail", "warning", 6000);
+      const result=await inferOne(entry.file,model,colormap,device,state.abort.signal,state.gtMode?"full":"fast",state.gtMode?"color,gray":"color",state.gtMode?state.gtFile:null,state.gtMode,getInteractiveMaxDim());
       clearInterval(tick);
       updateEstimate("workspace",model,device,result.latency_ms);
       entry.result=result; entry.status=result.fallback_used?"completed_with_warning":"done";
       setFileSt(entry.id,result.fallback_used?"warning":"done",`${result.fallback_used?"⚠":"✓"} ${result.latency_ms}ms${result.engine_used?` · ${result.engine_used}`:""}`);
-      if (result.fallback_used) toastOnce("Depth map generated with PyTorch fallback · ONNX unavailable", "warning", 4500);
+      if (result.fallback_used) {
+        toastOnce(settings.allowFallbackEngine ? "Depth map generated with PyTorch fallback · ONNX unavailable" : "PyTorch fallback is disabled in Settings · review result", "warning", 4500);
+        if (!settings.allowFallbackEngine) entry.status = "completed_with_warning";
+      }
       state.session.total++; state.session.totalInferenceMs+=result.latency_ms;
       if (result.cached) state.session.cached++;
       state.session.latencies.push(result.latency_ms);
@@ -2786,6 +3011,7 @@ async function runBatch() {
   const done=pending.filter(e=>e.status==="done"||e.status==="completed_with_warning").length;
   setProgress(100,`Batch complete — ${done} image${done!==1?"s":""} in ${fmtDuration(elapsed)}`,"");
   if (done>0) toast(`Batch complete — ${done} succeeded`,"success");
+  if (done > 0 && done === pending.length && settings.autoClearQueueAfterBatch) { state.files = []; if (el.fileQueue) el.fileQueue.innerHTML = ""; }
   } catch (err) {
     pending.filter(e=>e.status==="running").forEach(e=>{ e.status="error"; setFileSt(e.id,"error","Error"); });
     state.session.errors += pending.filter(e=>e.status==="error").length;
@@ -2809,6 +3035,7 @@ async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs
   if (gtFile) fd.append("gt_file", gtFile);
   if (gtRequired) fd.append("gt_required", "true");
   if (maxDim) fd.append("max_dim", String(maxDim));
+  if (settings.useInferenceCache === false) fd.append("use_cache", "false");
   if (!engineReady()) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
   const res=await apiFetch("/estimate",{
     method:"POST", body:fd,
@@ -3140,6 +3367,7 @@ function downloadWebcamDepth() {
   document.body.appendChild(a); a.click(); a.remove();
 }
 function handleWebcamVisibilityChange() {
+  if (!settings.pauseWebcamWhenHidden) return;
   if (!state.webcam.running) return;
   if (document.hidden) {
     state.webcam.hiddenPaused = true;
@@ -3202,7 +3430,7 @@ function appendGalleryItem(r) {
         <span class="gallery-tag">${esc(r.model?.replace("MiDaS_","").replace("DPT_","DPT "))}</span>
         <span class="gallery-tag">${esc(r.colormap)}</span>
         <span class="gallery-tag">${esc(r.device_used||"")}</span>
-        ${r.cached?'<span class="gallery-tag">cached</span>':""}
+        ${r.cached && settings.showCacheBadges?'<span class="gallery-tag">cached</span>':""}
       </div>
       <div class="gallery-stats-row">
         <span>Latency <strong>${esc(Number.isFinite(Number(r.latency_ms)) ? `${Number(r.latency_ms)}ms` : "—")}</strong></span>
@@ -3469,7 +3697,7 @@ async function runComparison() {
       el.compareProgressEta.textContent=`ETA ${fmtDuration(rem)}`;
     },120);
     try {
-      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray");
+      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray",null,false,getInteractiveMaxDim());
       clearInterval(tick); updateEstimate("compare",model,device,r.latency_ms);
       results.push(r); renderCompareCard(r);
     } catch(err) {
@@ -3784,7 +4012,7 @@ function renderExperimentRow(row) {
 }
 
 function renderExperiment() {
-  const rows = experimentRows();
+  const rows = settings.stripFilenamesFromExports ? experimentRows().map(r => ({ ...r, filename: "" })) : experimentRows();
 
   el.experimentCount.textContent = rows.length;
 
@@ -3892,7 +4120,8 @@ async function runExperiment() {
         state.gtMode ? "full" : "fast",
         "color,gray",
         state.gtMode ? state.gtFile : null,
-        state.gtMode
+        state.gtMode,
+        getInteractiveMaxDim()
       );
 
       state.experiment.results.push({
@@ -3950,6 +4179,7 @@ function exportBlob(name, type, content) {
 }
 
 window.addEventListener("pagehide", () => {
+  if (settings.autoClearResultsOnClose) { state.results = []; if (el.gallery) el.gallery.innerHTML = ""; }
   stopWebcam({ quiet: true });
   [...activeBlobUrls].forEach(revokeBlobUrl);
 });
@@ -3959,7 +4189,7 @@ function exportExperimentJson() {
     run_name: state.experiment.name,
     started_at: state.experiment.startedAt,
     exported_at: new Date().toISOString(),
-    results: state.experiment.results,
+    results: settings.stripFilenamesFromExports ? state.experiment.results.map(r => ({ ...r, filename: undefined })) : state.experiment.results,
   };
 
   exportBlob(
@@ -3970,7 +4200,7 @@ function exportExperimentJson() {
 }
 
 function exportExperimentCsv() {
-  const rows = experimentRows();
+  const rows = settings.stripFilenamesFromExports ? experimentRows().map(r => ({ ...r, filename: "" })) : experimentRows();
   const header = ["filename", "model", "engine", "device", "latency_ms", "abs_rel", "rmse", "delta_1", "gt", "fallback", "warnings"];
 
   const csv = [
@@ -3993,12 +4223,14 @@ el.experimentExportCsvBtn?.addEventListener("click", exportExperimentCsv);
 // ══════════════════════════════════════════════════════════════
 function toastOnce(msg, type="info", dur=3500) {
   const now = Date.now();
-  if (state.lastToast.message === msg && now - state.lastToast.at < 15000) return;
+  if (settings.dedupeWarnings && state.lastToast.message === msg && now - state.lastToast.at < 15000) return;
   state.lastToast = { message: msg, at: now };
   toast(msg, type, dur);
 }
 
 function toast(msg, type="info", dur=3500) {
+  if (!toastAllowed(type)) return;
+  dur = toastDurationMs(typeof dur === "number" && dur !== 3500 ? dur : settings.toastDuration);
   const t=document.createElement("div");
   t.className=`toast ${type}`;
   t.innerHTML=`<span class="toast-dot"></span><span>${esc(msg)}</span>`;
@@ -4083,8 +4315,8 @@ function startPollingLoops() {
     return;
   }
   addPollingInterval("live", 10_000, signal => checkLive({ quiet: true, signal }));
-  addPollingInterval("diagnostics", 60_000, signal => checkDiagnostics({ quiet: true, signal }));
-  addPollingInterval("cacheMetrics", 45_000, signal => loadCacheMetrics({ signal }));
+  addPollingInterval("diagnostics", diagnosticsIntervalMs(), signal => checkDiagnostics({ quiet: true, signal }));
+  addPollingInterval("cacheMetrics", Math.max(30_000, diagnosticsIntervalMs() * 0.75), signal => loadCacheMetrics({ signal }));
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -4102,9 +4334,11 @@ async function init() {
   if (el.appShell) el.appShell.classList.remove("ready");
   state.initializingBackend = true;
   loadPrefs();
+  applySettings({ notify: false });
   setStatus("connecting", "Starting depth engine", DEFAULT_API_BASE_URL);
   syncQueueControls();
   initReconstructionPanel();
+  initSettingsPanel();
   initScrollableNav();
   initGuideAccordion();
   bindPointerGlow(".logo-group", { tilt: 3 });
@@ -4119,16 +4353,22 @@ async function init() {
     initEngineStatusPanel();
     syncWebcamControls();
     updateWebcamTelemetry();
-    switchPanel("main");
-    await checkLive();
-    await checkReadiness({ quiet: false });
+    const savedPanel = settings.rememberLastTab ? (() => { try { return localStorage.getItem(LAST_TAB_KEY) || "main"; } catch { return "main"; } })() : "main";
+    switchPanel(savedPanel);
+    if (settings.skipWelcome && el.welcomeScreen && el.appShell) { el.welcomeScreen.hidden = true; el.appShell.classList.add("ready"); el.themeToggleHeader?.appendChild(el.themeToggleBtn); el.themeToggleBtn?.classList.add("visible"); }
+    if (settings.autoCheckEngine) {
+      await checkLive();
+      await checkReadiness({ quiet: false });
+    } else {
+      await checkLive({ quiet: true });
+    }
     state.initializingBackend = false;
     syncQueueControls();
     syncReconstructControls();
     syncWebcamControls();
     updateWebcamTelemetry();
     startPollingLoops();
-    Promise.allSettled([checkDiagnostics({ quiet: true }), loadCacheMetrics()]);
+    if (settings.autoCheckEngine) Promise.allSettled([checkDiagnostics({ quiet: true }), loadCacheMetrics()]);
   } catch (err) {
     backendOnline = false;
     setStatus("offline", "Depth engine offline", `Depth engine URL resolution failed · ${err.message}`);
