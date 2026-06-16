@@ -48,6 +48,13 @@ _ENV_KEYS = (
     "DEPTHLENS_MAX_DIM",
     "DEPTHLENS_DEFAULT_METRICS",
     "DEPTHLENS_DEFAULT_OUTPUTS",
+    "DEPTHLENS_OBSERVABILITY_ENABLED",
+    "DEPTHLENS_PROMETHEUS_ENABLED",
+    "DEPTHLENS_TELEMETRY_MAX_EVENTS",
+    "DEPTHLENS_TRACE_HISTORY_LIMIT",
+    "DEPTHLENS_CRASH_HISTORY_LIMIT",
+    "DEPTHLENS_BENCHMARK_HISTORY_LIMIT",
+    "DEPTHLENS_TRACE_SAMPLE_RATE",
 )
 
 
@@ -104,6 +111,18 @@ class Settings(BaseSettings):
     DEPTHLENS_DEFAULT_OUTPUTS: str = Field(
         default="color", description="Default estimate outputs: color, gray, or color,gray."
     )
+    DEPTHLENS_OBSERVABILITY_ENABLED: bool = Field(
+        default=True, description="Enable local observability snapshots and instrumentation."
+    )
+    DEPTHLENS_PROMETHEUS_ENABLED: bool = Field(
+        default=True,
+        description="Enable local Prometheus exposition when prometheus-client is installed.",
+    )
+    DEPTHLENS_TELEMETRY_MAX_EVENTS: int = Field(default=200, ge=10, le=5000)
+    DEPTHLENS_TRACE_HISTORY_LIMIT: int = Field(default=200, ge=10, le=5000)
+    DEPTHLENS_CRASH_HISTORY_LIMIT: int = Field(default=100, ge=10, le=2000)
+    DEPTHLENS_BENCHMARK_HISTORY_LIMIT: int = Field(default=50, ge=5, le=1000)
+    DEPTHLENS_TRACE_SAMPLE_RATE: float = Field(default=1.0, ge=0.0, le=1.0)
 
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod

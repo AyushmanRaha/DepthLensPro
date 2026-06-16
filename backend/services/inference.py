@@ -21,6 +21,7 @@ from backend.config import settings
 from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
+from backend.services import observability
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
@@ -590,14 +591,31 @@ def infer_depth_arrays(
     model_id = normalize_model_id(model)
     spec = get_model_spec(model_id)
     depth_key = _depth_cache_key(raw, model_id, device, max_dim)
-    cached_depth = _get_cached_depth(depth_key)
-    img = _decode(raw, max_dim=max_dim)
+    with observability.trace_span(
+        "inference",
+        "depth_cache_lookup",
+        {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+    ):
+        cached_depth = _get_cached_depth(depth_key)
+    with observability.trace_span(
+        "inference",
+        "decode",
+        {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+    ):
+        img = _decode(raw, max_dim=max_dim)
     if cached_depth is None:
         t0 = time.perf_counter()
-        if (engine_requested or "auto").lower() == "auto":
-            depth, engine_metadata = _infer_with_metadata(img, model_id, device)
-        else:
-            depth, engine_metadata = _infer_with_metadata(img, model_id, device, engine_requested)
+        with observability.trace_span(
+            "inference",
+            "model_inference",
+            {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+        ):
+            if (engine_requested or "auto").lower() == "auto":
+                depth, engine_metadata = _infer_with_metadata(img, model_id, device)
+            else:
+                depth, engine_metadata = _infer_with_metadata(
+                    img, model_id, device, engine_requested
+                )
         lat = round((time.perf_counter() - t0) * 1000, 1)
         resolution = {"width": img.shape[1], "height": img.shape[0]}
         _set_cached_depth(depth_key, depth, resolution)
@@ -648,73 +666,126 @@ def process_image(
     gt_invalid_value: float | None = None,
 ) -> dict[str, Any]:
     """Decode, infer, colorize, and package one image response."""
-    arrays = infer_depth_arrays(raw, model, device, filename=filename, max_dim=max_dim)
-    model_id = arrays["model_id"]
-    spec = get_model_spec(model_id)
-    metrics_mode = normalize_metrics_mode(metrics)
-    output_set = parse_outputs(outputs)
-    img = arrays["img_bgr"]
-    depth = arrays["depth"]
-    lat = arrays["latency_ms"]
-    resolution = arrays["resolution"]
-    depth_cached = arrays["depth_cached"]
-    engine_metadata = {
-        key: value
-        for key, value in arrays.items()
-        if key
-        not in {"img_bgr", "depth", "latency_ms", "model", "resolution", "filename", "depth_cached"}
-    }
 
-    gt_result: dict[str, Any] | None = None
-    gt_metadata: dict[str, Any] = {"provided": False}
-    gt_visualizations: dict[str, str] = {}
-    if gt_raw:
-        try:
-            gt_payload = decode_ground_truth(
-                gt_raw,
-                gt_filename,
-                invalid_value=gt_invalid_value,
-                scale=gt_scale,
-            )
-            gt_result = compute_ground_truth_metrics(
-                depth,
-                gt_payload.depth,
-                metadata=gt_payload.metadata,
-                invalid_value=gt_invalid_value,
-            )
-            gt_metadata = gt_result["metadata"]
-            gt_visualizations = gt_result.get("visualizations", {})
-        except GroundTruthError:
-            raise
-        except Exception as exc:
-            raise GroundTruthError(f"Ground-truth metric computation failed: {exc}") from exc
-    elif gt_required:
-        raise GroundTruthError("Ground-truth mode requires a GT depth file")
+    model_label = model
+    try:
+        arrays = infer_depth_arrays(raw, model, device, filename=filename, max_dim=max_dim)
+        model_id = arrays["model_id"]
+        model_label = model_id
+        spec = get_model_spec(model_id)
+        metrics_mode = normalize_metrics_mode(metrics)
+        output_set = parse_outputs(outputs)
+        img = arrays["img_bgr"]
+        depth = arrays["depth"]
+        lat = arrays["latency_ms"]
+        resolution = arrays["resolution"]
+        depth_cached = arrays["depth_cached"]
+        engine_metadata = {
+            key: value
+            for key, value in arrays.items()
+            if key
+            not in {
+                "img_bgr",
+                "depth",
+                "latency_ms",
+                "model",
+                "resolution",
+                "filename",
+                "depth_cached",
+            }
+        }
 
-    payload: dict[str, Any] = {
-        "metrics": _metrics_for_mode(depth, img, metrics_mode, gt_result=gt_result),
-        "latency_ms": lat,
-        "model": model_id,
-        "model_id": model_id,
-        "model_display_name": spec.display_name,
-        "colormap": colormap,
-        "device_used": device,
-        "resolution": resolution,
-        "filename": filename,
-        "cached": False,
-        "depth_cached": depth_cached,
-        "metrics_mode": metrics_mode,
-        "outputs": list(output_set),
-        "gt_metadata": gt_metadata,
-        **engine_metadata,
-    }
-    payload.update(gt_visualizations)
-    if "color" in output_set:
-        payload["depth_map"] = _b64(_colorize(depth, colormap))
-    if "gray" in output_set:
-        gray = cv2.cvtColor((depth * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
-        payload["grayscale"] = _b64(gray)
-    return payload
+        gt_result: dict[str, Any] | None = None
+        gt_metadata: dict[str, Any] = {"provided": False}
+        gt_visualizations: dict[str, str] = {}
+        if gt_raw:
+            with observability.trace_span(
+                "inference",
+                "gt_metrics",
+                {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+            ):
+                try:
+                    gt_payload = decode_ground_truth(
+                        gt_raw,
+                        gt_filename,
+                        invalid_value=gt_invalid_value,
+                        scale=gt_scale,
+                    )
+                    gt_result = compute_ground_truth_metrics(
+                        depth,
+                        gt_payload.depth,
+                        metadata=gt_payload.metadata,
+                        invalid_value=gt_invalid_value,
+                    )
+                    gt_metadata = gt_result["metadata"]
+                    gt_visualizations = gt_result.get("visualizations", {})
+                except GroundTruthError:
+                    raise
+                except Exception as exc:
+                    raise GroundTruthError(
+                        f"Ground-truth metric computation failed: {exc}"
+                    ) from exc
+        elif gt_required:
+            raise GroundTruthError("Ground-truth mode requires a GT depth file")
+
+        with observability.trace_span(
+            "inference",
+            "metrics_computation",
+            {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+        ):
+            metric_payload = _metrics_for_mode(depth, img, metrics_mode, gt_result=gt_result)
+        payload: dict[str, Any] = {
+            "metrics": metric_payload,
+            "latency_ms": lat,
+            "model": model_id,
+            "model_id": model_id,
+            "model_display_name": spec.display_name,
+            "colormap": colormap,
+            "device_used": device,
+            "resolution": resolution,
+            "filename": filename,
+            "cached": False,
+            "depth_cached": depth_cached,
+            "metrics_mode": metrics_mode,
+            "outputs": list(output_set),
+            "gt_metadata": gt_metadata,
+            **engine_metadata,
+        }
+        payload.update(gt_visualizations)
+        if "color" in output_set:
+            with observability.trace_span(
+                "inference",
+                "color_encoding",
+                {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+            ):
+                payload["depth_map"] = _b64(_colorize(depth, colormap))
+        if "gray" in output_set:
+            with observability.trace_span(
+                "inference",
+                "grayscale_encoding",
+                {"model_id": model_id, "device_type": observability.normalize_device_type(device)},
+            ):
+                gray = cv2.cvtColor((depth * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+                payload["grayscale"] = _b64(gray)
+        observability.record_inference(
+            model_id,
+            str(engine_metadata.get("engine_used", "pytorch")),
+            str(engine_metadata.get("device_used", device)),
+            lat,
+            pixels=int(resolution.get("width", 0)) * int(resolution.get("height", 0)),
+            cached=bool(depth_cached),
+            outcome="ok",
+            metrics_mode=metrics_mode,
+            outputs_count=len(output_set),
+            warnings_count=len(engine_metadata.get("warnings") or []),
+        )
+        return payload
+    except Exception as exc:
+        observability.record_crash("inference", "INFERENCE_FAILED", exc)
+        observability.record_inference(
+            model_label, "unknown", device, None, outcome="error", error_code="INFERENCE_FAILED"
+        )
+        raise
 
 
 async def process_image_async(

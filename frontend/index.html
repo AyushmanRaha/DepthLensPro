@@ -889,6 +889,13 @@
               and raw frame throughput.
             </p>
 
+            <div class="performance-subnav" role="tablist" aria-label="Performance views">
+              <button class="btn btn-ghost btn-sm active" type="button" data-performance-view="benchmark" aria-selected="true">Benchmark</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-performance-view="observability" aria-selected="false">Observability</button>
+            </div>
+
+            <div class="performance-view active" id="performanceViewBenchmark" data-performance-view-panel="benchmark">
+
             <div class="cmap-row performance-controls">
               <div class="performance-field">
                 <label for="benchmarkModel" class="cmap-label">Model</label>
@@ -953,6 +960,37 @@
               <p class="chart-label">PyTorch vs ONNX Runtime Latency</p>
               <div class="chart-wrap">
                 <canvas id="benchmarkChart" aria-label="PyTorch and ONNX benchmark chart"></canvas>
+              </div>
+            </div>
+            </div>
+
+            <div class="performance-view" id="performanceViewObservability" data-performance-view-panel="observability" hidden>
+              <div class="about-card">
+                <div class="observability-header">
+                  <div>
+                    <h3 class="card-title">Observability</h3>
+                    <p class="compare-desc">Local runtime telemetry, Prometheus metrics, traces, crash history, and benchmark history.</p>
+                    <p class="muted" id="observabilityUpdatedAt">Not loaded</p>
+                  </div>
+                  <div class="observability-actions">
+                    <span class="observability-status-pill" id="observabilityStatus">Idle</span>
+                    <button class="btn btn-primary btn-sm" id="observabilityRefreshBtn" type="button">Refresh</button>
+                    <button class="btn btn-ghost btn-sm" id="observabilityExportBtn" type="button">Export JSON</button>
+                    <button class="btn btn-ghost btn-sm" id="observabilityCopyMetricsBtn" type="button">Copy /metrics</button>
+                  </div>
+                </div>
+                <div class="metrics-grid observability-grid">
+                  <div class="metric-cell"><span class="metric-value" id="observabilityTotalRequests">—</span><span class="metric-label">Total Requests</span></div>
+                  <div class="metric-cell"><span class="metric-value" id="observabilityHttpP95">—</span><span class="metric-label">HTTP p95</span></div>
+                  <div class="metric-cell"><span class="metric-value" id="observabilityInferenceRuns">—</span><span class="metric-label">Inference Runs</span></div>
+                  <div class="metric-cell"><span class="metric-value" id="observabilityInferenceP95">—</span><span class="metric-label">Inference p95</span></div>
+                  <div class="metric-cell"><span class="metric-value" id="observabilityCacheHitRatio">—</span><span class="metric-label">Cache Hit Ratio</span></div>
+                  <div class="metric-cell"><span class="metric-value" id="observabilityCrashCount">—</span><span class="metric-label">Recent Crashes</span></div>
+                </div>
+                <div class="chart-wrap"><canvas id="observabilityChart" aria-label="Inference latency history chart"></canvas></div>
+                <h4>Recent Traces</h4><table class="observability-table"><tbody id="observabilityTraceBody"><tr><td class="observability-empty">No traces yet</td></tr></tbody></table>
+                <h4>Benchmark History</h4><table class="observability-table"><tbody id="observabilityBenchmarkBody"><tr><td class="observability-empty">No benchmark history yet</td></tr></tbody></table>
+                <h4>Crash Analytics</h4><table class="observability-table"><tbody id="observabilityCrashBody"><tr><td class="observability-empty">No crashes recorded</td></tr></tbody></table>
               </div>
             </div>
           </div>
