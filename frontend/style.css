@@ -2502,7 +2502,6 @@ ul.guide-step-list { list-style:disc; }
 .settings-switch input:checked + span::after { transform:translateX(19px); background:var(--accent); box-shadow:0 0 12px var(--accent-glow); }
 .settings-action { border:1px solid var(--border); border-radius:999px; background:rgba(255,255,255,.045); color:var(--text-muted); padding:.38rem .68rem; font-size:.68rem; transition:transform var(--t), border-color var(--t), color var(--t), background var(--t); }
 .settings-action:hover, .settings-action:focus-visible { transform:translateY(-1px); border-color:var(--border-focus); color:var(--accent); background:var(--accent-glow); outline:none; }
-.settings-advanced { font-family:var(--ff-mono); font-size:.62rem; white-space:pre-wrap; overflow-wrap:anywhere; padding:.7rem; border:1px solid var(--border); border-radius:12px; color:var(--text-muted); background:rgba(0,0,0,.12); }
 .site-header .settings-menu-host, .site-header .settings-menu-host * { -webkit-app-region:no-drag; }
 @media (max-width:760px) { .settings-panel { top:64px; right:10px; width:calc(100vw - 20px); min-width:0; max-height:calc(100vh - 76px); resize:vertical; } .settings-row { grid-template-columns:1fr; } .settings-control { justify-self:stretch; } .settings-control input[type="text"], .settings-control select { width:100%; max-width:none; } }
 

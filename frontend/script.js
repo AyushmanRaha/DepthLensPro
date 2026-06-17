@@ -646,11 +646,9 @@ function renderSettingsPanel() {
       controlRow("Auto-check engine on launch", "Avoid aggressive boot diagnostics when disabled.", sw("autoCheckEngine")),
       controlRow("Diagnostics refresh interval", "Controls visible polling cadence.", sel("diagnosticsRefresh", [["slow","Slow"],["normal","Normal"],["fast","Fast"]])),
       controlRow("Refresh diagnostics when settings opens", "Run lightweight diagnostics when opening settings.", sw("refreshDiagnosticsOnOpen")),
-      controlRow("Show advanced diagnostics", "Display backend, readiness, engine, and cache details here.", sw("showAdvancedDiagnostics")),
       controlRow("Warn before degraded engine", "Show a warning before inference when readiness is degraded.", sw("warnOnDegradedEngine")),
       controlRow("Allow PyTorch fallback", "If disabled, fallback results are treated as warnings/failures in the UI.", sw("allowFallbackEngine")),
-      controlRow("Auto-retry failed engine checks", "Allow background retries after failed health checks.", sw("autoRetryEngineChecks")),
-      settings.showAdvancedDiagnostics ? `<pre class="settings-advanced">${esc(settingsAdvancedReadout())}</pre>` : ""
+      controlRow("Auto-retry failed engine checks", "Allow background retries after failed health checks.", sw("autoRetryEngineChecks"))
     ].join(""),
     performance: [
       controlRow("Use inference cache", "Frontend policy flag for cache-aware requests and badges.", sw("useInferenceCache")),
