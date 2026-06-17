@@ -13,6 +13,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     mode: "native",
     onnxMode: "optional",
     onnxModels: ["midas_small"],
+    torchCache: "required",
+    detectorCache: "optional",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -22,6 +24,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--mode") options.mode = argv[++i] || options.mode;
     else if (arg === "--onnx") options.onnxMode = argv[++i] || options.onnxMode;
     else if (arg === "--models" || arg === "--onnx-models") options.onnxModels = parseOnnxModels(argv[++i] || "midas_small");
+    else if (arg === "--torch-cache") options.torchCache = argv[++i] || options.torchCache;
+    else if (arg === "--detector-cache") options.detectorCache = argv[++i] || options.detectorCache;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -30,7 +34,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    "Usage: node scripts/verify-packaged-resources.js [--platform darwin|win32|linux] [--arch arm64|x64] [--mode native] [--onnx optional|required|require-all|off] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list]",
+    "Usage: node scripts/verify-packaged-resources.js [--platform darwin|win32|linux] [--arch arm64|x64] [--mode native] [--torch-cache off|optional|required] [--detector-cache off|optional|required] [--onnx optional|required|require-all|off] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list]",
     "",
     "Discovers electron-builder packaged resource roots under electron-app/dist and verifies backend, frontend, venv, models, and models/onnx.",
   ].join("\n");
@@ -110,6 +114,8 @@ function verifyPackagedResources(options) {
     onnxMode: options.onnxMode,
     platform: options.platform,
     onnxModels: options.onnxModels,
+    torchCache: options.torchCache,
+    detectorCache: options.detectorCache,
   }));
   return { roots, results, ok: results.length > 0 && results.every((result) => result.ok) };
 }

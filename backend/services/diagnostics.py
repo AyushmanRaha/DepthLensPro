@@ -12,6 +12,7 @@ from typing import Any
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.services.onnx_diagnostics import onnx_status_payload
+from backend.services.model_assets import inspect_model_assets
 
 REQUIRED_RUNTIME_MODULES = ("fastapi", "uvicorn", "numpy", "torch", "cv2", "PIL")
 OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
@@ -81,10 +82,25 @@ def readiness_payload() -> dict[str, Any]:
     required_ok = all(item.get("available") for item in required.values())
     torch_details = _torch_runtime_details(required.get("torch", {}))
     onnx_status = onnx_status_payload(settings.DEPTHLENS_WARMUP_DEVICE)
+    asset_status = inspect_model_assets()
+    asset_status["runtime_imports_ready"] = required_ok
+    inference_ready = bool(required_ok and asset_status.get("model_assets_ready"))
 
     return {
-        "status": "ready" if required_ok else "degraded",
-        "inference_ready": required_ok,
+        "status": "ready" if inference_ready else ("assets_missing" if required_ok else "degraded"),
+        "backend_alive": True,
+        "runtime_imports_ready": required_ok,
+        "model_assets_ready": bool(asset_status.get("model_assets_ready")),
+        "pytorch_hub_cache_ready": bool(asset_status.get("pytorch_hub_cache_ready")),
+        "pytorch_hub_cache_path": asset_status.get("pytorch_hub_cache_path"),
+        "midas_repo_cached": bool(asset_status.get("midas_repo_cached")),
+        "checkpoint_summary": asset_status.get("checkpoint_summary"),
+        "onnx_any_ready": bool(asset_status.get("onnx_any_ready")),
+        "onnx_all_ready": bool(asset_status.get("onnx_all_ready")),
+        "downloads_disabled": bool(asset_status.get("downloads_disabled")),
+        "inference_ready": inference_ready,
+        "fatal_reason": None if inference_ready else (asset_status.get("fatal_reason") or "runtime_imports_unavailable"),
+        "recommended_action": None if inference_ready else (asset_status.get("recommended_action") or "Install backend dependencies and run setup."),
         "required": required,
         "optional": optional,
         "torch_runtime": torch_details,

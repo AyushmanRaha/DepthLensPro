@@ -6,6 +6,7 @@ const DEFAULT_ROOT = path.resolve(path.join(__dirname, "..", ".."));
 const VALID_ROOT_KINDS = new Set(["repo", "packaged"]);
 const VALID_MODES = new Set(["basic", "native"]);
 const VALID_ONNX_MODES = new Set(["off", "optional", "required", "require-all"]);
+const VALID_CACHE_MODES = new Set(["off", "optional", "required"]);
 const ONNX_MODELS = ["midas_small", "dpt_hybrid", "dpt_large"];
 
 function parseOnnxModels(value = "midas_small") {
@@ -24,6 +25,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     mode: "basic",
     onnxMode: "optional",
     onnxModels: ["midas_small"],
+    torchCache: "required",
+    detectorCache: "optional",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -32,6 +35,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--mode") options.mode = argv[++i] || options.mode;
     else if (arg === "--onnx") options.onnxMode = argv[++i] || options.onnxMode;
     else if (arg === "--models" || arg === "--onnx-models") options.onnxModels = parseOnnxModels(argv[++i] || "midas_small");
+    else if (arg === "--torch-cache") options.torchCache = argv[++i] || options.torchCache;
+    else if (arg === "--detector-cache") options.detectorCache = argv[++i] || options.detectorCache;
     else if (arg === "--root") options.root = path.resolve(argv[++i] || options.root);
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (!arg.startsWith("--")) options.root = path.resolve(arg);
@@ -41,12 +46,14 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (!VALID_ROOT_KINDS.has(options.rootKind)) throw new Error(`Invalid --root-kind ${options.rootKind}; expected repo or packaged.`);
   if (!VALID_MODES.has(options.mode)) throw new Error(`Invalid --mode ${options.mode}; expected basic or native.`);
   if (!VALID_ONNX_MODES.has(options.onnxMode)) throw new Error(`Invalid --onnx ${options.onnxMode}; expected off, optional, required, or require-all.`);
+  if (!VALID_CACHE_MODES.has(options.torchCache)) throw new Error(`Invalid --torch-cache ${options.torchCache}; expected off, optional, or required.`);
+  if (!VALID_CACHE_MODES.has(options.detectorCache)) throw new Error(`Invalid --detector-cache ${options.detectorCache}; expected off, optional, or required.`);
   return options;
 }
 
 function usage() {
   return [
-    "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
+    "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--torch-cache off|optional|required] [--detector-cache off|optional|required] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
     "",
     "Examples:",
     "  node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
@@ -66,6 +73,30 @@ function isDirectory(targetPath) {
   try { return fs.statSync(targetPath).isDirectory(); } catch (_) { return false; }
 }
 
+
+function torchCacheStatus(root) {
+  const cacheRoot = path.join(root, "models", "torch-cache");
+  const hub = path.join(cacheRoot, "hub");
+  const checkpoints = path.join(hub, "checkpoints");
+  const repoEntries = isDirectory(hub) ? fs.readdirSync(hub).filter((name) => name.toLowerCase().includes("midas")) : [];
+  const validRepos = repoEntries.filter((name) => isFile(path.join(hub, name, "hubconf.py")) && (isDirectory(path.join(hub, name, "midas")) || isDirectory(path.join(hub, name, "MiDaS"))));
+  const checkpointFiles = isDirectory(checkpoints) ? fs.readdirSync(checkpoints).filter((name) => /\.(pt|pth)$/i.test(name) && fs.statSync(path.join(checkpoints, name)).size > 0) : [];
+  const hints = {
+    midas_small: ["midas_v21_small", "midas_small"],
+    dpt_hybrid: ["dpt_hybrid", "dpt_hybrid_384"],
+    dpt_large: ["dpt_large", "dpt_large_384"],
+  };
+  const modelReady = Object.fromEntries(Object.entries(hints).map(([model, tokens]) => [model, checkpointFiles.some((name) => tokens.some((token) => name.toLowerCase().includes(token))) ]));
+  const allModelsReady = Object.values(modelReady).every(Boolean);
+  return { cacheRoot, repoCached: validRepos.length > 0, validRepos, checkpoints, checkpointFiles, modelReady, ok: isDirectory(cacheRoot) && validRepos.length > 0 && allModelsReady };
+}
+
+function detectorCacheStatus(root) {
+  const checkpoints = path.join(root, "models", "torch-cache", "hub", "checkpoints");
+  const files = isDirectory(checkpoints) ? fs.readdirSync(checkpoints).filter((name) => /\.(pt|pth)$/i.test(name) && name.toLowerCase().includes("fasterrcnn") && fs.statSync(path.join(checkpoints, name)).size > 0) : [];
+  return { checkpoints, files, ok: files.length > 0 };
+}
+
 function pythonCandidatesForPlatform(platform = process.platform) {
   const posixPython = [path.join("venv", "bin", "python3"), path.join("venv", "bin", "python")];
   const winPython = [path.join("venv", "Scripts", "python.exe"), path.join("venv", "Scripts", "python3.exe")];
@@ -78,6 +109,8 @@ function verifyResourceRoot(options = {}) {
   const mode = options.mode || "basic";
   const onnxMode = options.onnxMode || "optional";
   const onnxModels = options.onnxModels || ["midas_small"];
+  const torchCacheMode = options.torchCache || (mode === "native" ? "required" : "optional");
+  const detectorCacheMode = options.detectorCache || "optional";
   const platform = options.platform || process.platform;
   const checks = [];
   const infos = [];
@@ -109,6 +142,16 @@ function verifyResourceRoot(options = {}) {
   addCheck("models", requiresModelDirs, isDirectory);
   addCheck(path.join("models", "onnx"), requiresModelDirs, isDirectory);
 
+  const torchStatus = torchCacheStatus(root);
+  infos.push({ rel: path.join("models", "torch-cache"), exists: isDirectory(torchStatus.cacheRoot), required: torchCacheMode === "required", torchStatus });
+  if (torchCacheMode !== "off") {
+    checks.push({ rel: path.join("models", "torch-cache"), label: "models/torch-cache MiDaS Torch Hub cache", full: torchStatus.cacheRoot, ok: torchStatus.ok, required: torchCacheMode === "required" });
+  }
+  const detectorStatus = detectorCacheStatus(root);
+  if (detectorCacheMode !== "off") {
+    checks.push({ rel: path.join("models", "torch-cache", "hub", "checkpoints"), label: "detector checkpoint cache", full: detectorStatus.checkpoints, ok: detectorStatus.ok, required: detectorCacheMode === "required" });
+  }
+
   const requiredModels = onnxMode === "off" || onnxMode === "optional" ? [] : (onnxMode === "require-all" ? ONNX_MODELS : onnxModels);
   const onnxFiles = ONNX_MODELS.map((model) => ({
     rel: path.join("models", "onnx", `${model}.onnx`),
@@ -138,7 +181,7 @@ function remediation(result) {
   }
   return [
     "Repo-root resources are incomplete. Run setup before packaging:",
-    "  macOS/Linux: npm run setup",
+    "  macOS/Linux: npm run setup:<platform>",
     "  Windows:     npm run setup:win",
     "Then rebuild with the supported native build script. ONNX binaries remain optional unless --onnx required or --onnx require-all is used.",
   ].join("\n");
@@ -155,8 +198,14 @@ function formatResult(result) {
     const missing = check.ok ? "" : ` missing under ${check.full}`;
     lines.push(`${severity} ${check.label}${missing}${optional}`);
   }
+  lines.push("\nModel cache summary:");
+  const torchInfo = result.infos.find((info) => info.torchStatus);
+  if (torchInfo) {
+    const st = torchInfo.torchStatus;
+    lines.push(`${st.ok ? "✓" : "✗"} models/torch-cache repo=${st.repoCached ? "yes" : "no"} checkpoints=${st.checkpointFiles.length} models=${Object.entries(st.modelReady).map(([k,v]) => `${k}:${v ? "ok" : "missing"}`).join(",")}`);
+  }
   lines.push("\nONNX resource summary:");
-  for (const info of result.infos) {
+  for (const info of result.infos.filter((item) => !item.torchStatus)) {
     const required = info.required ? "required" : "optional";
     lines.push(`${info.exists ? "✓" : info.required ? "✗" : "!"} ${info.rel} ${info.exists ? `${info.size} bytes` : `missing (${required})`}`);
   }
@@ -205,4 +254,6 @@ module.exports = {
   remediation,
   parseOnnxModels,
   ONNX_MODELS,
+  torchCacheStatus,
+  detectorCacheStatus,
 };

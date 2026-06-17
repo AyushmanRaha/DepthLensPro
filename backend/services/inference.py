@@ -22,6 +22,7 @@ from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services import observability
+from backend.services.model_assets import ModelAssetsUnavailableError, classify_torch_hub_failure, ensure_assets_before_load, inspect_model_assets
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
@@ -93,10 +94,17 @@ def _load_model(
         # not hold device state.  Keep the cache model-scoped intentionally; if a
         # future transform depends on CUDA/MPS/XPU state, change this key to
         # include ``device_str`` alongside the model cache key below.
+        ensure_assets_before_load()
         if model_id not in TRANSFORMS:
-            transforms = torch.hub.load(  # type: ignore[no-untyped-call]
+            try:
+                transforms = torch.hub.load(  # type: ignore[no-untyped-call]
                 "intel-isl/MiDaS", "transforms", trust_repo=True
-            )
+                )
+            except Exception as exc:
+                log.exception("MiDaS transforms load failed; TORCH_HOME=%s", os.getenv("TORCH_HOME"))
+                if classify_torch_hub_failure(exc):
+                    raise ModelAssetsUnavailableError(status=inspect_model_assets(), cause=exc) from exc
+                raise
             TRANSFORMS[model_id] = (
                 transforms.small_transform
                 if model_id == "midas_small"
@@ -105,7 +113,13 @@ def _load_model(
 
         device = torch.device(device_str)
         log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
-        model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+        try:
+            model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+        except Exception as exc:
+            log.exception("MiDaS model load failed for %s; TORCH_HOME=%s", spec.pytorch_model_name, os.getenv("TORCH_HOME"))
+            if classify_torch_hub_failure(exc):
+                raise ModelAssetsUnavailableError(status=inspect_model_assets(), cause=exc) from exc
+            raise
         model.to(device).eval()
 
         if device.type == "mps":

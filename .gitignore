@@ -74,3 +74,5 @@ backend.pid
 *.log
 !models/.gitkeep
 !models/onnx/.gitkeep
+models/torch-cache/**
+!models/torch-cache/.gitkeep
