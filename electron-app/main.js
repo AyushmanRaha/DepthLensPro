@@ -701,6 +701,7 @@ async function startBackend() {
       DEPTHLENSPRO_MODEL_DIR: path.join(cwd, "models"),
       DEPTHLENS_ONNX_DIR: path.join(cwd, "models", "onnx"),
       TORCH_HOME: path.join(cwd, "models", "torch-cache"),
+      DEPTHLENS_DISABLE_MODEL_DOWNLOADS: app.isPackaged ? "1" : (process.env.DEPTHLENS_DISABLE_MODEL_DOWNLOADS || ""),
       SSL_CERT_FILE: process.env.SSL_CERT_FILE || "",
       REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE || process.env.SSL_CERT_FILE || "",
     },

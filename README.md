@@ -438,8 +438,8 @@ npm --version
 git clone https://github.com/AyushmanRaha/DepthLensPro.git
 cd DepthLensPro
 
-# Install Python + Node dependencies and cache RGB detector weights once.
-# ONNX export is intentionally skipped here to keep first-run fast.
+# Install Python + Node dependencies, cache PyTorch MiDaS Torch Hub assets,
+# and cache detector weights once. ONNX export is intentionally skipped here.
 npm run setup
 
 # Terminal 1 — start local FastAPI backend
@@ -469,7 +469,7 @@ Expected `/live` response:
 }
 ```
 
-> **Setup-time detector cache:** The setup step downloads and caches the RGB Camera View / 3D tab object-detector weights once under `models/torch-cache`. This cache is separate from optional ONNX files in `models/onnx`, and your uploaded images are still processed locally at all times.
+> **Setup-time model cache:** The setup step downloads and validates the PyTorch MiDaS Torch Hub repo, transforms, and checkpoints for MiDaS Small, DPT Hybrid, and DPT Large under `models/torch-cache`. It also caches RGB detector weights when enabled. ONNX files are separate and optional under `models/onnx`.
 
 ---
 
@@ -499,7 +499,7 @@ Platform support is explicit and architecture-specific:
 | Linux arm64 | Supported | `npm run build:linux:arm64` |
 | Linux x64 | Supported | `npm run build:linux:x64` |
 
-The native workflow is implemented by verbose scripts such as `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, `scripts/setup-linux.sh`, and `scripts/build-native-linux.sh`, and is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. The same setup commands (`npm run setup:mac`, `npm run setup:linux`, `npm run setup:win`, or `npm run setup`) also cache RGB object detector weights under `models/torch-cache` for offline / packaged use. Standard builds do **not** require ONNX files. ONNX remains optional and separate; ONNX builds use separate commands and require all three models in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
+The native workflow is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. Setup is the only normal step that performs heavyweight dependency installs or model downloads. Standard setup installs the Python venv, backend dependencies, Electron dependencies, PyTorch MiDaS Torch Hub cache, and detector weights; it does **not** generate ONNX by default. ONNX setup adds export/validation for all three files in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`. Standard builds require `models/torch-cache` and treat ONNX as optional; ONNX builds require both the PyTorch cache and all three ONNX files.
 
 #### macOS — standard build
 
@@ -607,6 +607,47 @@ npm run build:linux:arm64:onnx
 npm run launch:linux
 ```
 
+
+#### Setup progress and verification
+
+Setup output is intentionally verbose and streams in real time. Long-running installs and downloads print section headers and commands before they run, for example:
+
+```text
+[1/8] Selecting Python
+[2/8] Creating or validating venv
+[3/8] Upgrading pip/setuptools/wheel/certifi
+[4/8] Installing backend dependencies
+[5/8] Installing Electron dependencies
+[6/8] Caching PyTorch MiDaS assets
+[7/8] Handling optional ONNX assets
+[8/8] Verifying resources
+```
+
+During MiDaS caching, `scripts/prefetch-midas-assets.py` prints the active `TORCH_HOME`, each selected model, whether offline validation is being used, retry counts, and final cache verification. Use these checks after setup:
+
+```bash
+npm run verify:resources
+node electron-app/scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx optional .
+npm run verify:onnx                 # validates existing ONNX files only
+node electron-app/scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx require-all --models all .
+```
+
+Packaged resource verification is performed by the build scripts. To run it manually after packaging, use:
+
+```bash
+cd electron-app
+node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --torch-cache required --onnx optional
+node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --torch-cache required --onnx require-all --models all
+```
+
+Model assets are intentionally not committed to git. They live in:
+
+| Asset | Repo path | Packaged path | Required for standard builds |
+|---|---|---|---|
+| PyTorch MiDaS Torch Hub repo, transforms, checkpoints | `models/torch-cache` | `<Resources>/models/torch-cache` | Yes |
+| Detector checkpoints | `models/torch-cache/hub/checkpoints` | `<Resources>/models/torch-cache/hub/checkpoints` | Optional feature cache |
+| ONNX exports | `models/onnx` | `<Resources>/models/onnx` | No; required only for ONNX builds/benchmarks |
+
 Platform-specific outputs:
 
 | Platform | Output |
@@ -615,7 +656,7 @@ Platform-specific outputs:
 | Windows | `electron-app/dist/win-arm64-unpacked/` or `electron-app/dist/win-x64-unpacked/` and NSIS installer |
 | Linux | `electron-app/dist/*arm64*.AppImage`, `electron-app/dist/*x64*.AppImage`, and unpacked resources when retained by electron-builder |
 
-The build scripts verify repo resources before packaging and packaged resources after packaging. Standard verification treats ONNX as optional; ONNX verification fails early if any required model is missing, empty, invalid, or not bundled. Because setup stores detector weights under `models/torch-cache` and Electron packages `models` as extra resources, the packaged backend can use the setup-created detector cache instead of downloading at runtime.
+The build scripts verify repo resources before packaging and packaged resources after packaging. They do not silently download model assets. If `models/torch-cache` is missing, standard builds fail early with a “run setup first” remediation. If an ONNX build is requested and any ONNX file is missing or empty, the build fails early with the matching `setup:<platform>:onnx` command. Electron packages `models` as extra resources, so packaged resources contain `Resources/models/torch-cache` and, for ONNX builds, `Resources/models/onnx`.
 
 ---
 
@@ -699,7 +740,7 @@ The Dockerfile uses a two-stage build: a `builder` stage installs all Python whe
 
 ### E. Optional ONNX Acceleration
 
-ONNX Runtime is entirely optional and separate from the RGB object detector cache. The app works without ONNX files by falling back to PyTorch; the RGB detector weights are cached by the normal setup step under `models/torch-cache`.
+ONNX Runtime is entirely optional for standard builds and separate from the required PyTorch MiDaS cache. The app works without ONNX files by using PyTorch MiDaS assets cached under `models/torch-cache`; ONNX builds add `.onnx` files under `models/onnx`.
 
 Generate ONNX files locally:
 
@@ -1309,6 +1350,68 @@ npm run backend:dev
 
 ---
 
+
+
+### “Depth engine ready” but inference fails
+
+Older builds could report backend readiness when Python imports succeeded even though MiDaS runtime assets were missing. `/ready` now separates `backend_alive`, `runtime_imports_ready`, `model_assets_ready`, `pytorch_hub_cache_ready`, `onnx_any_ready`, `onnx_all_ready`, and `inference_ready`. If `inference_ready` is false, inspect `fatal_reason` and `recommended_action`:
+
+```bash
+curl http://127.0.0.1:8765/ready
+```
+
+For native apps, rerun the platform setup and rebuild so packaged resources include the cache:
+
+```bash
+npm run setup:mac && npm run build:mac:arm64
+npm run setup:linux && npm run build:linux:x64
+npm run setup:win && npm run build:win:x64
+```
+
+### `MODEL_ASSETS_UNAVAILABLE`
+
+This means MiDaS Torch Hub repo code or checkpoints are missing/incomplete under `TORCH_HOME` (`models/torch-cache` in the repo, `<Resources>/models/torch-cache` in packaged apps). The response includes `torch_home`, `expected_cache`, and an action. ONNX is optional for standard builds; PyTorch MiDaS assets are not.
+
+Fix:
+
+```bash
+npm run setup:mac        # or setup:linux / setup:win
+npm run build:mac:arm64 # or your platform build command
+```
+
+### `ONNX missing_model_file`
+
+This is not a core engine failure for standard builds. It means the optional ONNX benchmark/acceleration file is absent. Standard inference still uses PyTorch when `models/torch-cache` is valid. For ONNX builds or benchmarks, generate all required files:
+
+```bash
+npm run setup:mac:onnx      # or setup:linux:onnx / setup:win:onnx
+npm run verify:onnx
+```
+
+### Setup appears stuck
+
+Setup should no longer sit silently at “loading assets.” It streams pip, npm, MiDaS, detector, ONNX export, and verification output in real time. If progress stops, the last printed command/model identifies the current operation. Re-run with a larger MiDaS timeout if a slow network is expected:
+
+```bash
+python scripts/doctor.py --timeout-seconds 1800 --retries 3
+```
+
+Offline validation without downloads:
+
+```bash
+venv/bin/python scripts/prefetch-midas-assets.py --offline --models all
+```
+
+### Packaged app missing resources
+
+Build scripts verify packaged resources, but installed stale copies can still be launched accidentally. Verify the packaged output directly:
+
+```bash
+cd electron-app
+node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --torch-cache required --onnx optional
+node scripts/verify-packaged-resources.js --platform win32 --arch x64 --mode native --torch-cache required --onnx optional
+node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --torch-cache required --onnx optional
+```
 
 ### RGB Camera Detection Reports Missing Detector Weights
 

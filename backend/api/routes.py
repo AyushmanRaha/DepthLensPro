@@ -19,6 +19,7 @@ from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
 from backend.services import observability
+from backend.services.model_assets import ModelAssetsUnavailableError
 
 
 def _available_devices() -> dict[str, Any]:
@@ -775,6 +776,10 @@ async def estimate(
         ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except ModelAssetsUnavailableError as exc:
+        observability.record_crash("inference", exc.error_code, exc, route="/estimate")
+        observability.record_inference(model, "unknown", resolved, None, cached=False, outcome="error", error_code=exc.error_code)
+        raise HTTPException(503, exc.to_payload()) from exc
     except Exception as exc:
         observability.record_crash("inference", "INFERENCE_FAILED", exc, route="/estimate")
         observability.record_inference(
@@ -951,6 +956,10 @@ async def reconstruct(
         ) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except ModelAssetsUnavailableError as exc:
+        observability.record_crash("reconstruction", exc.error_code, exc, route="/reconstruct")
+        observability.record_inference(model, "reconstruction", resolved, None, outcome="error", error_code=exc.error_code)
+        raise HTTPException(503, exc.to_payload()) from exc
     except Exception as exc:
         observability.record_crash(
             "reconstruction", "RECONSTRUCTION_FAILED", exc, route="/reconstruct"

@@ -46,7 +46,7 @@ def configure_certificates() -> dict[str, str | None]:
         os.environ.setdefault("SSL_CERT_FILE", bundle)
         os.environ.setdefault("REQUESTS_CA_BUNDLE", bundle)
         os.environ.setdefault("CURL_CA_BUNDLE", bundle)
-    os.environ.setdefault("TORCH_HOME", os.fspath(ROOT / ".cache" / "torch"))
+    os.environ.setdefault("TORCH_HOME", os.fspath(ROOT / "models" / "torch-cache"))
     return {"certifi_bundle": bundle, "torch_home": os.environ.get("TORCH_HOME")}
 
 
@@ -191,9 +191,10 @@ def main() -> None:
     args = parse_args()
     models = sorted(MODEL_REGISTRY) if args.all else (args.models if args.models else [args.model])
     failures = []
-    for model_name in models:
+    for index, model_name in enumerate(models, 1):
+        print(f"[ONNX] [{index}/{len(models)}] {'validating' if args.validate_only else 'exporting'} {model_name}...", flush=True)
         result = validate_model(model_name, args.output_dir) if args.validate_only else export_model_to_onnx(model_name, force=args.force, output_dir=args.output_dir, opset=args.opset)
-        print(json.dumps(result, indent=2, default=str))
+        print(json.dumps(result, indent=2, default=str), flush=True)
         if not result.get("ok"):
             optional = result.get("model_id") in OPTIONAL_ONNX_MODELS and not args.strict
             if not optional:

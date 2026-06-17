@@ -19,7 +19,16 @@ function mkdir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function makeTree(root, { platform = process.platform, models = true, onnxDir = true, onnxFile = false } = {}) {
+function makeTorchCache(root) {
+  const repo = path.join(root, "models", "torch-cache", "hub", "intel-isl_MiDaS_master");
+  mkdir(path.join(repo, "midas"));
+  touch(path.join(repo, "hubconf.py"));
+  touch(path.join(root, "models", "torch-cache", "hub", "checkpoints", "midas_v21_small_256.pt"));
+  touch(path.join(root, "models", "torch-cache", "hub", "checkpoints", "dpt_hybrid_384.pt"));
+  touch(path.join(root, "models", "torch-cache", "hub", "checkpoints", "dpt_large_384.pt"));
+}
+
+function makeTree(root, { platform = process.platform, models = true, onnxDir = true, onnxFile = false, torchCache = true } = {}) {
   mkdir(path.join(root, "backend"));
   touch(path.join(root, "backend", "app.py"));
   mkdir(path.join(root, "frontend"));
@@ -29,6 +38,7 @@ function makeTree(root, { platform = process.platform, models = true, onnxDir = 
   if (models) mkdir(path.join(root, "models"));
   if (models && onnxDir) mkdir(path.join(root, "models", "onnx"));
   if (models && onnxDir && onnxFile) touch(path.join(root, "models", "onnx", "midas_small.onnx"));
+  if (models && torchCache) makeTorchCache(root);
 }
 
 function verify(root, options = {}) {
@@ -152,6 +162,13 @@ console.log("Resource verification tests passed.");
   const linux = spawnSync("bash", ["-n", path.join(__dirname, "..", "scripts", "build-native-linux.sh")], { encoding: "utf8" });
   assert.strictEqual(linux.status, 0, linux.stderr || linux.stdout);
   const winScript = fs.readFileSync(path.join(__dirname, "..", "scripts", "build-native-windows.ps1"), "utf8");
-  assert(winScript.includes("@SetupArgs"), "Windows build script must pass through all setup arguments");
-  assert(winScript.includes("--onnx-models"), "Windows build script must parse --onnx-models examples");
+  assert(winScript.includes("-AutoSetup"), "Windows build script documents explicit auto setup flag");
+  assert(winScript.includes("verify-resources.js"), "Windows build script verifies resources before packaging");
+}
+
+{
+  const root = tempRoot();
+  makeTree(root);
+  const result = verify(root, { onnxMode: "require-all", onnxModels: ["midas_small", "dpt_hybrid", "dpt_large"] });
+  assert.strictEqual(result.ok, false, "require-all fails until all ONNX files exist");
 }
