@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import numpy as np
 import torch
@@ -19,6 +19,13 @@ from backend.model_registry import (
 from backend.utils.hardware import _default_device_key
 
 MIDAS_REPO = "intel-isl/MiDaS"
+
+
+def _torch_hub_load(*args: Any, **kwargs: Any) -> Any:
+    hub_load = cast(Callable[..., Any], torch.hub.load)
+    return hub_load(*args, **kwargs)
+
+
 ONNX_INPUT_SIZE = (256, 256)
 DEFAULT_ONNX_DIR = Path(__file__).resolve().parent / "onnx_weights"
 
@@ -115,7 +122,7 @@ class ONNXExecutionEngine:
 
     @staticmethod
     def _load_transform(model_name: str) -> Any:
-        transforms = torch.hub.load(MIDAS_REPO, "transforms", trust_repo=True)
+        transforms = _torch_hub_load(MIDAS_REPO, "transforms", trust_repo=True)
         model_id = normalize_model_id(model_name)
         if model_id == "midas_small":
             return transforms.small_transform
@@ -180,13 +187,13 @@ class DepthEstimator:
         if model_name not in self.models:
             print(f"Loading {model_name} onto {self.device}...")
             spec = get_model_spec(model_name)
-            self.models[model_name] = torch.hub.load(
+            self.models[model_name] = _torch_hub_load(
                 self.repo, spec.pytorch_model_name, trust_repo=True
             )
             self.models[model_name].to(self.device)
             self.models[model_name].eval()
 
-            midas_transforms = torch.hub.load(self.repo, "transforms", trust_repo=True)
+            midas_transforms = _torch_hub_load(self.repo, "transforms", trust_repo=True)
             if spec.model_id == "midas_small":
                 self.transforms[model_name] = midas_transforms.small_transform
             else:

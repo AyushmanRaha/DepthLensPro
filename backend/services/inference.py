@@ -36,6 +36,12 @@ from backend.services.model_assets import (
 
 log = logging.getLogger("depthlens")
 
+
+def _torch_hub_load(*args: Any, **kwargs: Any) -> Any:
+    hub_load = cast(Callable[..., Any], torch.hub.load)
+    return hub_load(*args, **kwargs)
+
+
 __all__ = ["COLORMAPS", "MAX_SIZE_MB", "SUPPORTED_MODELS"]
 
 COLORMAPS: dict[str, int] = {
@@ -102,7 +108,7 @@ def _load_model(
         ensure_assets_before_load()
         if model_id not in TRANSFORMS:
             try:
-                transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
+                transforms = _torch_hub_load("intel-isl/MiDaS", "transforms", trust_repo=True)
             except Exception as exc:
                 log.exception(
                     "MiDaS transforms load failed; TORCH_HOME=%s", os.getenv("TORCH_HOME")
@@ -121,7 +127,7 @@ def _load_model(
         device = torch.device(device_str)
         log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
         try:
-            model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)
+            model = _torch_hub_load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)
         except Exception as exc:
             log.exception(
                 "MiDaS model load failed for %s; TORCH_HOME=%s",

@@ -651,11 +651,11 @@ async def benchmark(
     try:
         from backend.services.benchmarks import BENCHMARK_TIMEOUT_SECONDS
 
-        result = await asyncio.wait_for(
+        result: dict[str, Any] = await asyncio.wait_for(
             run_in_threadpool(run_benchmark, model=model, device=device, iterations=iterations),
             timeout=BENCHMARK_TIMEOUT_SECONDS,
         )
-        return cast(dict[str, Any], result)
+        return result
     except asyncio.TimeoutError as exc:
         observability.record_benchmark(
             model, None, device, device, iterations, None, None, None, None, None, 1, "error"
@@ -719,7 +719,7 @@ async def estimate(
     resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Image file required")
+        raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
@@ -811,7 +811,7 @@ async def estimate(
         log.exception("Inference failed")
         raise HTTPException(
             500,
-            {"error_code": "INFERENCE_FAILED", "message": "Depth inference failed"},
+            {"error_code": "INFERENCE_FAILED", "message": "Inference failed"},
         ) from exc
 
     if ck is not None:
@@ -850,7 +850,7 @@ async def detect(
     max_detections: int = Form(5),
 ) -> JSONResponse:
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Image file required")
+        raise HTTPException(415, "Expected an image file")
     if threshold < 0.05 or threshold > 0.95:
         raise HTTPException(422, "threshold must be between 0.05 and 0.95")
     if max_detections < 1 or max_detections > 20:
@@ -878,8 +878,12 @@ async def detect(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
-        if exc.__class__.__name__ == "DetectorUnavailableError" or (
-            isinstance(exc, ModuleNotFoundError) and exc.name in {"PIL", "torch", "torchvision"}
+        if (
+            getattr(exc, "error_code", None) == "DETECTOR_WEIGHTS_UNAVAILABLE"
+            or exc.__class__.__name__ == "DetectorUnavailableError"
+            or (
+                isinstance(exc, ModuleNotFoundError) and exc.name in {"PIL", "torch", "torchvision"}
+            )
         ):
             raise HTTPException(
                 503,
@@ -940,7 +944,7 @@ async def reconstruct(
     resolved = _validated_device_or_422(device)
 
     if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Image file required")
+        raise HTTPException(415, "Expected an image file")
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
@@ -1067,7 +1071,7 @@ async def batch(
         for upload in files:
             try:
                 if not (upload.content_type or "").startswith("image/"):
-                    raise ValueError("Image file required")
+                    raise ValueError("Expected an image file")
                 raw = await upload.read()
                 if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
                     raise ValueError(f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")

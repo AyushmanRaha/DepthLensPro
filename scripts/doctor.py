@@ -58,11 +58,8 @@ def verify_detector_cache(cache_root: Path = DETECTOR_TORCH_CACHE) -> tuple[bool
     checkpoints = cache_root / "hub" / "checkpoints"
     if not checkpoints.is_dir():
         return False, f"Detector checkpoint directory is missing: {checkpoints}"
-    if not any(
-        path.is_file() and path.suffix == ".pth" and "fasterrcnn" in path.name.lower()
-        for path in checkpoints.iterdir()
-    ):
-        return False, f"No Faster R-CNN detector .pth checkpoint files found in: {checkpoints}"
+    if not any(path.is_file() and path.suffix == ".pth" for path in checkpoints.iterdir()):
+        return False, f"No .pth detector checkpoint files found in: {checkpoints}"
     display_root = cache_root.relative_to(ROOT) if cache_root.is_relative_to(ROOT) else cache_root
     return True, f"Detector weights cached under {display_root}"
 

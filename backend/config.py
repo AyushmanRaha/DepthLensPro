@@ -15,10 +15,11 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import Field, field_validator
 
 if TYPE_CHECKING:
-    from pydantic_settings import BaseSettings, SettingsConfigDict
+    from pydantic import BaseModel as BaseSettings
+    from pydantic import ConfigDict as SettingsConfigDict
 elif importlib.util.find_spec("pydantic_settings") is not None:
     pydantic_settings = importlib.import_module("pydantic_settings")
-    BaseSettings = cast(Any, pydantic_settings.BaseSettings)
+    BaseSettings = cast(type[Any], pydantic_settings.BaseSettings)
     SettingsConfigDict = cast(Any, pydantic_settings.SettingsConfigDict)
 else:
     from pydantic import BaseModel as BaseSettings
