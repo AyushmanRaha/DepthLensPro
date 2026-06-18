@@ -392,7 +392,7 @@ flowchart TB
 
 | Layer | Key files | Responsibility |
 |---|---|---|
-| Electron main process | `electron-app/main.js` | Single-instance lock, backend lifecycle, PID metadata, port fallback, safe shutdown |
+| Electron main process | `electron-app/main.js`, `electron-app/src/main/*.js` | Small composition entrypoint plus focused modules for paths, backend HTTP probes, port fallback, PID metadata, Python resolution, backend lifecycle, settings persistence, and windows. No UI or IPC contract changes. |
 | Renderer UI | `frontend/index.html`, `script.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide |
 | Preload bridge | `electron-app/preload.js` | Narrow `contextBridge` surface — backend URL, dialogs, platform info only |
 | Security policy | `electron-app/src/security-policy.js` | Navigation allowlist: local frontend file and `127.0.0.1:PORT` only |
@@ -1663,11 +1663,19 @@ DepthLensPro/
 │   ├── assets/                      # App icons for all platforms
 │   ├── scripts/                     # Packaging, verification, lifecycle helpers
 │   ├── src/
-│   │   ├── platform-targets.js       # Central supported OS/architecture map, platform targets, settings bridge tests
-│   ├── src/
+│   │   ├── main/                    # Focused main-process modules; no UI or IPC contract changes
+│   │   │   ├── backend-http.js       # /live JSON probes and DepthLens backend detection
+│   │   │   ├── backend-lifecycle.js  # Backend startup, missing-resource errors, stale cleanup, safe shutdown
+│   │   │   ├── backend-pid-store.js  # Private PID and backend metadata files
+│   │   │   ├── paths.js              # App-root/resource/log path helpers
+│   │   │   ├── ports.js              # Port availability and fallback discovery
+│   │   │   ├── python-resolver.js    # Packaged/dev Python candidate selection
+│   │   │   ├── settings-store.js     # Persisted settings schema, sanitization, corruption backups
+│   │   │   └── windows.js            # Splash and main BrowserWindow options
 │   │   ├── backend-process-policy.js # Backend ownership checks (command-line + PID metadata)
+│   │   ├── platform-targets.js       # Central supported OS/architecture map, platform targets, settings bridge tests
 │   │   └── security-policy.js        # Navigation allowlist, external URL classification
-│   ├── main.js                      # Electron main process — single-instance, backend lifecycle, port discovery
+│   ├── main.js                      # Small Electron composition file — app lifecycle, IPC registration, module wiring
 │   ├── preload.js                   # Narrow contextBridge surface
 │   └── package.json
 │
