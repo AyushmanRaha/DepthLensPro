@@ -7,7 +7,7 @@ while (($#)); do case "$1" in --arch) shift; ARCH="${1:-arm64}";; --with-onnx) O
 echo "[DepthLens] Step 3 Build: platform=macOS arch=arm64 onnx=$ONNX_VERIFY_MODE models=$ONNX_MODELS resource_root=$(pwd)"
 if [[ "$AUTO_SETUP" == 1 ]]; then echo "[DepthLens] --auto-setup requested; running setup explicitly."; scripts/setup-macos.sh $([[ "$ONNX_VERIFY_MODE" == require-all ]] && echo --with-onnx --onnx-models all || echo --without-onnx); fi
 echo "[DepthLens] Verifying repo resources before packaging (no downloads)."
-(cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS" ..) || { echo "Run npm run setup:mac$([[ "$ONNX_VERIFY_MODE" == require-all ]] && echo :onnx) first." >&2; exit 1; }
+(cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS" ..) || { echo "Run npm run setup:mac (standard) or npm run setup:mac:onnx (ONNX) first." >&2; exit 1; }
 (cd electron-app && npm run clean:dist)
 echo "[DepthLens] Packaging macOS arm64..."; (cd electron-app && npm run build:mac:arm64:raw)
 echo "[DepthLens] Verifying packaged macOS arm64 resources..."; (cd electron-app && node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS")

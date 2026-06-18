@@ -8,7 +8,7 @@ Push-Location electron-app
 try {
   Write-Host "[DepthLens] Verifying repo resources before packaging (no downloads)."
   node scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx $OnnxVerifyMode --models $OnnxModels ..
-  if ($LASTEXITCODE -ne 0) { throw "Run npm run setup:win$(if ($OnnxVerifyMode -eq 'require-all') { ':onnx' }) first." }
+  if ($LASTEXITCODE -ne 0) { throw "Run npm run setup:win (standard) or npm run setup:win:onnx (ONNX) first." }
   npm run clean:dist
   Write-Host "[DepthLens] Packaging Windows $Arch..."; npm run "build:win:$Arch`:raw"
   Write-Host "[DepthLens] Verifying packaged Windows $Arch resources..."; node scripts/verify-packaged-resources.js --platform win32 --arch $Arch --mode native --torch-cache required --onnx $OnnxVerifyMode --models $OnnxModels

@@ -617,6 +617,13 @@ npm run launch:linux
 ```
 
 
+
+#### Setup report and diagnostics
+
+After a successful setup, `scripts/doctor.py` writes a machine-readable report to `.depthlens/setup-report.json`. The report records the detected platform and CPU architecture, selected Python executable, virtualenv path, Node/npm versions, PyTorch MiDaS cache status, detector cache status, ONNX status, and the exact resource verification command that setup used. This file is diagnostic only for this phase: build scripts still verify the actual files in `models/torch-cache` and `models/onnx` instead of trusting the report.
+
+Setup is safe to rerun. If pip, npm, MiDaS prefetch, detector prefetch, ONNX handling, or resource verification fails, rerun the platform setup command printed by the failure message. Use the standard setup command for PyTorch builds (`npm run setup:mac`, `npm run setup:linux`, or `npm run setup:win`) and the ONNX setup command when all three ONNX files are required (`npm run setup:mac:onnx`, `npm run setup:linux:onnx`, or `npm run setup:win:onnx`). Passing `--offline` validates existing caches only and does not download model assets; `--onnx-validate-only` validates existing ONNX files and never exports new ones.
+
 #### Setup progress and verification
 
 Setup output is intentionally verbose and streams in real time. Long-running installs and downloads print section headers and commands before they run, for example:
@@ -664,6 +671,8 @@ Platform-specific outputs:
 | macOS | `electron-app/dist/mac-arm64/DepthLens Pro.app` and `.dmg` |
 | Windows | `electron-app/dist/win-arm64-unpacked/` or `electron-app/dist/win-x64-unpacked/` and NSIS installer |
 | Linux | `electron-app/dist/*arm64*.AppImage`, `electron-app/dist/*x64*.AppImage`, and unpacked resources when retained by electron-builder |
+
+#### No silent downloads during build
 
 The build scripts verify repo resources before packaging and packaged resources after packaging. They do not silently download model assets. If `models/torch-cache` is missing, standard builds fail early with a “run setup first” remediation. If an ONNX build is requested and any ONNX file is missing or empty, the build fails early with the matching `setup:<platform>:onnx` command. Electron packages `models` as extra resources, so packaged resources contain `Resources/models/torch-cache` and, for ONNX builds, `Resources/models/onnx`.
 
@@ -1413,7 +1422,7 @@ Setup should no longer sit silently at “loading assets.” It streams pip, npm
 python scripts/doctor.py --timeout-seconds 1800 --retries 3
 ```
 
-Offline validation without downloads:
+Rerunning setup is resumable and safe: it reuses the existing `venv`, `electron-app/node_modules`, `models/torch-cache`, and `models/onnx` when they validate. If you need a no-network check, use offline validation without downloads:
 
 ```bash
 venv/bin/python scripts/prefetch-midas-assets.py --offline --models all

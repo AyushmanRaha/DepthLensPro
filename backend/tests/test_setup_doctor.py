@@ -115,3 +115,42 @@ def test_detector_weight_argument_conflict_errors() -> None:
         assert exc.code != 0
     else:  # pragma: no cover
         raise AssertionError("conflicting detector weight flags should error")
+
+
+def test_onnx_verify_mode_mapping() -> None:
+    assert doctor.onnx_verify_mode(doctor.parse_args([])) == "optional"
+    assert doctor.onnx_verify_mode(doctor.parse_args(["--without-onnx"])) == "off"
+    assert (
+        doctor.onnx_verify_mode(doctor.parse_args(["--with-onnx", "--onnx-models", "midas_small"]))
+        == "required"
+    )
+    assert (
+        doctor.onnx_verify_mode(doctor.parse_args(["--with-onnx", "--onnx-models", "all"]))
+        == "require-all"
+    )
+    assert (
+        doctor.onnx_verify_mode(doctor.parse_args(["--onnx-validate-only", "--onnx-models", "all"]))
+        == "require-all"
+    )
+
+
+def test_step_helpers_are_available() -> None:
+    for name in [
+        "select_python",
+        "ensure_venv",
+        "install_python_dependencies",
+        "install_electron_dependencies",
+        "ensure_model_dirs",
+        "cache_midas_assets",
+        "cache_detector_assets",
+        "handle_onnx_assets",
+        "verify_resources",
+    ]:
+        assert callable(getattr(doctor, name))
+
+
+def test_onnx_validate_only_command_never_forces_export() -> None:
+    args = doctor.parse_args(["--onnx-validate-only", "--onnx-models", "all"])
+    cmd = doctor.onnx_export_command(Path("python"), args)
+    assert "--validate-only" in cmd
+    assert "--force" not in cmd
