@@ -11,8 +11,8 @@ from typing import Any
 
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
-from backend.services.onnx_diagnostics import onnx_status_payload
 from backend.services.model_assets import inspect_model_assets
+from backend.services.onnx_diagnostics import onnx_status_payload
 
 REQUIRED_RUNTIME_MODULES = ("fastapi", "uvicorn", "numpy", "torch", "cv2", "PIL")
 OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
@@ -99,8 +99,19 @@ def readiness_payload() -> dict[str, Any]:
         "onnx_all_ready": bool(asset_status.get("onnx_all_ready")),
         "downloads_disabled": bool(asset_status.get("downloads_disabled")),
         "inference_ready": inference_ready,
-        "fatal_reason": None if inference_ready else (asset_status.get("fatal_reason") or "runtime_imports_unavailable"),
-        "recommended_action": None if inference_ready else (asset_status.get("recommended_action") or "Install backend dependencies and run setup."),
+        "fatal_reason": (
+            None
+            if inference_ready
+            else (asset_status.get("fatal_reason") or "runtime_imports_unavailable")
+        ),
+        "recommended_action": (
+            None
+            if inference_ready
+            else (
+                asset_status.get("recommended_action")
+                or "Install backend dependencies and run setup."
+            )
+        ),
         "required": required,
         "optional": optional,
         "torch_runtime": torch_details,

@@ -31,7 +31,9 @@ def test_model_asset_status_detects_fake_valid_cache(tmp_path: Path) -> None:
     assert status["checkpoint_summary"]["by_model"]["dpt_large"]["ready"] is True
 
 
-def test_readiness_payload_inference_not_ready_when_assets_missing(monkeypatch: Any, tmp_path: Path) -> None:
+def test_readiness_payload_inference_not_ready_when_assets_missing(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     pytest.importorskip("pydantic")
     pytest.importorskip("pydantic_settings")
     from backend.services import diagnostics
@@ -47,7 +49,9 @@ def test_readiness_payload_inference_not_ready_when_assets_missing(monkeypatch: 
 
 
 def test_model_assets_error_payload() -> None:
-    exc = ModelAssetsUnavailableError(status={"pytorch_hub_cache_path": "/tmp/cache", "recommended_action": "Run setup"})
+    exc = ModelAssetsUnavailableError(
+        status={"pytorch_hub_cache_path": "/tmp/cache", "recommended_action": "Run setup"}
+    )
     payload = exc.to_payload()
     assert payload["error_code"] == "MODEL_ASSETS_UNAVAILABLE"
     assert payload["torch_home"] == "/tmp/cache"

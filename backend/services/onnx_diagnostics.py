@@ -213,7 +213,9 @@ def _checker_status(path: str | None) -> tuple[str | None, str | None]:
         return "invalid_checker", f"{type(exc).__name__}: {exc}"
 
 
-def _status_from_session_result(session_result: dict[str, Any], runtime: dict[str, Any], checker_state: str | None = None) -> str:
+def _status_from_session_result(
+    session_result: dict[str, Any], runtime: dict[str, Any], checker_state: str | None = None
+) -> str:
     if session_result.get("ok"):
         return "available"
     error_code = session_result.get("error_code")
@@ -248,7 +250,10 @@ def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
         checker_state, checker_error = _checker_status(resolved.get("onnx_path"))
         state = _status_from_session_result(session_result, runtime, checker_state)
     try:
-        optional_onnx = bool(get_model_spec(resolved.get("model_id") or model).model_id in {"dpt_hybrid", "dpt_large"})
+        optional_onnx = bool(
+            get_model_spec(resolved.get("model_id") or model).model_id
+            in {"dpt_hybrid", "dpt_large"}
+        )
     except Exception:
         optional_onnx = False
     if optional_onnx and state in {"missing", "export_failed"}:
@@ -261,9 +266,17 @@ def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
         "exists": bool(resolved.get("exists")),
         "size_bytes": resolved.get("size_bytes") or 0,
         "state": state,
-        "legacy_state": "invalid/corrupt" if state in {"invalid_checker", "invalid_session", "invalid_dummy_inference"} else state,
+        "legacy_state": (
+            "invalid/corrupt"
+            if state in {"invalid_checker", "invalid_session", "invalid_dummy_inference"}
+            else state
+        ),
         "checker_error": locals().get("checker_error"),
-        "input_shape": [1, 3, *get_model_spec(resolved.get("model_id") or model).input_size] if (resolved.get("model_id") or model) in MODEL_REGISTRY else None,
+        "input_shape": (
+            [1, 3, *get_model_spec(resolved.get("model_id") or model).input_size]
+            if (resolved.get("model_id") or model) in MODEL_REGISTRY
+            else None
+        ),
         "fallback_behavior": "PyTorch fallback remains available",
         "path": resolved,
         "providers_used": session_result.get("providers_used", []),

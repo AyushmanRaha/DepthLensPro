@@ -1,3 +1,6 @@
+# FastAPI's route decorators are dynamically typed in the installed stubs.
+# mypy: disable-error-code=untyped-decorator
+
 """FastAPI route definitions for DepthLens Pro."""
 
 from __future__ import annotations
@@ -181,28 +184,31 @@ async def process_image_async(
     # This route wrapper is the single API request offload point.  It deliberately
     # does not use the service-level async helper, so INFERENCE_MAX_CONCURRENCY=2
     # is not accidentally applied twice for HTTP requests.
-    return await run_in_threadpool(
-        process_image,
-        raw,
-        model,
-        colormap,
-        device,
-        filename,
-        metrics,
-        outputs,
-        max_dim,
-        gt_raw,
-        gt_filename,
-        gt_required,
-        gt_scale,
-        gt_invalid_value,
+    return cast(
+        dict[str, Any],
+        await run_in_threadpool(
+            process_image,
+            raw,
+            model,
+            colormap,
+            device,
+            filename,
+            metrics,
+            outputs,
+            max_dim,
+            gt_raw,
+            gt_filename,
+            gt_required,
+            gt_scale,
+            gt_invalid_value,
+        ),
     )
 
 
 async def detect_objects_async(**kwargs: Any) -> dict[str, Any]:
     """Offload blocking local object detection while preserving route monkeypatching."""
 
-    return await run_in_threadpool(detect_objects, **kwargs)
+    return cast(dict[str, Any], await run_in_threadpool(detect_objects, **kwargs))
 
 
 async def reconstruct_point_cloud_async(
@@ -226,24 +232,27 @@ async def reconstruct_point_cloud_async(
 ) -> dict[str, Any]:
     """Offload blocking point-cloud reconstruction while preserving route monkeypatching."""
 
-    return await run_in_threadpool(
-        reconstruct_point_cloud,
-        raw=raw,
-        filename=filename,
-        model=model,
-        device=device,
-        colormap=colormap,
-        max_dim=max_dim,
-        export_format=export_format,
-        max_points=max_points,
-        preview_points=preview_points,
-        focal_scale=focal_scale,
-        depth_scale=depth_scale,
-        depth_near_percentile=depth_near_percentile,
-        depth_far_percentile=depth_far_percentile,
-        sampling=sampling,
-        include_rgb=include_rgb,
-        coordinate_system=coordinate_system,
+    return cast(
+        dict[str, Any],
+        await run_in_threadpool(
+            reconstruct_point_cloud,
+            raw=raw,
+            filename=filename,
+            model=model,
+            device=device,
+            colormap=colormap,
+            max_dim=max_dim,
+            export_format=export_format,
+            max_points=max_points,
+            preview_points=preview_points,
+            focal_scale=focal_scale,
+            depth_scale=depth_scale,
+            depth_near_percentile=depth_near_percentile,
+            depth_far_percentile=depth_far_percentile,
+            sampling=sampling,
+            include_rgb=include_rgb,
+            coordinate_system=coordinate_system,
+        ),
     )
 
 
@@ -606,7 +615,7 @@ async def ready() -> dict[str, Any]:
 
     from backend.services.diagnostics import readiness_payload
 
-    return await run_in_threadpool(readiness_payload)
+    return cast(dict[str, Any], await run_in_threadpool(readiness_payload))
 
 
 @router.get("/devices")
@@ -619,7 +628,7 @@ async def list_devices() -> dict[str, Any]:
 async def onnx_status(device: str = "auto") -> dict[str, Any]:
     """Expose static ONNX weight and runtime provider diagnostics."""
 
-    return await run_in_threadpool(onnx_status_payload, device=device)
+    return cast(dict[str, Any], await run_in_threadpool(onnx_status_payload, device=device))
 
 
 @router.get("/models")
@@ -646,7 +655,7 @@ async def benchmark(
             run_in_threadpool(run_benchmark, model=model, device=device, iterations=iterations),
             timeout=BENCHMARK_TIMEOUT_SECONDS,
         )
-        return result
+        return cast(dict[str, Any], result)
     except asyncio.TimeoutError as exc:
         observability.record_benchmark(
             model, None, device, device, iterations, None, None, None, None, None, 1, "error"
@@ -778,7 +787,15 @@ async def estimate(
         raise HTTPException(422, str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
         observability.record_crash("inference", exc.error_code, exc, route="/estimate")
-        observability.record_inference(model, "unknown", resolved, None, cached=False, outcome="error", error_code=exc.error_code)
+        observability.record_inference(
+            model,
+            "unknown",
+            resolved,
+            None,
+            cached=False,
+            outcome="error",
+            error_code=exc.error_code,
+        )
         raise HTTPException(503, exc.to_payload()) from exc
     except Exception as exc:
         observability.record_crash("inference", "INFERENCE_FAILED", exc, route="/estimate")
@@ -869,7 +886,10 @@ async def detect(
                 {
                     "error_code": getattr(exc, "error_code", "DETECTOR_UNAVAILABLE"),
                     "message": str(exc) or "Local object detector is unavailable",
-                    "action": "Run setup to install detector dependencies, or retry when network access is available for lazy weights download.",
+                    "action": (
+                        "Run setup to install detector dependencies, or retry when network "
+                        "access is available for lazy weights download."
+                    ),
                 },
             ) from exc
         observability.record_crash("detector", "DETECTION_FAILED", exc, route="/detect")
@@ -958,7 +978,9 @@ async def reconstruct(
         raise HTTPException(422, str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
         observability.record_crash("reconstruction", exc.error_code, exc, route="/reconstruct")
-        observability.record_inference(model, "reconstruction", resolved, None, outcome="error", error_code=exc.error_code)
+        observability.record_inference(
+            model, "reconstruction", resolved, None, outcome="error", error_code=exc.error_code
+        )
         raise HTTPException(503, exc.to_payload()) from exc
     except Exception as exc:
         observability.record_crash(

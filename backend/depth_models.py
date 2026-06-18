@@ -115,9 +115,7 @@ class ONNXExecutionEngine:
 
     @staticmethod
     def _load_transform(model_name: str) -> Any:
-        transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-            MIDAS_REPO, "transforms", trust_repo=True
-        )
+        transforms = torch.hub.load(MIDAS_REPO, "transforms", trust_repo=True)
         model_id = normalize_model_id(model_name)
         if model_id == "midas_small":
             return transforms.small_transform
@@ -182,15 +180,13 @@ class DepthEstimator:
         if model_name not in self.models:
             print(f"Loading {model_name} onto {self.device}...")
             spec = get_model_spec(model_name)
-            self.models[model_name] = torch.hub.load(  # type: ignore[no-untyped-call]
+            self.models[model_name] = torch.hub.load(
                 self.repo, spec.pytorch_model_name, trust_repo=True
             )
             self.models[model_name].to(self.device)
             self.models[model_name].eval()
 
-            midas_transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-                self.repo, "transforms", trust_repo=True
-            )
+            midas_transforms = torch.hub.load(self.repo, "transforms", trust_repo=True)
             if spec.model_id == "midas_small":
                 self.transforms[model_name] = midas_transforms.small_transform
             else:

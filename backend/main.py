@@ -1,3 +1,6 @@
+# FastAPI middleware and exception decorators are dynamically typed in the installed stubs.
+# mypy: disable-error-code=untyped-decorator
+
 """FastAPI application factory and runtime lifecycle."""
 
 from __future__ import annotations
