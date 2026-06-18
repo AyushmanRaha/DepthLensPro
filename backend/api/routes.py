@@ -510,6 +510,11 @@ def _telemetry_status(*checks: dict[str, Any]) -> str:
     return "degraded" if any(check.get("status") == "degraded" for check in checks) else "ok"
 
 
+def _required_device_health_failed(devs: dict[str, Any]) -> bool:
+    cpu = devs.get("cpu")
+    return not isinstance(cpu, dict) or cpu.get("available") is not True
+
+
 @router.get("/metrics")
 async def prometheus_metrics() -> Response:
     content, media_type = observability.prometheus_text()
@@ -547,15 +552,13 @@ async def health() -> dict[str, Any]:
     cache_ms = _elapsed_ms(cache_started)
     try:
         onnx = onnx_status_payload(best)
-        onnx_error = None
     except Exception as exc:
         log.warning("ONNX diagnostics degraded: %s", exc)
         onnx = {"status": "degraded", "error": str(exc)}
-        onnx_error = str(exc)
     readiness, readiness_meta = _cached_readiness_payload(best)
 
     status = _telemetry_status(memory, disk)
-    if device_meta.get("error") or cache_error or onnx_error or readiness_meta.get("error"):
+    if cache_error or _required_device_health_failed(devs):
         status = "degraded"
     return {
         "status": status,

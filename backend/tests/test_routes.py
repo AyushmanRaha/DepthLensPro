@@ -18,7 +18,24 @@ def _png_bytes() -> bytes:
     return b"stub-image-bytes"
 
 
+def _stable_health_diagnostics(monkeypatch: Any) -> None:
+    monkeypatch.setattr("backend.api.routes._memory_telemetry", lambda: {"status": "ok"})
+    monkeypatch.setattr("backend.api.routes._disk_telemetry", lambda: {"status": "ok"})
+    monkeypatch.setattr(
+        "backend.api.routes.onnx_status_payload",
+        lambda device: {"overall_status": "onnx_unavailable"},
+    )
+    monkeypatch.setattr(
+        "backend.api.routes._cached_readiness_payload",
+        lambda device: (
+            {"overall_status": "pytorch_ready_onnx_unavailable", "models": {}},
+            {"cached": False},
+        ),
+    )
+
+
 def test_health_checkpoint(monkeypatch: Any) -> None:
+    _stable_health_diagnostics(monkeypatch)
     monkeypatch.setattr(
         "backend.api.routes._available_devices",
         lambda: {
@@ -249,6 +266,7 @@ def test_devices_always_include_cpu_on_discovery_failure(monkeypatch: Any) -> No
 
 
 def test_health_stays_ok_when_optional_acceleration_probe_fails(monkeypatch: Any) -> None:
+    _stable_health_diagnostics(monkeypatch)
     monkeypatch.setattr(
         "backend.api.routes._DEVICE_CACHE",
         {"expires_at": 0.0, "devices": None, "primary": "cpu", "error": None},
