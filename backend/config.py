@@ -1,9 +1,10 @@
+# Pydantic's runtime validator decorator is dynamically typed in the installed stubs.
+# mypy: disable-error-code=untyped-decorator
+
 """Structured runtime configuration for the DepthLens Pro backend."""
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -11,19 +12,22 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field, field_validator
 
+from backend.constants import DEFAULT_BACKEND_HOST, DEFAULT_BACKEND_PORT
+
 if TYPE_CHECKING:
-    from pydantic_settings import BaseSettings, SettingsConfigDict
-elif importlib.util.find_spec("pydantic_settings") is not None:
-    pydantic_settings = importlib.import_module("pydantic_settings")
-    BaseSettings = cast(Any, pydantic_settings.BaseSettings)
-    SettingsConfigDict = cast(Any, pydantic_settings.SettingsConfigDict)
+    SettingsConfigDict: Any
 else:
-    from pydantic import BaseModel as BaseSettings
+    try:
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+    except (
+        ImportError
+    ):  # pragma: no cover - compatibility path before dev dependencies are installed
+        from pydantic import BaseModel as BaseSettings
 
-    def SettingsConfigDict(**kwargs: Any) -> dict[str, Any]:
-        """Compatibility shim when local dev dependencies are not installed yet."""
+        def SettingsConfigDict(**kwargs: Any) -> dict[str, Any]:
+            """Compatibility shim when local dev dependencies are not installed yet."""
 
-        return kwargs
+            return kwargs
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -58,7 +62,16 @@ _ENV_KEYS = (
 )
 
 
-class Settings(BaseSettings):
+if TYPE_CHECKING:
+
+    class _SettingsBase:
+        def __init__(self, **data: Any) -> None: ...
+
+else:
+    _SettingsBase = BaseSettings
+
+
+class Settings(_SettingsBase):
     """Environment-backed application settings.
 
     Values are loaded from process environment variables first and then from a
@@ -68,12 +81,14 @@ class Settings(BaseSettings):
     path keeps local tests importable before dependencies are installed.
     """
 
-    HOST: str = Field(default="127.0.0.1", description="Host interface for the ASGI server.")
-    PORT: int = Field(default=8765, ge=1, le=65535, description="ASGI server port.")
+    HOST: str = Field(
+        default=DEFAULT_BACKEND_HOST, description="Host interface for the ASGI server."
+    )
+    PORT: int = Field(default=DEFAULT_BACKEND_PORT, ge=1, le=65535, description="ASGI server port.")
     LOG_LEVEL: LogLevel = Field(default="INFO", description="Backend logging level.")
     DEBUG: bool = Field(default=False, description="Enable FastAPI debug responses.")
     REDIS_URL: str | None = Field(default=None, description="Full Redis connection URL override.")
-    REDIS_HOST: str = Field(default="127.0.0.1", description="Redis cache host.")
+    REDIS_HOST: str = Field(default=DEFAULT_BACKEND_HOST, description="Redis cache host.")
     REDIS_PORT: int = Field(default=6379, ge=1, le=65535, description="Redis cache port.")
     REDIS_DB: int = Field(default=0, ge=0, description="Redis logical database index.")
     REDIS_PASSWORD: str | None = Field(default=None, description="Optional Redis password.")

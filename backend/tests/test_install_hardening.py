@@ -67,3 +67,48 @@ def test_readme_mentions_setup_scripts() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "scripts/setup-macos.sh" in readme
     assert "scripts/build-native-macos.sh" in readme
+
+
+def test_setup_report_helper_shape(tmp_path: Path) -> None:
+    from scripts.setup_state import write_setup_report
+
+    report = {
+        "platform": "Linux",
+        "arch": "x86_64",
+        "selected_python": "/usr/bin/python3.12",
+        "venv_path": "venv",
+        "node_version": "v22.0.0",
+        "npm_version": "10.0.0",
+        "torch_cache_status": "ok",
+        "detector_cache_status": "ok",
+        "onnx_status": "ok",
+        "verification_command": "cd electron-app && node scripts/verify-resources.js ..",
+    }
+    path = write_setup_report(report, tmp_path / "setup-report.json")
+    payload = json.loads(path.read_text())
+    for key in report:
+        assert key in payload
+
+
+def test_public_setup_and_build_scripts_preserved() -> None:
+    for script in [
+        "scripts/setup-macos.sh",
+        "scripts/setup-linux.sh",
+        "scripts/setup-windows.ps1",
+        "scripts/build-native-macos.sh",
+        "scripts/build-native-linux.sh",
+        "scripts/build-native-windows.ps1",
+    ]:
+        assert Path(script).is_file()
+
+
+def test_build_scripts_name_setup_remediation_commands() -> None:
+    expected = {
+        "scripts/build-native-macos.sh": ["npm run setup:mac", "npm run setup:mac:onnx"],
+        "scripts/build-native-linux.sh": ["npm run setup:linux", "npm run setup:linux:onnx"],
+        "scripts/build-native-windows.ps1": ["npm run setup:win", "npm run setup:win:onnx"],
+    }
+    for script, commands in expected.items():
+        text = Path(script).read_text(encoding="utf-8")
+        for command in commands:
+            assert command in text

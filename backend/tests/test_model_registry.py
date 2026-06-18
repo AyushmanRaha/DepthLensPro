@@ -5,7 +5,14 @@ from typing import Any
 
 import pytest
 
-from backend.model_registry import UnknownModelError, normalize_model_id, resolve_onnx_path
+from backend.constants import SUPPORTED_ONNX_MODEL_IDS
+from backend.core import paths
+from backend.model_registry import (
+    MODEL_REGISTRY,
+    UnknownModelError,
+    normalize_model_id,
+    resolve_onnx_path,
+)
 
 
 @pytest.mark.parametrize(
@@ -86,3 +93,30 @@ def test_export_and_inference_paths_share_canonical_location(tmp_path: Path) -> 
     read_payload = resolve_onnx_path("dpt_large", output_dir=tmp_path)
     write_payload = resolve_onnx_path("dpt_large", output_dir=tmp_path, for_write=True)
     assert read_payload["expected_path"] == write_payload["onnx_path"]
+
+
+def test_model_constants_match_registry_order() -> None:
+    assert tuple(MODEL_REGISTRY) == SUPPORTED_ONNX_MODEL_IDS
+
+
+def test_path_helpers_expose_canonical_roots() -> None:
+    assert paths.REPO_ROOT.name == "DepthLensPro"
+    assert paths.MODEL_ROOT == paths.REPO_ROOT / "models"
+    assert paths.TORCH_CACHE_ROOT == paths.MODEL_ROOT / "torch-cache"
+    assert paths.ONNX_ROOT == paths.MODEL_ROOT / "onnx"
+
+
+def test_path_helper_preserves_env_priority(monkeypatch: Any, tmp_path: Path) -> None:
+    model_dir = tmp_path / "model-root"
+    onnx_dir = tmp_path / "onnx-root"
+    weights_dir = tmp_path / "weights-root"
+    monkeypatch.setenv("DEPTHLENSPRO_MODEL_DIR", str(model_dir))
+    monkeypatch.setenv("DEPTHLENS_ONNX_DIR", str(onnx_dir))
+    monkeypatch.setenv("ONNX_WEIGHTS_DIR", str(weights_dir))
+
+    candidates = paths.onnx_candidate_dirs()
+
+    assert candidates == [
+        ("env_model_dir", model_dir / "onnx"),
+        ("env_model_dir_legacy", model_dir),
+    ]

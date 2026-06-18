@@ -18,7 +18,24 @@ def _png_bytes() -> bytes:
     return b"stub-image-bytes"
 
 
+def _stable_health_diagnostics(monkeypatch: Any) -> None:
+    monkeypatch.setattr("backend.api.routes._memory_telemetry", lambda: {"status": "ok"})
+    monkeypatch.setattr("backend.api.routes._disk_telemetry", lambda: {"status": "ok"})
+    monkeypatch.setattr(
+        "backend.api.routes.onnx_status_payload",
+        lambda device: {"overall_status": "onnx_unavailable"},
+    )
+    monkeypatch.setattr(
+        "backend.api.routes._cached_readiness_payload",
+        lambda device: (
+            {"overall_status": "pytorch_ready_onnx_unavailable", "models": {}},
+            {"cached": False},
+        ),
+    )
+
+
 def test_health_checkpoint(monkeypatch: Any) -> None:
+    _stable_health_diagnostics(monkeypatch)
     monkeypatch.setattr(
         "backend.api.routes._available_devices",
         lambda: {
@@ -48,6 +65,66 @@ def test_health_checkpoint(monkeypatch: Any) -> None:
     assert payload["status"] == "ok"
     assert payload["primary_device"] == "cpu"
     assert payload["devices"]["cpu"]["available"] is True
+
+
+def test_health_response_keys_contract(monkeypatch: Any) -> None:
+    _stable_health_diagnostics(monkeypatch)
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {
+                "cpu": {
+                    "name": "CPU",
+                    "hardware_name": "CPU",
+                    "type": "cpu",
+                    "compute_classes": ["cpu"],
+                    "available": True,
+                }
+            },
+            "cpu",
+            {"duration_ms": 0.0},
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.api.routes._cached_acceleration_checks",
+        lambda devs, force=False: (
+            {
+                "cuda": {"available": False, "operational": False},
+                "mps": {"available": False, "operational": False},
+                "xpu": {"available": False, "operational": False},
+            },
+            {"duration_ms": 0.0},
+        ),
+    )
+
+    payload = client.get("/health").json()
+
+    assert set(payload) == {
+        "status",
+        "diagnostics_status",
+        "version",
+        "primary_device",
+        "devices",
+        "loaded_models",
+        "cache_entries",
+        "cache_metrics",
+        "torch_version",
+        "cuda_available",
+        "mps_available",
+        "xpu_available",
+        "acceleration_ok",
+        "acceleration_checks",
+        "onnx",
+        "readiness",
+        "backend_live",
+        "overall_status",
+        "model_readiness",
+        "warmup",
+        "timings_ms",
+        "telemetry",
+        "system",
+    }
+    assert set(payload["telemetry"]) == {"memory", "disk"}
 
 
 def test_static_metadata_routes() -> None:
@@ -136,6 +213,49 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     assert second.json()["cached"] is True
     assert calls["count"] == 1
 
+
+def test_estimate_telemetry_failure_does_not_break_success(monkeypatch: Any) -> None:
+    cache_service.clear()
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+    monkeypatch.setattr(
+        "backend.api.routes.observability.record_inference",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("telemetry unavailable")),
+    )
+
+    def fake_process(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "depth_map": "depth-png",
+            "metrics": {"mean": 0.5},
+            "latency_ms": 1.2,
+            "model": "midas_small",
+            "colormap": "inferno",
+            "engine_used": "pytorch",
+            "device_used": "cpu",
+            "resolution": {"width": 8, "height": 8},
+            "filename": "sample.png",
+            "cached": False,
+        }
+
+    monkeypatch.setattr("backend.api.routes.process_image", fake_process)
+
+    response = client.post(
+        "/estimate",
+        files={"file": ("sample.png", io.BytesIO(_png_bytes()), "image/png")},
+        data={"model": "MiDaS_small", "colormap": "inferno", "device": "auto"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["depth_map"] == "depth-png"
+
+
 def test_estimate_generic_failure_uses_sanitized_error(monkeypatch: Any) -> None:
     cache_service.clear()
     monkeypatch.setattr(
@@ -162,7 +282,7 @@ def test_estimate_generic_failure_uses_sanitized_error(monkeypatch: Any) -> None
     assert response.status_code == 500
     assert response.json()["detail"] == {
         "error_code": "INFERENCE_FAILED",
-        "message": "Inference failed",
+        "message": "Depth inference failed",
     }
 
 
@@ -247,7 +367,8 @@ def test_devices_always_include_cpu_on_discovery_failure(monkeypatch: Any) -> No
     assert payload["primary_device"] == "cpu"
 
 
-def test_health_degrades_when_acceleration_probe_fails(monkeypatch: Any) -> None:
+def test_health_stays_ok_when_optional_acceleration_probe_fails(monkeypatch: Any) -> None:
+    _stable_health_diagnostics(monkeypatch)
     monkeypatch.setattr(
         "backend.api.routes._DEVICE_CACHE",
         {"expires_at": 0.0, "devices": None, "primary": "cpu", "error": None},
@@ -283,7 +404,7 @@ def test_health_degrades_when_acceleration_probe_fails(monkeypatch: Any) -> None
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "degraded"
+    assert payload["status"] == "ok"
     assert payload["acceleration_checks"]["mps"]["operational"] is False
     assert "timings_ms" in payload
 

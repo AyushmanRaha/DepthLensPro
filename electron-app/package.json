@@ -30,7 +30,7 @@
     "clean:spotlight": "node scripts/clean-spotlight.js",
     "reinstall:mac": "node scripts/reinstall-mac.js",
     "backend:ready": "node -e \"fetch('http://127.0.0.1:8765/ready').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
-    "test": "node test-security-policy.js && node test-verify-resources.js && node test-platform-targets.js && node test-persistence-schema.js",
+    "test": "node test-security-policy.js && node test-verify-resources.js && node test-platform-targets.js && node test-persistence-schema.js && node test-refactor-contract.js && node test-main-modules.js && node test-frontend-contract.js",
     "doctor": "cd .. && python3 scripts/doctor.py --doctor-only",
     "setup": "cd .. && python3 scripts/doctor.py",
     "setup:mac": "cd .. && scripts/setup-macos.sh",
@@ -54,7 +54,7 @@
     "forceCodeSigning": false,
     "appId": "com.ayushmanraha.depthlens-pro",
     "productName": "DepthLens Pro",
-    "copyright": "Copyright \u00a9 2025 Ayushman Raha",
+    "copyright": "Copyright © 2025 Ayushman Raha",
     "directories": {
       "output": "dist"
     },

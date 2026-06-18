@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prefetch TorchVision RGB object detector weights for offline/runtime use."""
+
 from __future__ import annotations
 
 import os

@@ -27,6 +27,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     onnxModels: ["midas_small"],
     torchCache: "required",
     detectorCache: "optional",
+    json: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -38,6 +39,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--torch-cache") options.torchCache = argv[++i] || options.torchCache;
     else if (arg === "--detector-cache") options.detectorCache = argv[++i] || options.detectorCache;
     else if (arg === "--root") options.root = path.resolve(argv[++i] || options.root);
+    else if (arg === "--json") options.json = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (!arg.startsWith("--")) options.root = path.resolve(arg);
     else throw new Error(`Unknown argument: ${arg}`);
@@ -53,7 +55,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    "Usage: node scripts/verify-resources.js [--root-kind repo|packaged] [--mode basic|native] [--torch-cache off|optional|required] [--detector-cache off|optional|required] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
+    "Usage: node scripts/verify-resources.js [--json] [--root-kind repo|packaged] [--mode basic|native] [--torch-cache off|optional|required] [--detector-cache off|optional|required] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
     "",
     "Examples:",
     "  node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
@@ -103,6 +105,15 @@ function pythonCandidatesForPlatform(platform = process.platform) {
   return platform === "win32" ? winPython : posixPython;
 }
 
+function pythonCandidateChecks(root, platform = process.platform) {
+  const platformPython = pythonCandidatesForPlatform(platform);
+  const fallbackPython = platform === "win32" ? pythonCandidatesForPlatform("darwin") : pythonCandidatesForPlatform("win32");
+  return [...platformPython, ...fallbackPython].map((rel) => {
+    const full = path.join(root, rel);
+    return { rel, full, exists: isFile(full) || pathExists(full), platformCandidate: platformPython.includes(rel) };
+  });
+}
+
 function verifyResourceRoot(options = {}) {
   const root = path.resolve(options.root || DEFAULT_ROOT);
   const rootKind = options.rootKind || "repo";
@@ -127,9 +138,9 @@ function verifyResourceRoot(options = {}) {
   addCheck("frontend", true, isDirectory);
   addCheck(path.join("frontend", "index.html"), true, isFile);
 
-  const platformPython = pythonCandidatesForPlatform(platform);
-  const fallbackPython = platform === "win32" ? pythonCandidatesForPlatform("darwin") : pythonCandidatesForPlatform("win32");
-  const pythonOk = [...platformPython, ...fallbackPython].some((rel) => isFile(path.join(root, rel)) || pathExists(path.join(root, rel)));
+  const pythonChecks = pythonCandidateChecks(root, platform);
+  const platformPython = pythonChecks.filter((item) => item.platformCandidate).map((item) => item.rel);
+  const pythonOk = pythonChecks.some((item) => item.exists);
   checks.push({
     rel: platformPython.join(" or "),
     label: `${platformPython.join(" or ")} (platform Python)`,
@@ -166,7 +177,26 @@ function verifyResourceRoot(options = {}) {
   }
 
   const failed = checks.filter((check) => check.required && !check.ok);
-  return { root, rootKind, mode, onnxMode, onnxModels, platform, checks, infos, failed, ok: failed.length === 0 };
+  return {
+    schemaVersion: 1,
+    root,
+    rootKind,
+    mode,
+    onnxMode,
+    onnxModels,
+    platform,
+    modelReadiness: {
+      torchCache: torchStatus,
+      onnx: infos.filter((item) => !item.torchStatus && item.rel && item.rel.endsWith(".onnx")),
+    },
+    detectorReadiness: detectorStatus,
+    pythonCandidateChecks: pythonChecks,
+    checks,
+    infos,
+    failed,
+    remediation: remediation({ rootKind }),
+    ok: failed.length === 0,
+  };
 }
 
 function remediation(result) {
@@ -235,6 +265,15 @@ function main() {
     return;
   }
   const result = verifyResourceRoot(options);
+  if (options.json) {
+    const json = JSON.stringify(result, null, 2);
+    if (result.ok) console.log(json);
+    else {
+      console.error(json);
+      process.exit(1);
+    }
+    return;
+  }
   const output = formatResult(result);
   if (result.ok) console.log(output);
   else {
@@ -249,6 +288,7 @@ module.exports = {
   DEFAULT_ROOT,
   parseArgs,
   pythonCandidatesForPlatform,
+  pythonCandidateChecks,
   verifyResourceRoot,
   formatResult,
   remediation,

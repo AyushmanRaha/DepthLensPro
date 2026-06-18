@@ -141,6 +141,27 @@ def _resolve(requested: str) -> torch.device:
     return torch.device(requested)
 
 
+def normalize_device_key(device: str | None, *, resolve_auto: bool = False) -> str:
+    """Normalize PyTorch-style device metadata without changing provider priority."""
+
+    requested = str(device or "auto").strip().lower() or "auto"
+    return _default_device_key() if resolve_auto and requested == "auto" else requested
+
+
+def normalize_onnx_provider_name(provider: str | None) -> str:
+    """Normalize ONNX Runtime provider metadata for comparisons/log labels."""
+
+    return str(provider or "").strip()
+
+
+def normalize_onnx_providers(providers: Sequence[str] | None) -> list[str]:
+    """Return non-empty provider names in their original priority order."""
+
+    return list(
+        dict.fromkeys(p for p in (normalize_onnx_provider_name(x) for x in providers or []) if p)
+    )
+
+
 def _onnx_provider_candidates(device: str) -> list[str]:
     """Map a PyTorch-style device string to ordered ONNX Runtime providers.
 
@@ -149,9 +170,7 @@ def _onnx_provider_candidates(device: str) -> list[str]:
     names and always appends CPU as the safe final fallback.
     """
 
-    requested = (device or "auto").lower()
-    if requested == "auto":
-        requested = _default_device_key()
+    requested = normalize_device_key(device, resolve_auto=True)
 
     providers: list[str]
     if requested.startswith("cuda"):
@@ -174,12 +193,13 @@ def _onnx_provider_candidates(device: str) -> list[str]:
 def _onnx_providers_for_device(device: str, available: Sequence[str]) -> list[str]:
     """Return ONNX Runtime providers supported by this runtime for a PyTorch device."""
 
-    available_set = set(available)
+    normalized_available = normalize_onnx_providers(available)
+    available_set = set(normalized_available)
     candidates = _onnx_provider_candidates(device)
     selected = [provider for provider in candidates if provider in available_set]
     if "CPUExecutionProvider" in available_set and "CPUExecutionProvider" not in selected:
         selected.append("CPUExecutionProvider")
-    return selected or list(available)
+    return selected or normalized_available
 
 
 def _acceleration_checks(devs: DeviceMap) -> dict[str, dict[str, Any]]:

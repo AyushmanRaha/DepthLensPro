@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import numpy as np
 import torch
@@ -19,6 +20,14 @@ from backend.model_registry import (
 from backend.utils.hardware import _default_device_key
 
 MIDAS_REPO = "intel-isl/MiDaS"
+log = logging.getLogger("depthlens")
+
+
+def _torch_hub_load(*args: Any, **kwargs: Any) -> Any:
+    hub_load = cast(Callable[..., Any], torch.hub.load)
+    return hub_load(*args, **kwargs)
+
+
 ONNX_INPUT_SIZE = (256, 256)
 DEFAULT_ONNX_DIR = Path(__file__).resolve().parent / "onnx_weights"
 
@@ -103,9 +112,16 @@ class ONNXExecutionEngine:
             self.model_id, device, model_path=self.model_path, session_options=self.session_options
         )
         if not session_result.get("ok"):
-            raise RuntimeError(
-                session_result.get("technical_detail") or session_result.get("message")
+            log.warning(
+                "ONNX_SESSION_CREATE_FAILED model=%s device=%s provider_state=%s "
+                "providers=%s detail=%s",
+                self.model_id,
+                device,
+                session_result.get("provider_state"),
+                session_result.get("providers_used") or session_result.get("available_providers"),
+                session_result.get("technical_detail") or session_result.get("message"),
             )
+            raise RuntimeError(session_result.get("message") or "ONNX Runtime session unavailable")
         self.available_providers = list(session_result.get("available_providers", []))
         self.providers = list(session_result.get("providers_used", []))
         self.session = session_result["session"]
@@ -115,9 +131,7 @@ class ONNXExecutionEngine:
 
     @staticmethod
     def _load_transform(model_name: str) -> Any:
-        transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-            MIDAS_REPO, "transforms", trust_repo=True
-        )
+        transforms = _torch_hub_load(MIDAS_REPO, "transforms", trust_repo=True)
         model_id = normalize_model_id(model_name)
         if model_id == "midas_small":
             return transforms.small_transform
@@ -149,7 +163,17 @@ class ONNXExecutionEngine:
         """Execute an ONNX Runtime forward pass and return the raw depth plane."""
 
         batch = self.transform(img_rgb).detach().cpu().numpy().astype(np.float32)
-        outputs = self.session.run([self.output_name], {self.input_name: batch})
+        try:
+            outputs = self.session.run([self.output_name], {self.input_name: batch})
+        except Exception as exc:
+            log.warning(
+                "ONNX_SESSION_RUN_FAILED model=%s provider=%s input_shape=%s error=%s",
+                self.model_id,
+                self.provider,
+                tuple(batch.shape),
+                exc,
+            )
+            raise RuntimeError("ONNX Runtime inference failed") from exc
         pred = np.asarray(outputs[0], dtype=np.float32)
         pred = np.squeeze(pred)
         return resize_onnx_depth(pred, img_rgb.shape[:2])
@@ -182,15 +206,13 @@ class DepthEstimator:
         if model_name not in self.models:
             print(f"Loading {model_name} onto {self.device}...")
             spec = get_model_spec(model_name)
-            self.models[model_name] = torch.hub.load(  # type: ignore[no-untyped-call]
+            self.models[model_name] = _torch_hub_load(
                 self.repo, spec.pytorch_model_name, trust_repo=True
             )
             self.models[model_name].to(self.device)
             self.models[model_name].eval()
 
-            midas_transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-                self.repo, "transforms", trust_repo=True
-            )
+            midas_transforms = _torch_hub_load(self.repo, "transforms", trust_repo=True)
             if spec.model_id == "midas_small":
                 self.transforms[model_name] = midas_transforms.small_transform
             else:

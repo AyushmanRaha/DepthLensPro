@@ -28,6 +28,13 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 
 ---
 
+
+## Refactor Safety Contract
+
+DepthLens Pro now tracks a behavior-preservation baseline for internal refactor phases. See [`docs/refactor-contract.md`](docs/refactor-contract.md) for the public API, UI, install/build, platform, and allowed-file-change contract, and [`docs/refactor-test-matrix.md`](docs/refactor-test-matrix.md) for the required phase-gate commands.
+
+The existing native installation workflow remains the public workflow for both standard and ONNX builds: **clone → setup → build → launch**. Subsequent internal refactors must preserve all public setup, build, launch, resource verification, and ONNX verification commands.
+
 ## Table of Contents
 
 | Section | What it covers |
@@ -385,8 +392,8 @@ flowchart TB
 
 | Layer | Key files | Responsibility |
 |---|---|---|
-| Electron main process | `electron-app/main.js` | Single-instance lock, backend lifecycle, PID metadata, port fallback, safe shutdown |
-| Renderer UI | `frontend/index.html`, `script.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide |
+| Electron main process | `electron-app/main.js`, `electron-app/src/main/*.js` | Small composition entrypoint plus focused modules for paths, backend HTTP probes, port fallback, PID metadata, Python resolution, backend lifecycle, settings persistence, and windows. No UI or IPC contract changes. |
+| Renderer UI | `frontend/index.html`, `frontend/js/*.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide. Phase 7 only reorganized scripts into ordered frontend modules; UI, DOM, CSS, endpoint calls, persistence, and feature behavior are preserved. |
 | Preload bridge | `electron-app/preload.js` | Narrow `contextBridge` surface — backend URL, dialogs, platform info only |
 | Security policy | `electron-app/src/security-policy.js` | Navigation allowlist: local frontend file and `127.0.0.1:PORT` only |
 | Process policy | `electron-app/src/backend-process-policy.js` | Checks command-line and stored PID metadata before terminating backend processes |
@@ -487,17 +494,19 @@ Expected `/live` response:
 
 ### A. Native Desktop App
 
-Platform support is explicit and architecture-specific:
+Platform support is explicit and architecture-specific. The setup entry points are `scripts/setup-macos.sh`, `scripts/setup-linux.sh`, and `scripts/setup-windows.ps1` (also exposed through the Electron npm setup scripts).
 
 | Platform / architecture | Status | Build command |
 |---|---|---|
 | macOS Apple Silicon arm64 | Supported | `npm run build:mac:arm64` |
-| macOS x64 | Not supported | `npm run build:mac:x64` exits with a clear error |
+| Intel Mac / macOS x64 | Not supported | `npm run build:mac:x64` exits with a clear error |
 | macOS universal | Not supported | `npm run build:mac:universal` exits with a clear error |
 | Windows arm64 | Supported | `npm run build:win:arm64` |
 | Windows x64 | Supported | `npm run build:win:x64` |
 | Linux arm64 | Supported | `npm run build:linux:arm64` |
 | Linux x64 | Supported | `npm run build:linux:x64` |
+
+Windows arm64 and x64 are supported, Linux arm64 and x64 are supported, and macOS remains Apple Silicon only.
 
 The native workflow is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. Setup is the only normal step that performs heavyweight dependency installs or model downloads. Standard setup installs the Python venv, backend dependencies, Electron dependencies, PyTorch MiDaS Torch Hub cache, and detector weights; it does **not** generate ONNX by default. ONNX setup adds export/validation for all three files in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`. Standard builds require `models/torch-cache` and treat ONNX as optional; ONNX builds require both the PyTorch cache and all three ONNX files.
 
@@ -608,6 +617,13 @@ npm run launch:linux
 ```
 
 
+
+#### Setup report and diagnostics
+
+After a successful setup, `scripts/doctor.py` writes a machine-readable report to `.depthlens/setup-report.json`. The report records the detected platform and CPU architecture, selected Python executable, virtualenv path, Node/npm versions, PyTorch MiDaS cache status, detector cache status, ONNX status, and the exact resource verification command that setup used. This file is diagnostic only for this phase: build scripts still verify the actual files in `models/torch-cache` and `models/onnx` instead of trusting the report.
+
+Setup is safe to rerun. If pip, npm, MiDaS prefetch, detector prefetch, ONNX handling, or resource verification fails, rerun the platform setup command printed by the failure message. Use the standard setup command for PyTorch builds (`npm run setup:mac`, `npm run setup:linux`, or `npm run setup:win`) and the ONNX setup command when all three ONNX files are required (`npm run setup:mac:onnx`, `npm run setup:linux:onnx`, or `npm run setup:win:onnx`). Passing `--offline` validates existing caches only and does not download model assets; `--onnx-validate-only` validates existing ONNX files and never exports new ones.
+
 #### Setup progress and verification
 
 Setup output is intentionally verbose and streams in real time. Long-running installs and downloads print section headers and commands before they run, for example:
@@ -630,6 +646,14 @@ npm run verify:resources
 node electron-app/scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx optional .
 npm run verify:onnx                 # validates existing ONNX files only
 node electron-app/scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx require-all --models all .
+```
+
+Resource verification also supports structured JSON diagnostics without changing the default human-readable output. The JSON report includes the root kind, verification mode, ONNX mode, model readiness, detector readiness, Python candidate checks, and remediation text. The optional manifest schema in `models/resource-manifest.schema.json` documents the expected resource groups for diagnostics; the verification scripts still inspect the actual filesystem and do not trust the manifest as the sole source of truth.
+
+```bash
+node electron-app/scripts/verify-resources.js --json --root-kind repo --mode native --torch-cache required --onnx optional .
+npm run verify:resources
+npm run verify:onnx
 ```
 
 Packaged resource verification is performed by the build scripts. To run it manually after packaging, use:
@@ -655,6 +679,8 @@ Platform-specific outputs:
 | macOS | `electron-app/dist/mac-arm64/DepthLens Pro.app` and `.dmg` |
 | Windows | `electron-app/dist/win-arm64-unpacked/` or `electron-app/dist/win-x64-unpacked/` and NSIS installer |
 | Linux | `electron-app/dist/*arm64*.AppImage`, `electron-app/dist/*x64*.AppImage`, and unpacked resources when retained by electron-builder |
+
+#### No silent downloads during build
 
 The build scripts verify repo resources before packaging and packaged resources after packaging. They do not silently download model assets. If `models/torch-cache` is missing, standard builds fail early with a “run setup first” remediation. If an ONNX build is requested and any ONNX file is missing or empty, the build fails early with the matching `setup:<platform>:onnx` command. Electron packages `models` as extra resources, so packaged resources contain `Resources/models/torch-cache` and, for ONNX builds, `Resources/models/onnx`.
 
@@ -1181,11 +1207,19 @@ These are standard monocular depth estimation benchmark metrics used in papers l
 
 ### Run Local Checks
 
+Phase 1 repair verification assumes the backend dependencies are installed before
+full pytest collection. Use the normal four-step workflow (`clone → setup → build
+→ launch`) and run the appropriate setup command first, for example
+`npm run setup:<platform>` for standard builds or `npm run setup:<platform>:onnx`
+when validating the required ONNX files (`midas_small.onnx`, `dpt_hybrid.onnx`,
+and `dpt_large.onnx`). Standard setup/build does not require ONNX generation.
+
 ```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
+python -m black --check .
+python -m ruff check .
+python -m mypy backend/
+python -m pytest backend/tests/test_install_contract.py
+python -m pytest
 
 cd electron-app
 npm test
@@ -1195,7 +1229,7 @@ cd ..
 Or as a single pipeline:
 
 ```bash
-black --check . && ruff check . && mypy backend/ && pytest && cd electron-app && npm test && cd ..
+python -m black --check . && python -m ruff check . && python -m mypy backend/ && python -m pytest backend/tests/test_install_contract.py && python -m pytest && cd electron-app && npm test && cd ..
 ```
 
 ### Useful Test Commands
@@ -1396,7 +1430,7 @@ Setup should no longer sit silently at “loading assets.” It streams pip, npm
 python scripts/doctor.py --timeout-seconds 1800 --retries 3
 ```
 
-Offline validation without downloads:
+Rerunning setup is resumable and safe: it reuses the existing `venv`, `electron-app/node_modules`, `models/torch-cache`, and `models/onnx` when they validate. If you need a no-network check, use offline validation without downloads:
 
 ```bash
 venv/bin/python scripts/prefetch-midas-assets.py --offline --models all
@@ -1590,13 +1624,28 @@ DepthLensPro/
 ├── backend/
 │   ├── api/
 │   │   ├── live.py                  # / and /live routes (no heavy imports)
-│   │   └── routes.py                # All other routes — estimate, batch, health, benchmark, cache, reconstruct
+│   │   ├── routes.py                # Thin route orchestration — estimate, batch, health, benchmark, cache, reconstruct
+│   │   ├── validation.py            # Request field, upload, model, colormap, metrics/output validation helpers
+│   │   ├── errors.py                # Public HTTP error payload mapping helpers
+│   │   ├── device_state.py          # Cached device discovery, accelerator checks, readiness diagnostics
+│   │   └── system_telemetry.py      # Memory/disk telemetry helpers used by /health
+│   ├── core/
+│   │   └── paths.py                 # Central repo/model/Torch-cache/ONNX path policy and env overrides
 │   ├── services/
 │   │   ├── benchmarks.py            # PyTorch vs ONNX benchmarking, auto-export, busy flag
 │   │   ├── cache_service.py         # Redis + in-memory LRU, versioned JSON serialisation
 │   │   ├── diagnostics.py           # Module importability, ONNX weight inventory
 │   │   ├── ground_truth.py          # GT decode, nearest-neighbour resize, median-scale align, metrics
-│   │   ├── inference.py             # Core image-to-depth pipeline, depth cache, ONNX/PyTorch dispatch
+│   │   ├── inference.py             # Public façade/orchestrator for image-to-depth responses
+│   │   ├── inference_types.py       # Shared typed payload metadata for inference internals
+│   │   ├── image_io.py              # Decode, depth normalization, colorization, PNG base64 encoding
+│   │   ├── inference_cache.py       # Stable inference/depth cache keys and in-memory depth cache
+│   │   ├── model_assets.py          # Runtime model asset readiness and remediation helpers
+│   │   ├── model_runtime.py         # PyTorch MiDaS model/transform caches, locks, inference
+│   │   ├── object_detection.py      # TorchVision RGB detection weight checks and inference
+│   │   ├── observability.py         # Local-only counters, timings, and bounded histories
+│   │   ├── onnx_inference.py        # ONNX engine cache, locks, inference, PyTorch fallback metadata
+│   │   ├── metrics.py               # Metrics mode parsing, fast/full metrics, grouped payloads
 │   │   ├── onnx_diagnostics.py      # ONNX session creation, provider selection, checker validation
 │   │   └── reconstruction.py        # Pinhole projection, PLY/OBJ serialisation, preview downsampling
 │   ├── scripts/
@@ -1605,6 +1654,7 @@ DepthLensPro/
 │   ├── utils/
 │   │   └── hardware.py              # Device discovery, ONNX provider mapping, acceleration probe
 │   ├── app.py                       # ASGI compatibility entry point (adds repo root to sys.path)
+│   ├── constants.py                 # Shared lightweight literals for upload, modes, ONNX IDs, resource modes
 │   ├── config.py                    # Pydantic settings with dotenv fallback
 │   ├── depth_models.py              # ONNXExecutionEngine, DepthEstimator (legacy)
 │   ├── main.py                      # FastAPI app factory, CORS, JSON logging, lifespan
@@ -1616,17 +1666,42 @@ DepthLensPro/
 │   ├── assets/                      # App icons for all platforms
 │   ├── scripts/                     # Packaging, verification, lifecycle helpers
 │   ├── src/
-│   │   ├── platform-targets.js       # Central supported OS/architecture map, platform targets, settings bridge tests
-│   ├── src/
+│   │   ├── main/                    # Focused main-process modules; no UI or IPC contract changes
+│   │   │   ├── backend-http.js       # /live JSON probes and DepthLens backend detection
+│   │   │   ├── backend-lifecycle.js  # Backend startup, missing-resource errors, stale cleanup, safe shutdown
+│   │   │   ├── backend-pid-store.js  # Private PID and backend metadata files
+│   │   │   ├── paths.js              # App-root/resource/log path helpers
+│   │   │   ├── ports.js              # Port availability and fallback discovery
+│   │   │   ├── python-resolver.js    # Packaged/dev Python candidate selection
+│   │   │   ├── settings-store.js     # Persisted settings schema, sanitization, corruption backups
+│   │   │   └── windows.js            # Splash and main BrowserWindow options
 │   │   ├── backend-process-policy.js # Backend ownership checks (command-line + PID metadata)
+│   │   ├── platform-targets.js       # Central supported OS/architecture map, platform targets, settings bridge tests
 │   │   └── security-policy.js        # Navigation allowlist, external URL classification
-│   ├── main.js                      # Electron main process — single-instance, backend lifecycle, port discovery
+│   ├── main.js                      # Small Electron composition file — app lifecycle, IPC registration, module wiring
 │   ├── preload.js                   # Narrow contextBridge surface
 │   └── package.json
 │
 ├── frontend/
 │   ├── index.html                   # App shell and all workspace panels (Workspace, Webcam, Compare, Performance, Experiments, 3D, Guide)
-│   ├── script.js                    # Frontend behaviour — fetch, charts, gallery, lightbox, webcam, 3D viewer
+│   ├── js/                          # Ordered browser scripts; behavior-preserving split from the former monolithic script.js
+│   │   ├── state.js                 # Shared renderer state containers and defaults
+│   │   ├── settings.js              # Theme, settings, localStorage, Electron settings bridge
+│   │   ├── api-client.js            # Backend URL resolution, fetch wrappers, health/device/status calls
+│   │   ├── dom.js                   # DOM lookup map and safe element helpers
+│   │   ├── uploads.js               # File queue, validation, drag/drop
+│   │   ├── inference-ui.js          # Estimate/batch progress and result rendering
+│   │   ├── webcam.js                # Real-time camera inference lifecycle and cleanup
+│   │   ├── compare.js               # Model comparison workspace
+│   │   ├── benchmark.js             # PyTorch/ONNX benchmark panel
+│   │   ├── experiments.js           # Experiment run/export workspace
+│   │   ├── reconstruction.js        # 3D reconstruction and point-cloud preview
+│   │   ├── charts.js                # Chart.js setup and theme handling
+│   │   ├── notifications.js         # Settings panels, persistence hooks, toasts/navigation helpers
+│   │   ├── observability.js         # Gallery/lightbox and observability dashboard
+│   │   ├── performance.js           # Metrics dashboard refresh helpers
+│   │   └── compat.js                # Final initialization, cleanup, utility compatibility
+│   ├── script.js                    # Compatibility breadcrumb; index.html loads frontend/js directly
 │   ├── style.css                    # Full design system (dark + light theme, CSS variables, animations)
 │   └── welcome-anim.js              # Depth Field Calibration canvas animation (self-contained)
 │
@@ -1636,6 +1711,9 @@ DepthLensPro/
 ├── scripts/
 │   ├── doctor.py                    # Cross-platform setup and environment verification
 │   ├── diagnose_backend.py          # Port/process/endpoint diagnostics
+│   ├── prefetch-detector-weights.py # Optional detector-weight cache prefetch
+│   ├── prefetch-midas-assets.py     # MiDaS Torch Hub/checkpoint cache prefetch
+│   ├── setup_state.py               # Shared setup report/status helpers
 │   ├── setup-macos.sh
 │   ├── setup-linux.sh
 │   ├── setup-windows.ps1
@@ -1643,8 +1721,15 @@ DepthLensPro/
 │   ├── build-native-linux.sh
 │   └── build-native-windows.ps1
 │
+├── docs/
+│   ├── debugging.md                 # Startup, asset, ONNX, port, packaged-resource, and settings troubleshooting
+│   ├── maintenance.md               # Safe extension guide for models, routes, installer/build, frontend modules, tests
+│   ├── refactor-completion-report.md # Final refactor contracts, phase summary, test matrix, known limits
+│   ├── refactor-contract.md
+│   └── refactor-test-matrix.md
+│
 ├── .github/
-│   └── workflows/ci.yml             # GitHub Actions — lint, type-check, test, Electron tests
+│   └── workflows/ci.yml             # GitHub Actions — lint, type-check, pytest, Electron tests, resource dry-run
 ├── Dockerfile                       # Two-stage Python 3.12 slim build
 ├── docker-compose.yml
 ├── package.json                     # Root npm scripts
@@ -1654,7 +1739,23 @@ DepthLensPro/
 └── README.md
 ```
 
+### Backend route organization
+
+The inference service decomposition is internal only: `backend/services/inference.py` preserves the existing public imports and response payloads while delegating image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
+
+The FastAPI route layer stays thin: public route declarations and high-level orchestration remain in `backend/api/routes.py`, while reusable validation, error mapping, device/readiness cache, and health telemetry helpers live in the neighboring `backend/api/` modules listed above. This is an internal organization change only; no public API routes, request fields, status codes, or response shapes were changed.
+
+### Centralized path, platform, and model policy
+
+DepthLens Pro now keeps low-risk shared literals and path resolution in small central modules so setup, backend runtime, and packaging checks can stay in sync without changing public commands or API payloads. Backend upload/mode/model constants live in `backend/constants.py`, filesystem roots and ONNX environment override priority live in `backend/core/paths.py`, and Electron platform support remains centralized in `electron-app/src/platform-targets.js`. Standard builds still treat ONNX files as optional, while ONNX builds continue to require all supported ONNX model files.
+
+### Reliability/performance hardening
+
+Recent internal hardening keeps the public API, UI, and four-step install flow unchanged while reducing avoidable runtime work. Estimate cache hits now reuse normalized output metadata instead of reparsing it for telemetry, local observability hooks are failure-safe around inference paths, ONNX provider/device metadata is normalized before selection without changing provider priority, and Electron startup diagnostics keep a bounded backend-output tail with setup-remediation context.
+
 ---
+
+The final refactor maintenance docs live in [`docs/maintenance.md`](docs/maintenance.md), [`docs/debugging.md`](docs/debugging.md), and [`docs/refactor-completion-report.md`](docs/refactor-completion-report.md).
 
 ## Contributing
 
@@ -1684,7 +1785,7 @@ cd ..
 
 - Python is formatted with Black (`line-length = 100`) and linted with Ruff (`E`, `F`, `W`, `I` rules)
 - Type annotations are checked with mypy in strict mode (excluding `backend/tests/`)
-- JavaScript follows the style already present in `main.js` and `script.js` — no separate formatter is enforced, but the Electron test suite (`npm test`) must pass
+- JavaScript follows the style already present in `main.js` and the ordered `frontend/js/` browser scripts — no separate formatter is enforced, but the Electron test suite (`npm test`) must pass
 
 ---
 

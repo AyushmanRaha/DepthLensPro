@@ -115,6 +115,56 @@ def test_atomic_export_preserves_final_file_after_validation_failure(
     assert not list(tmp_path.glob("*.tmp.onnx"))
 
 
+def test_validate_only_result_has_consistent_json_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    onnx_file = tmp_path / "midas_small.onnx"
+    onnx_file.write_bytes(b"valid")
+    monkeypatch.setattr(
+        export_onnx,
+        "_validate_onnx",
+        lambda path, model: (
+            True,
+            None,
+            {"status": "available", "providers": ["CPUExecutionProvider"]},
+        ),
+    )
+
+    result = export_onnx.validate_model("midas_small", tmp_path)
+
+    assert result["ok"] is True
+    assert result["operation"] == "validate"
+    assert result["model_id"] == "midas_small"
+    assert result["onnx_path"] == str(onnx_file)
+    assert result["exists"] is True
+    assert result["file_size"] == 5
+    assert result["validation"]["status"] == "available"
+    assert result["error_code"] is None
+
+
+def test_cached_invalid_onnx_is_quarantined_with_consistent_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    onnx_file = tmp_path / "midas_small.onnx"
+    onnx_file.write_bytes(b"corrupt")
+    monkeypatch.setattr(
+        export_onnx,
+        "_validate_onnx",
+        lambda path, model: (False, "bad model", {"status": "invalid_checker"}),
+    )
+
+    result = export_onnx.export_model_to_onnx("midas_small", output_dir=tmp_path)
+
+    assert result["ok"] is False
+    assert result["operation"] == "export"
+    assert result["model_id"] == "midas_small"
+    assert result["error_code"] == "ONNX_VALIDATION_FAILED"
+    assert result["quarantined_path"] is not None
+    assert not onnx_file.exists()
+    assert Path(result["quarantined_path"]).exists()
+    assert Path(result["quarantined_path"] + ".txt").read_text(encoding="utf-8") == "bad model"
+
+
 def test_benchmark_auto_export_is_locked_for_concurrent_calls(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

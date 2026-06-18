@@ -1,5 +1,7 @@
 """Export and validate MiDaS Torch Hub weights as static ONNX files."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -10,7 +12,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 
 import torch
 
@@ -18,11 +20,21 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.depth_models import MIDAS_REPO, onnx_model_path  # noqa: E402
-from backend.model_registry import MODEL_REGISTRY, get_model_spec, normalize_model_id, onnx_output_path  # noqa: E402
-from backend.services.onnx_diagnostics import create_onnx_session  # noqa: E402
+from backend.depth_models import MIDAS_REPO, onnx_model_path
+from backend.model_registry import (
+    MODEL_REGISTRY,
+    get_model_spec,
+    normalize_model_id,
+    onnx_output_path,
+)
+from backend.services.onnx_diagnostics import create_onnx_session
 
 OPTIONAL_ONNX_MODELS = {"dpt_hybrid", "dpt_large"}
+
+
+def _torch_hub_load(*args: Any, **kwargs: Any) -> Any:
+    hub_load = cast(Callable[..., Any], torch.hub.load)
+    return hub_load(*args, **kwargs)
 
 
 def parse_model_list(value: str) -> list[str]:
@@ -39,6 +51,7 @@ def configure_certificates() -> dict[str, str | None]:
     """Point Python HTTPS clients at certifi when available."""
     try:
         import certifi
+
         bundle = certifi.where()
     except Exception:
         bundle = None
@@ -53,6 +66,7 @@ def configure_certificates() -> dict[str, str | None]:
 def _dummy_input(shape: tuple[int, int, int, int]) -> Any:
     try:
         import numpy as np
+
         return np.zeros(shape, dtype=np.float32)
     except Exception:
         return None
@@ -61,7 +75,10 @@ def _dummy_input(shape: tuple[int, int, int, int]) -> Any:
 def _validate_onnx(path: Path, model_id: str) -> tuple[bool, str | None, dict[str, Any]]:
     spec = get_model_spec(model_id)
     shape = (1, 3, spec.input_size[0], spec.input_size[1])
-    detail: dict[str, Any] = {"input_shape": list(shape), "file_size": path.stat().st_size if path.exists() else 0}
+    detail: dict[str, Any] = {
+        "input_shape": list(shape),
+        "file_size": path.stat().st_size if path.exists() else 0,
+    }
     if not path.is_file() or path.stat().st_size <= 0:
         return False, "exported ONNX file is missing or empty", detail | {"status": "empty"}
     try:
@@ -72,10 +89,22 @@ def _validate_onnx(path: Path, model_id: str) -> tuple[bool, str | None, dict[st
     except ImportError:
         detail["checker"] = "skipped_onnx_not_installed"
     except Exception as exc:
-        return False, f"onnx.checker failed: {type(exc).__name__}: {exc}", detail | {"status": "invalid_checker"}
+        return (
+            False,
+            f"onnx.checker failed: {type(exc).__name__}: {exc}",
+            detail | {"status": "invalid_checker"},
+        )
     session = create_onnx_session(model_id, "cpu", model_path=path)
     if not session.get("ok"):
-        return False, str(session.get("technical_detail") or session.get("message")), detail | {"status": "invalid_session", "session": {k: v for k, v in session.items() if k != "session"}}
+        return (
+            False,
+            str(session.get("technical_detail") or session.get("message")),
+            detail
+            | {
+                "status": "invalid_session",
+                "session": {k: v for k, v in session.items() if k != "session"},
+            },
+        )
     try:
         ort_session = session["session"]
         input_name = ort_session.get_inputs()[0].name
@@ -86,7 +115,11 @@ def _validate_onnx(path: Path, model_id: str) -> tuple[bool, str | None, dict[st
             detail["dummy_outputs"] = [list(getattr(out, "shape", [])) for out in outputs]
         detail["providers"] = session.get("providers_used", [])
     except Exception as exc:
-        return False, f"dummy inference failed: {type(exc).__name__}: {exc}", detail | {"status": "invalid_dummy_inference"}
+        return (
+            False,
+            f"dummy inference failed: {type(exc).__name__}: {exc}",
+            detail | {"status": "invalid_dummy_inference"},
+        )
     return True, None, detail | {"status": "available"}
 
 
@@ -107,7 +140,58 @@ def _quarantine(path: Path, reason: str) -> Path | None:
         return None
 
 
-def export_model_to_onnx(model_id: str, force: bool = False, input_shape: tuple[int, int, int, int] | None = None, output_dir: Path | None = None, opset: int = 17) -> dict[str, Any]:
+def _validation_result(path: Path, model_id: str) -> tuple[bool, str | None, dict[str, Any]]:
+    result = _validate_onnx(path, model_id)
+    if len(result) == 2:
+        ok, error = result
+        return bool(ok), error, {}
+    ok, error, detail = result
+    return ok, error, detail
+
+
+def _base_result(
+    *,
+    ok: bool,
+    model_id: str,
+    onnx_path: Path,
+    input_shape: tuple[int, int, int, int],
+    operation: str,
+    opset: int,
+    validation: dict[str, Any] | None = None,
+    error_code: str | None = None,
+    message: str,
+    technical_detail: str | None = None,
+    export_strategy: str | None = None,
+    reused_existing: bool = False,
+    quarantined_path: Path | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "operation": operation,
+        "model_id": model_id,
+        "input_shape": list(input_shape),
+        "onnx_path": os.fspath(onnx_path),
+        "exists": onnx_path.exists(),
+        "file_size": onnx_path.stat().st_size if onnx_path.exists() else 0,
+        "reused_existing": reused_existing,
+        "export_strategy": export_strategy,
+        "opset": opset,
+        "validation": validation or {},
+        "quarantined_path": os.fspath(quarantined_path) if quarantined_path else None,
+        "error_code": error_code,
+        "optional": model_id in OPTIONAL_ONNX_MODELS,
+        "message": message,
+        "technical_detail": technical_detail,
+    }
+
+
+def export_model_to_onnx(
+    model_id: str,
+    force: bool = False,
+    input_shape: tuple[int, int, int, int] | None = None,
+    output_dir: Path | None = None,
+    opset: int = 17,
+) -> dict[str, Any]:
     configure_certificates()
     canonical = normalize_model_id(model_id)
     spec = get_model_spec(canonical)
@@ -116,13 +200,41 @@ def export_model_to_onnx(model_id: str, force: bool = False, input_shape: tuple[
     shape = input_shape or (1, 3, spec.input_size[0], spec.input_size[1])
 
     if path.is_file() and path.stat().st_size > 0 and not force:
-        ok, error, validation = _validate_onnx(path, canonical)
+        ok, error, validation = _validation_result(path, canonical)
         if ok:
-            return {"ok": True, "model_id": canonical, "input_shape": list(shape), "onnx_path": os.fspath(path), "reused_existing": True, "export_strategy": "cached_valid_onnx", "opset": opset, "validation": validation, "file_size": path.stat().st_size, "error_code": None, "message": "Using cached ONNX model.", "technical_detail": None}
+            return _base_result(
+                ok=True,
+                model_id=canonical,
+                input_shape=shape,
+                onnx_path=path,
+                operation="export",
+                opset=opset,
+                validation=validation,
+                reused_existing=True,
+                export_strategy="cached_valid_onnx",
+                message="Using cached ONNX model.",
+            )
         quarantined = _quarantine(path, error or "invalid cached ONNX")
-        return {"ok": False, "model_id": canonical, "input_shape": list(shape), "onnx_path": os.fspath(path), "quarantined_path": os.fspath(quarantined) if quarantined else None, "reused_existing": False, "export_strategy": None, "opset": opset, "validation": validation, "error_code": "ONNX_VALIDATION_FAILED", "message": "Cached ONNX failed validation and was removed/quarantined.", "technical_detail": error}
+        return _base_result(
+            ok=False,
+            model_id=canonical,
+            input_shape=shape,
+            onnx_path=path,
+            operation="export",
+            opset=opset,
+            validation=validation,
+            quarantined_path=quarantined,
+            error_code="ONNX_VALIDATION_FAILED",
+            message="Cached ONNX failed validation and was removed/quarantined.",
+            technical_detail=error,
+        )
 
-    model = torch.hub.load(MIDAS_REPO, spec.pytorch_model_name, trust_repo=True, skip_validation=True)  # type: ignore[no-untyped-call]
+    model = _torch_hub_load(
+        MIDAS_REPO,
+        spec.pytorch_model_name,
+        trust_repo=True,
+        skip_validation=True,
+    )
     model.eval().cpu()
     dummy = torch.zeros(shape, dtype=torch.float32)
     errors: list[str] = []
@@ -131,10 +243,18 @@ def export_model_to_onnx(model_id: str, force: bool = False, input_shape: tuple[
     for strategy in strategies:
         tmp_path: Path | None = None
         try:
-            fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp.onnx")
+            fd, tmp_name = tempfile.mkstemp(
+                dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp.onnx"
+            )
             os.close(fd)
             tmp_path = Path(tmp_name)
-            kwargs: dict[str, Any] = {"export_params": True, "opset_version": opset, "do_constant_folding": True, "input_names": ["input"], "output_names": ["output"]}
+            kwargs: dict[str, Any] = {
+                "export_params": True,
+                "opset_version": opset,
+                "do_constant_folding": True,
+                "input_names": ["input"],
+                "output_names": ["output"],
+            }
             if "dynamo" in signature.parameters:
                 kwargs["dynamo"] = strategy == "dynamo_export"
             elif strategy == "dynamo_export":
@@ -143,11 +263,23 @@ def export_model_to_onnx(model_id: str, force: bool = False, input_shape: tuple[
                 kwargs["external_data"] = False
             with torch.no_grad():
                 torch.onnx.export(model, (dummy,), os.fspath(tmp_path), **kwargs)
-            ok, error, validation = _validate_onnx(tmp_path, canonical)
+            ok, error, validation = _validation_result(tmp_path, canonical)
             if ok:
                 os.replace(tmp_path, path)
                 tmp_path = None
-                return {"ok": True, "model_id": canonical, "input_shape": list(shape), "onnx_path": os.fspath(path), "reused_existing": False, "export_strategy": strategy, "opset": opset, "validation": validation, "file_size": path.stat().st_size, "runtime_providers": validation.get("providers", []), "error_code": None, "message": f"Exported {spec.display_name} with {strategy}.", "technical_detail": None}
+                result = _base_result(
+                    ok=True,
+                    model_id=canonical,
+                    input_shape=shape,
+                    onnx_path=path,
+                    operation="export",
+                    opset=opset,
+                    validation=validation,
+                    export_strategy=strategy,
+                    message=f"Exported {spec.display_name} with {strategy}.",
+                )
+                result["runtime_providers"] = validation.get("providers", [])
+                return result
             errors.append(f"{strategy}: validation failed: {error}")
             _quarantine(tmp_path, error or "validation failed")
             tmp_path = None
@@ -156,14 +288,37 @@ def export_model_to_onnx(model_id: str, force: bool = False, input_shape: tuple[
         finally:
             if tmp_path is not None:
                 _quarantine(tmp_path, "temporary export failed")
-    return {"ok": False, "model_id": canonical, "input_shape": list(shape), "onnx_path": os.fspath(path), "reused_existing": False, "export_strategy": None, "opset": opset, "error_code": "ONNX_EXPORT_FAILED", "optional": canonical in OPTIONAL_ONNX_MODELS, "message": "ONNX export failed; PyTorch inference remains available.", "technical_detail": "\n".join(errors)}
+    return _base_result(
+        ok=False,
+        model_id=canonical,
+        input_shape=shape,
+        onnx_path=path,
+        operation="export",
+        opset=opset,
+        error_code="ONNX_EXPORT_FAILED",
+        message="ONNX export failed; PyTorch inference remains available.",
+        technical_detail="\n".join(errors),
+    )
 
 
 def validate_model(model_id: str, output_dir: Path | None = None) -> dict[str, Any]:
     canonical = normalize_model_id(model_id)
     path = onnx_output_path(canonical, output_dir)
-    ok, error, detail = _validate_onnx(path, canonical)
-    return {"ok": ok, "model_id": canonical, "onnx_path": os.fspath(path), "validation": detail, "error_code": None if ok else str(detail.get("status", "invalid")).upper(), "message": "ONNX validation passed." if ok else (error or "ONNX validation failed"), "technical_detail": error}
+    spec = get_model_spec(canonical)
+    shape = (1, 3, spec.input_size[0], spec.input_size[1])
+    ok, error, detail = _validation_result(path, canonical)
+    return _base_result(
+        ok=ok,
+        model_id=canonical,
+        input_shape=shape,
+        onnx_path=path,
+        operation="validate",
+        opset=17,
+        validation=detail,
+        error_code=None if ok else str(detail.get("status", "invalid")).upper(),
+        message="ONNX validation passed." if ok else (error or "ONNX validation failed"),
+        technical_detail=error,
+    )
 
 
 def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:
@@ -176,14 +331,40 @@ def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export DepthLens Pro MiDaS models to ONNX.")
     parser.add_argument("--model", choices=sorted(MODEL_REGISTRY), default="midas_small")
-    parser.add_argument("--models", type=parse_model_list, help="Comma-separated model IDs to export/validate, or all.")
+    parser.add_argument(
+        "--models",
+        type=parse_model_list,
+        help="Comma-separated model IDs to export/validate, or all.",
+    )
     parser.add_argument("--all", action="store_true", help="Export every supported MiDaS model.")
-    parser.add_argument("--output-dir", type=Path, default=onnx_model_path("midas_small").parent, help="Directory for generated .onnx files.")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=onnx_model_path("midas_small").parent,
+        help="Directory for generated .onnx files.",
+    )
     parser.add_argument("--opset", type=int, default=17, help="ONNX opset version.")
-    parser.add_argument("--force", action="store_true", help="Regenerate even if a valid cached ONNX file exists.")
-    parser.add_argument("--validate-only", action="store_true", help="Validate existing ONNX files without exporting.")
-    parser.add_argument("--strict", "--require-all", dest="strict", action="store_true", help="Fail if any selected model is missing/invalid, including optional DPT models.")
-    parser.add_argument("--allow-optional-dpt-failure", action="store_true", default=True, help="Allow DPT Hybrid/Large failures while requiring MiDaS Small.")
+    parser.add_argument(
+        "--force", action="store_true", help="Regenerate even if a valid cached ONNX file exists."
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate existing ONNX files without exporting.",
+    )
+    parser.add_argument(
+        "--strict",
+        "--require-all",
+        dest="strict",
+        action="store_true",
+        help="Fail if any selected model is missing/invalid, including optional DPT models.",
+    )
+    parser.add_argument(
+        "--allow-optional-dpt-failure",
+        action="store_true",
+        default=True,
+        help="Allow DPT Hybrid/Large failures while requiring MiDaS Small.",
+    )
     return parser.parse_args()
 
 
@@ -192,8 +373,15 @@ def main() -> None:
     models = sorted(MODEL_REGISTRY) if args.all else (args.models if args.models else [args.model])
     failures = []
     for index, model_name in enumerate(models, 1):
-        print(f"[ONNX] [{index}/{len(models)}] {'validating' if args.validate_only else 'exporting'} {model_name}...", flush=True)
-        result = validate_model(model_name, args.output_dir) if args.validate_only else export_model_to_onnx(model_name, force=args.force, output_dir=args.output_dir, opset=args.opset)
+        action = "validating" if args.validate_only else "exporting"
+        print(f"[ONNX] [{index}/{len(models)}] {action} {model_name}...", flush=True)
+        result = (
+            validate_model(model_name, args.output_dir)
+            if args.validate_only
+            else export_model_to_onnx(
+                model_name, force=args.force, output_dir=args.output_dir, opset=args.opset
+            )
+        )
         print(json.dumps(result, indent=2, default=str), flush=True)
         if not result.get("ok"):
             optional = result.get("model_id") in OPTIONAL_ONNX_MODELS and not args.strict

@@ -1,3 +1,6 @@
+# FastAPI's route decorators are dynamically typed in the installed stubs.
+# mypy: disable-error-code=untyped-decorator
+
 """Lightweight liveness routes for DepthLens Pro."""
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ async def live() -> dict[str, Any]:
     busy = False
     try:
         from backend.services.benchmarks import benchmark_busy
+
         busy = benchmark_busy()
     except Exception:
         busy = False

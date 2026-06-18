@@ -11,8 +11,8 @@ from typing import Any
 
 from backend.config import settings
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
-from backend.services.onnx_diagnostics import onnx_status_payload
 from backend.services.model_assets import inspect_model_assets
+from backend.services.onnx_diagnostics import onnx_status_payload
 
 REQUIRED_RUNTIME_MODULES = ("fastapi", "uvicorn", "numpy", "torch", "cv2", "PIL")
 OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
@@ -21,7 +21,30 @@ OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
 def _module_check(name: str, *, required: bool) -> dict[str, Any]:
     started = time.perf_counter()
     result: dict[str, Any] = {"required": required, "available": False}
-    spec = importlib.util.find_spec(name)
+    try:
+        spec = importlib.util.find_spec(name)
+    except ValueError as exc:
+        try:
+            module = importlib.import_module(name)
+        except Exception:
+            result.update(
+                {
+                    "status": "missing_required" if required else "missing_optional",
+                    "error": f"Python module {name!r} is unavailable: {exc}",
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
+            return result
+        result.update(
+            {
+                "status": "ok",
+                "available": True,
+                "version": getattr(module, "__version__", None),
+                "origin": getattr(getattr(module, "__spec__", None), "origin", None),
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            }
+        )
+        return result
     if spec is None:
         result.update(
             {
@@ -99,8 +122,19 @@ def readiness_payload() -> dict[str, Any]:
         "onnx_all_ready": bool(asset_status.get("onnx_all_ready")),
         "downloads_disabled": bool(asset_status.get("downloads_disabled")),
         "inference_ready": inference_ready,
-        "fatal_reason": None if inference_ready else (asset_status.get("fatal_reason") or "runtime_imports_unavailable"),
-        "recommended_action": None if inference_ready else (asset_status.get("recommended_action") or "Install backend dependencies and run setup."),
+        "fatal_reason": (
+            None
+            if inference_ready
+            else (asset_status.get("fatal_reason") or "runtime_imports_unavailable")
+        ),
+        "recommended_action": (
+            None
+            if inference_ready
+            else (
+                asset_status.get("recommended_action")
+                or "Install backend dependencies and run setup."
+            )
+        ),
         "required": required,
         "optional": optional,
         "torch_runtime": torch_details,
