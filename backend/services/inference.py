@@ -398,7 +398,9 @@ def process_image(
             ):
                 gray = cv2.cvtColor((depth * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
                 payload["grayscale"] = _b64(gray)
-        observability.record_inference(
+        observability.safe_observe(
+            "service_inference",
+            observability.record_inference,
             model_id,
             str(engine_metadata.get("engine_used", "pytorch")),
             str(engine_metadata.get("device_used", device)),
@@ -412,9 +414,22 @@ def process_image(
         )
         return payload
     except Exception as exc:
-        observability.record_crash("inference", "INFERENCE_FAILED", exc)
-        observability.record_inference(
-            model_label, "unknown", device, None, outcome="error", error_code="INFERENCE_FAILED"
+        observability.safe_observe(
+            "service_inference_crash",
+            observability.record_crash,
+            "inference",
+            "INFERENCE_FAILED",
+            exc,
+        )
+        observability.safe_observe(
+            "service_inference_error",
+            observability.record_inference,
+            model_label,
+            "unknown",
+            device,
+            None,
+            outcome="error",
+            error_code="INFERENCE_FAILED",
         )
         raise
 

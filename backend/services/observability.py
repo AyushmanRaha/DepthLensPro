@@ -250,6 +250,17 @@ def reset_for_tests() -> None:
 reset_for_tests()
 
 
+def safe_observe(label: str, func: Any, *args: Any, **kwargs: Any) -> None:
+    """Run an observability hook without allowing telemetry failures to affect callers."""
+
+    try:
+        func(*args, **kwargs)
+    except Exception as exc:  # pragma: no cover - defensive containment
+        code = sanitize_error_code(label)
+        message = sanitize_message(exc)
+        print(f"[DepthLens observability degraded] {code}: {message}")
+
+
 def increment_active_http() -> None:
     global _http_active
     if not enabled():

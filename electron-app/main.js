@@ -111,7 +111,12 @@ app.on("before-quit", (event) => {
   if (state.backendProcess && state.backendOwnedByElectron && !isQuitting) {
     event.preventDefault();
     isQuitting = true;
-    backendLifecycle.shutdownOwnedBackend().finally(() => { app.quit(); });
+    backendLifecycle.shutdownOwnedBackend().finally(() => {
+      if (!app.isQuittingDepthLens) {
+        app.isQuittingDepthLens = true;
+        app.quit();
+      }
+    });
   }
 });
 app.on("web-contents-created", (_event, contents) => {
