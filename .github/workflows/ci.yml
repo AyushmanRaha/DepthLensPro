@@ -2,15 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [refactor-perf-tests, main, master]
+    branches:
+      - "**"
   pull_request:
-    branches: [refactor-perf-tests, main, master]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+  TESTING: "1"
+  DEPTHLENS_DISABLE_MODEL_DOWNLOADS: "1"
+  DEPTHLENS_SKIP_WARMUP: "1"
+  DEPTHLENS_CACHE_BACKEND: "memory"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  validate:
+  backend-quality:
+    name: backend-quality
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python 3.12
@@ -18,35 +44,103 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install backend dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --no-cache-dir -r backend/requirements.txt
+          python -m pip check
 
-      - name: Black check
-        run: black --check .
+      - name: Check Python formatting with Black
+        run: python -m black --check .
 
-      - name: Ruff check
-        run: ruff check .
+      - name: Lint Python with Ruff
+        run: python -m ruff check .
 
-      - name: Mypy
-        run: mypy backend/
+      - name: Type-check backend with mypy
+        run: python -m mypy backend/
 
-      - name: Pytest
-        run: pytest
+      - name: Run Python tests
+        run: python -m pytest -q
+
+  electron-contract:
+    name: electron-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Install Electron dependencies
+        working-directory: electron-app
         run: npm ci
-        working-directory: electron-app
 
-      - name: Electron lightweight tests
+      - name: Run Electron contract tests
+        working-directory: electron-app
         run: npm test
-        working-directory: electron-app
 
-      - name: Resource verification dry run
+      - name: Run lightweight resource verification dry run
+        working-directory: electron-app
         run: |
-          tmp_root=$(mktemp -d)
+          tmp_root="$(mktemp -d)"
           mkdir -p "$tmp_root/backend" "$tmp_root/frontend" "$tmp_root/venv/bin"
           touch "$tmp_root/backend/app.py" "$tmp_root/frontend/index.html" "$tmp_root/venv/bin/python"
-          node scripts/verify-resources.js --root-kind repo --mode basic --torch-cache off --detector-cache off --onnx off --json "$tmp_root"
-        working-directory: electron-app
+
+          node scripts/verify-resources.js \
+            --root-kind repo \
+            --mode basic \
+            --torch-cache off \
+            --detector-cache off \
+            --onnx off \
+            --json \
+            "$tmp_root"
+
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build backend Docker image
+        run: docker build --pull --tag depthlenspro-backend:ci .
+
+  ci-passed:
+    name: ci-passed
+    runs-on: ubuntu-latest
+    needs:
+      - backend-quality
+      - electron-contract
+      - docker-build
+    if: always()
+
+    steps:
+      - name: Verify all required CI jobs passed
+        run: |
+          echo "backend-quality: ${{ needs.backend-quality.result }}"
+          echo "electron-contract: ${{ needs.electron-contract.result }}"
+          echo "docker-build: ${{ needs.docker-build.result }}"
+
+          if [ "${{ needs.backend-quality.result }}" != "success" ]; then
+            echo "backend-quality failed"
+            exit 1
+          fi
+
+          if [ "${{ needs.electron-contract.result }}" != "success" ]; then
+            echo "electron-contract failed"
+            exit 1
+          fi
+
+          if [ "${{ needs.docker-build.result }}" != "success" ]; then
+            echo "docker-build failed"
+            exit 1
+          fi
+
+          echo "All CI jobs passed."
