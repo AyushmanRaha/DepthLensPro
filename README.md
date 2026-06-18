@@ -648,6 +648,14 @@ npm run verify:onnx                 # validates existing ONNX files only
 node electron-app/scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx require-all --models all .
 ```
 
+Resource verification also supports structured JSON diagnostics without changing the default human-readable output. The JSON report includes the root kind, verification mode, ONNX mode, model readiness, detector readiness, Python candidate checks, and remediation text. The optional manifest schema in `models/resource-manifest.schema.json` documents the expected resource groups for diagnostics; the verification scripts still inspect the actual filesystem and do not trust the manifest as the sole source of truth.
+
+```bash
+node electron-app/scripts/verify-resources.js --json --root-kind repo --mode native --torch-cache required --onnx optional .
+npm run verify:resources
+npm run verify:onnx
+```
+
 Packaged resource verification is performed by the build scripts. To run it manually after packaging, use:
 
 ```bash

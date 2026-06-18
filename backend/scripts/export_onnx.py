@@ -140,6 +140,51 @@ def _quarantine(path: Path, reason: str) -> Path | None:
         return None
 
 
+def _validation_result(path: Path, model_id: str) -> tuple[bool, str | None, dict[str, Any]]:
+    result = _validate_onnx(path, model_id)
+    if len(result) == 2:
+        ok, error = result
+        return bool(ok), error, {}
+    ok, error, detail = result
+    return ok, error, detail
+
+
+def _base_result(
+    *,
+    ok: bool,
+    model_id: str,
+    onnx_path: Path,
+    input_shape: tuple[int, int, int, int],
+    operation: str,
+    opset: int,
+    validation: dict[str, Any] | None = None,
+    error_code: str | None = None,
+    message: str,
+    technical_detail: str | None = None,
+    export_strategy: str | None = None,
+    reused_existing: bool = False,
+    quarantined_path: Path | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "operation": operation,
+        "model_id": model_id,
+        "input_shape": list(input_shape),
+        "onnx_path": os.fspath(onnx_path),
+        "exists": onnx_path.exists(),
+        "file_size": onnx_path.stat().st_size if onnx_path.exists() else 0,
+        "reused_existing": reused_existing,
+        "export_strategy": export_strategy,
+        "opset": opset,
+        "validation": validation or {},
+        "quarantined_path": os.fspath(quarantined_path) if quarantined_path else None,
+        "error_code": error_code,
+        "optional": model_id in OPTIONAL_ONNX_MODELS,
+        "message": message,
+        "technical_detail": technical_detail,
+    }
+
+
 def export_model_to_onnx(
     model_id: str,
     force: bool = False,
@@ -155,37 +200,34 @@ def export_model_to_onnx(
     shape = input_shape or (1, 3, spec.input_size[0], spec.input_size[1])
 
     if path.is_file() and path.stat().st_size > 0 and not force:
-        ok, error, validation = _validate_onnx(path, canonical)
+        ok, error, validation = _validation_result(path, canonical)
         if ok:
-            return {
-                "ok": True,
-                "model_id": canonical,
-                "input_shape": list(shape),
-                "onnx_path": os.fspath(path),
-                "reused_existing": True,
-                "export_strategy": "cached_valid_onnx",
-                "opset": opset,
-                "validation": validation,
-                "file_size": path.stat().st_size,
-                "error_code": None,
-                "message": "Using cached ONNX model.",
-                "technical_detail": None,
-            }
+            return _base_result(
+                ok=True,
+                model_id=canonical,
+                input_shape=shape,
+                onnx_path=path,
+                operation="export",
+                opset=opset,
+                validation=validation,
+                reused_existing=True,
+                export_strategy="cached_valid_onnx",
+                message="Using cached ONNX model.",
+            )
         quarantined = _quarantine(path, error or "invalid cached ONNX")
-        return {
-            "ok": False,
-            "model_id": canonical,
-            "input_shape": list(shape),
-            "onnx_path": os.fspath(path),
-            "quarantined_path": os.fspath(quarantined) if quarantined else None,
-            "reused_existing": False,
-            "export_strategy": None,
-            "opset": opset,
-            "validation": validation,
-            "error_code": "ONNX_VALIDATION_FAILED",
-            "message": "Cached ONNX failed validation and was removed/quarantined.",
-            "technical_detail": error,
-        }
+        return _base_result(
+            ok=False,
+            model_id=canonical,
+            input_shape=shape,
+            onnx_path=path,
+            operation="export",
+            opset=opset,
+            validation=validation,
+            quarantined_path=quarantined,
+            error_code="ONNX_VALIDATION_FAILED",
+            message="Cached ONNX failed validation and was removed/quarantined.",
+            technical_detail=error,
+        )
 
     model = _torch_hub_load(
         MIDAS_REPO,
@@ -221,25 +263,23 @@ def export_model_to_onnx(
                 kwargs["external_data"] = False
             with torch.no_grad():
                 torch.onnx.export(model, (dummy,), os.fspath(tmp_path), **kwargs)
-            ok, error, validation = _validate_onnx(tmp_path, canonical)
+            ok, error, validation = _validation_result(tmp_path, canonical)
             if ok:
                 os.replace(tmp_path, path)
                 tmp_path = None
-                return {
-                    "ok": True,
-                    "model_id": canonical,
-                    "input_shape": list(shape),
-                    "onnx_path": os.fspath(path),
-                    "reused_existing": False,
-                    "export_strategy": strategy,
-                    "opset": opset,
-                    "validation": validation,
-                    "file_size": path.stat().st_size,
-                    "runtime_providers": validation.get("providers", []),
-                    "error_code": None,
-                    "message": f"Exported {spec.display_name} with {strategy}.",
-                    "technical_detail": None,
-                }
+                result = _base_result(
+                    ok=True,
+                    model_id=canonical,
+                    input_shape=shape,
+                    onnx_path=path,
+                    operation="export",
+                    opset=opset,
+                    validation=validation,
+                    export_strategy=strategy,
+                    message=f"Exported {spec.display_name} with {strategy}.",
+                )
+                result["runtime_providers"] = validation.get("providers", [])
+                return result
             errors.append(f"{strategy}: validation failed: {error}")
             _quarantine(tmp_path, error or "validation failed")
             tmp_path = None
@@ -248,34 +288,37 @@ def export_model_to_onnx(
         finally:
             if tmp_path is not None:
                 _quarantine(tmp_path, "temporary export failed")
-    return {
-        "ok": False,
-        "model_id": canonical,
-        "input_shape": list(shape),
-        "onnx_path": os.fspath(path),
-        "reused_existing": False,
-        "export_strategy": None,
-        "opset": opset,
-        "error_code": "ONNX_EXPORT_FAILED",
-        "optional": canonical in OPTIONAL_ONNX_MODELS,
-        "message": "ONNX export failed; PyTorch inference remains available.",
-        "technical_detail": "\n".join(errors),
-    }
+    return _base_result(
+        ok=False,
+        model_id=canonical,
+        input_shape=shape,
+        onnx_path=path,
+        operation="export",
+        opset=opset,
+        error_code="ONNX_EXPORT_FAILED",
+        message="ONNX export failed; PyTorch inference remains available.",
+        technical_detail="\n".join(errors),
+    )
 
 
 def validate_model(model_id: str, output_dir: Path | None = None) -> dict[str, Any]:
     canonical = normalize_model_id(model_id)
     path = onnx_output_path(canonical, output_dir)
-    ok, error, detail = _validate_onnx(path, canonical)
-    return {
-        "ok": ok,
-        "model_id": canonical,
-        "onnx_path": os.fspath(path),
-        "validation": detail,
-        "error_code": None if ok else str(detail.get("status", "invalid")).upper(),
-        "message": "ONNX validation passed." if ok else (error or "ONNX validation failed"),
-        "technical_detail": error,
-    }
+    spec = get_model_spec(canonical)
+    shape = (1, 3, spec.input_size[0], spec.input_size[1])
+    ok, error, detail = _validation_result(path, canonical)
+    return _base_result(
+        ok=ok,
+        model_id=canonical,
+        input_shape=shape,
+        onnx_path=path,
+        operation="validate",
+        opset=17,
+        validation=detail,
+        error_code=None if ok else str(detail.get("status", "invalid")).upper(),
+        message="ONNX validation passed." if ok else (error or "ONNX validation failed"),
+        technical_detail=error,
+    )
 
 
 def export_model(model_name: str, output_dir: Path, opset: int = 17) -> Path:

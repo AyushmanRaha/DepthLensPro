@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://depthlens-pro.local/schemas/resource-manifest.schema.json",
+  "title": "DepthLens Pro Resource Manifest",
+  "description": "Optional diagnostic manifest for repo-root and packaged DepthLens Pro resources. Verification scripts still inspect the filesystem directly; this manifest documents the expected resource groups and stable JSON report fields.",
+  "type": "object",
+  "required": ["schemaVersion", "resources"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "resources": {
+      "type": "object",
+      "required": ["backend", "frontend", "python", "torchCache", "onnx", "detectors"],
+      "properties": {
+        "backend": {
+          "type": "object",
+          "properties": {
+            "requiredPaths": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["backend/", "backend/app.py"]
+            }
+          }
+        },
+        "frontend": {
+          "type": "object",
+          "properties": {
+            "requiredPaths": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["frontend/", "frontend/index.html"]
+            }
+          }
+        },
+        "python": {
+          "type": "object",
+          "properties": {
+            "posixCandidates": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["venv/bin/python3", "venv/bin/python"]
+            },
+            "windowsCandidates": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["venv/Scripts/python.exe", "venv/Scripts/python3.exe"]
+            }
+          }
+        },
+        "torchCache": {
+          "type": "object",
+          "properties": {
+            "root": { "type": "string", "default": "models/torch-cache" },
+            "requiresMidasHubRepo": { "type": "boolean", "default": true },
+            "checkpointGlobs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["models/torch-cache/hub/checkpoints/*.pt", "models/torch-cache/hub/checkpoints/*.pth"]
+            }
+          }
+        },
+        "onnx": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [
+                "models/onnx/midas_small.onnx",
+                "models/onnx/dpt_hybrid.onnx",
+                "models/onnx/dpt_large.onnx"
+              ]
+            }
+          }
+        },
+        "detectors": {
+          "type": "object",
+          "properties": {
+            "checkpointRoot": {
+              "type": "string",
+              "default": "models/torch-cache/hub/checkpoints"
+            },
+            "filenameToken": { "type": "string", "default": "fasterrcnn" }
+          }
+        }
+      }
+    }
+  }
+}

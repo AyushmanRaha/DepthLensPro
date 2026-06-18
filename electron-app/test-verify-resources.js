@@ -172,3 +172,50 @@ console.log("Resource verification tests passed.");
   const result = verify(root, { onnxMode: "require-all", onnxModels: ["midas_small", "dpt_hybrid", "dpt_large"] });
   assert.strictEqual(result.ok, false, "require-all fails until all ONNX files exist");
 }
+
+{
+  const root = tempRoot();
+  makeTree(root, { onnxDir: true, onnxFile: false, torchCache: true });
+  const result = verify(root, { mode: "native", onnxMode: "optional", torchCache: "required" });
+  assert.strictEqual(result.ok, true, "standard verification passes without ONNX when Torch cache is valid");
+  assert.strictEqual(result.modelReadiness.torchCache.ok, true);
+}
+
+{
+  const root = tempRoot();
+  makeTree(root, { onnxFile: true });
+  fs.writeFileSync(path.join(root, "models", "onnx", "dpt_hybrid.onnx"), "");
+  touch(path.join(root, "models", "onnx", "dpt_large.onnx"));
+  const result = verify(root, { onnxMode: "require-all" });
+  assert.strictEqual(result.ok, false, "require-all fails when a required ONNX file is empty");
+  assert(result.failed.some((item) => item.rel.endsWith(path.join("models", "onnx", "dpt_hybrid.onnx"))));
+}
+
+{
+  const root = tempRoot();
+  makeTree(root);
+  const cli = spawnSync(process.execPath, [path.join(__dirname, "scripts", "verify-resources.js"), "--json", "--root-kind", "repo", "--mode", "native", "--onnx", "optional", root], { encoding: "utf8" });
+  assert.strictEqual(cli.status, 0, cli.stderr || cli.stdout);
+  const payload = JSON.parse(cli.stdout);
+  assert.strictEqual(payload.schemaVersion, 1);
+  assert.strictEqual(payload.rootKind, "repo");
+  assert.strictEqual(payload.mode, "native");
+  assert.strictEqual(payload.onnxMode, "optional");
+  assert(payload.modelReadiness.torchCache.ok);
+  assert(payload.detectorReadiness);
+  assert(Array.isArray(payload.pythonCandidateChecks));
+  assert.strictEqual(typeof payload.remediation, "string");
+}
+
+{
+  const dist = tempRoot();
+  const resources = path.join(dist, "linux-arm64-unpacked", "resources");
+  makeTree(resources, { platform: "linux" });
+  const cli = spawnSync(process.execPath, [path.join(__dirname, "scripts", "verify-packaged-resources.js"), "--json", "--platform", "linux", "--arch", "arm64", "--dist", dist], { encoding: "utf8" });
+  assert.strictEqual(cli.status, 0, cli.stderr || cli.stdout);
+  const payload = JSON.parse(cli.stdout);
+  assert.strictEqual(payload.schemaVersion, 1);
+  assert.strictEqual(payload.rootKind, "packaged");
+  assert.strictEqual(payload.results.length, 1);
+  assert.strictEqual(payload.results[0].rootKind, "packaged");
+}
