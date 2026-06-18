@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field, field_validator
 
+from backend.constants import DEFAULT_BACKEND_HOST, DEFAULT_BACKEND_PORT
+
 if TYPE_CHECKING:
     SettingsConfigDict: Any
 else:
@@ -79,12 +81,14 @@ class Settings(_SettingsBase):
     path keeps local tests importable before dependencies are installed.
     """
 
-    HOST: str = Field(default="127.0.0.1", description="Host interface for the ASGI server.")
-    PORT: int = Field(default=8765, ge=1, le=65535, description="ASGI server port.")
+    HOST: str = Field(
+        default=DEFAULT_BACKEND_HOST, description="Host interface for the ASGI server."
+    )
+    PORT: int = Field(default=DEFAULT_BACKEND_PORT, ge=1, le=65535, description="ASGI server port.")
     LOG_LEVEL: LogLevel = Field(default="INFO", description="Backend logging level.")
     DEBUG: bool = Field(default=False, description="Enable FastAPI debug responses.")
     REDIS_URL: str | None = Field(default=None, description="Full Redis connection URL override.")
-    REDIS_HOST: str = Field(default="127.0.0.1", description="Redis cache host.")
+    REDIS_HOST: str = Field(default=DEFAULT_BACKEND_HOST, description="Redis cache host.")
     REDIS_PORT: int = Field(default=6379, ge=1, le=65535, description="Redis cache port.")
     REDIS_DB: int = Field(default=0, ge=0, description="Redis logical database index.")
     REDIS_PASSWORD: str | None = Field(default=None, description="Optional Redis password.")

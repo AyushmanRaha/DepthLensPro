@@ -100,3 +100,15 @@ def test_electron_scripts_keep_resource_wrappers() -> None:
         assert "verify:packaged" in command
         assert command.index("verify:resources") < command.index(raw_script)
         assert command.index(raw_script) < command.index("verify:packaged")
+
+
+def test_resource_verifier_standard_onnx_remains_optional() -> None:
+    script = Path("electron-app/scripts/verify-resources.js").read_text(encoding="utf-8")
+    assert 'onnxMode: "optional"' in script
+    assert 'const requiredModels = onnxMode === "off" || onnxMode === "optional" ? []' in script
+
+
+def test_resource_verifier_onnx_require_all_uses_all_canonical_models() -> None:
+    script = Path("electron-app/scripts/verify-resources.js").read_text(encoding="utf-8")
+    assert 'ONNX_MODELS = ["midas_small", "dpt_hybrid", "dpt_large"]' in script
+    assert 'onnxMode === "require-all" ? ONNX_MODELS : onnxModels' in script

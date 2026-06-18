@@ -1608,6 +1608,8 @@ DepthLensPro/
 │   ├── api/
 │   │   ├── live.py                  # / and /live routes (no heavy imports)
 │   │   └── routes.py                # All other routes — estimate, batch, health, benchmark, cache, reconstruct
+│   ├── core/
+│   │   └── paths.py                 # Central repo/model/Torch-cache/ONNX path policy and env overrides
 │   ├── services/
 │   │   ├── benchmarks.py            # PyTorch vs ONNX benchmarking, auto-export, busy flag
 │   │   ├── cache_service.py         # Redis + in-memory LRU, versioned JSON serialisation
@@ -1622,6 +1624,7 @@ DepthLensPro/
 │   ├── utils/
 │   │   └── hardware.py              # Device discovery, ONNX provider mapping, acceleration probe
 │   ├── app.py                       # ASGI compatibility entry point (adds repo root to sys.path)
+│   ├── constants.py                 # Shared lightweight literals for upload, modes, ONNX IDs, resource modes
 │   ├── config.py                    # Pydantic settings with dotenv fallback
 │   ├── depth_models.py              # ONNXExecutionEngine, DepthEstimator (legacy)
 │   ├── main.py                      # FastAPI app factory, CORS, JSON logging, lifespan
@@ -1670,6 +1673,10 @@ DepthLensPro/
 ├── LICENSE
 └── README.md
 ```
+
+### Centralized path, platform, and model policy
+
+DepthLens Pro now keeps low-risk shared literals and path resolution in small central modules so setup, backend runtime, and packaging checks can stay in sync without changing public commands or API payloads. Backend upload/mode/model constants live in `backend/constants.py`, filesystem roots and ONNX environment override priority live in `backend/core/paths.py`, and Electron platform support remains centralized in `electron-app/src/platform-targets.js`. Standard builds still treat ONNX files as optional, while ONNX builds continue to require all supported ONNX model files.
 
 ---
 

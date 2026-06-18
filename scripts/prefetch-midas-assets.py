@@ -14,10 +14,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from backend.model_registry import MODEL_REGISTRY, get_model_spec
+from backend.constants import SUPPORTED_ONNX_MODEL_IDS
+from backend.core.paths import TORCH_CACHE_ROOT
+from backend.model_registry import get_model_spec
 from backend.services.model_assets import inspect_model_assets
 
-IDS = tuple(MODEL_REGISTRY.keys())
+IDS = SUPPORTED_ONNX_MODEL_IDS
 
 
 def parse_models(v: str):
@@ -48,7 +50,7 @@ def main():
     p.add_argument("--retries", type=int, default=2)
     args = p.parse_args()
     models = args.models if isinstance(args.models, list) else parse_models(args.models)
-    torch_home = Path(os.environ.get("TORCH_HOME", ROOT / "models" / "torch-cache")).resolve()
+    torch_home = Path(os.environ.get("TORCH_HOME", TORCH_CACHE_ROOT)).resolve()
     os.environ["TORCH_HOME"] = str(torch_home)
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
     print(f"[MiDaS assets] TORCH_HOME={torch_home}", flush=True)

@@ -18,6 +18,7 @@ import torch
 from starlette.concurrency import run_in_threadpool
 
 from backend.config import settings
+from backend.constants import MAX_UPLOAD_SIZE_MB, SUPPORTED_METRICS_MODES, SUPPORTED_OUTPUT_MODES
 from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
@@ -57,7 +58,7 @@ COLORMAPS: dict[str, int] = {
 assert set(COLORMAPS) == set(COLORMAP_NAMES)
 
 MAX_DIM = int(settings.DEPTHLENS_MAX_DIM)
-MAX_SIZE_MB = 20
+MAX_SIZE_MB = MAX_UPLOAD_SIZE_MB
 MODELS: dict[str, tuple[torch.nn.Module, torch.device]] = {}
 ONNX_ENGINES: dict[str, ONNXExecutionEngine] = {}
 _DEPTH_CACHE: dict[str, tuple[float, np.ndarray, dict[str, int]]] = {}
@@ -345,7 +346,7 @@ def _fhash(
 
 def normalize_metrics_mode(mode: str | None) -> str:
     value = (mode or settings.DEPTHLENS_DEFAULT_METRICS or "fast").strip().lower()
-    if value not in {"none", "fast", "full"}:
+    if value not in SUPPORTED_METRICS_MODES:
         raise ValueError("metrics must be one of: none, fast, full")
     return value
 
@@ -361,7 +362,7 @@ def parse_outputs(outputs: str | None) -> tuple[str, ...]:
             item = "color"
         if item in {"grayscale", "grey"}:
             item = "gray"
-        if item not in {"color", "gray"}:
+        if item not in SUPPORTED_OUTPUT_MODES:
             raise ValueError("outputs must contain only color and/or gray")
         if item not in normalized:
             normalized.append(item)
