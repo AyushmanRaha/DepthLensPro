@@ -67,6 +67,66 @@ def test_health_checkpoint(monkeypatch: Any) -> None:
     assert payload["devices"]["cpu"]["available"] is True
 
 
+def test_health_response_keys_contract(monkeypatch: Any) -> None:
+    _stable_health_diagnostics(monkeypatch)
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {
+                "cpu": {
+                    "name": "CPU",
+                    "hardware_name": "CPU",
+                    "type": "cpu",
+                    "compute_classes": ["cpu"],
+                    "available": True,
+                }
+            },
+            "cpu",
+            {"duration_ms": 0.0},
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.api.routes._cached_acceleration_checks",
+        lambda devs, force=False: (
+            {
+                "cuda": {"available": False, "operational": False},
+                "mps": {"available": False, "operational": False},
+                "xpu": {"available": False, "operational": False},
+            },
+            {"duration_ms": 0.0},
+        ),
+    )
+
+    payload = client.get("/health").json()
+
+    assert set(payload) == {
+        "status",
+        "diagnostics_status",
+        "version",
+        "primary_device",
+        "devices",
+        "loaded_models",
+        "cache_entries",
+        "cache_metrics",
+        "torch_version",
+        "cuda_available",
+        "mps_available",
+        "xpu_available",
+        "acceleration_ok",
+        "acceleration_checks",
+        "onnx",
+        "readiness",
+        "backend_live",
+        "overall_status",
+        "model_readiness",
+        "warmup",
+        "timings_ms",
+        "telemetry",
+        "system",
+    }
+    assert set(payload["telemetry"]) == {"memory", "disk"}
+
+
 def test_static_metadata_routes() -> None:
     assert client.get("/").json()["service"] == "DepthLens Pro API"
     assert client.get("/models").status_code == 200
