@@ -1607,7 +1607,11 @@ DepthLensPro/
 ├── backend/
 │   ├── api/
 │   │   ├── live.py                  # / and /live routes (no heavy imports)
-│   │   └── routes.py                # All other routes — estimate, batch, health, benchmark, cache, reconstruct
+│   │   ├── routes.py                # Thin route orchestration — estimate, batch, health, benchmark, cache, reconstruct
+│   │   ├── validation.py            # Request field, upload, model, colormap, metrics/output validation helpers
+│   │   ├── errors.py                # Public HTTP error payload mapping helpers
+│   │   ├── device_state.py          # Cached device discovery, accelerator checks, readiness diagnostics
+│   │   └── system_telemetry.py      # Memory/disk telemetry helpers used by /health
 │   ├── core/
 │   │   └── paths.py                 # Central repo/model/Torch-cache/ONNX path policy and env overrides
 │   ├── services/
@@ -1673,6 +1677,10 @@ DepthLensPro/
 ├── LICENSE
 └── README.md
 ```
+
+### Backend route organization
+
+The FastAPI route layer stays thin: public route declarations and high-level orchestration remain in `backend/api/routes.py`, while reusable validation, error mapping, device/readiness cache, and health telemetry helpers live in the neighboring `backend/api/` modules listed above. This is an internal organization change only; no public API routes, request fields, status codes, or response shapes were changed.
 
 ### Centralized path, platform, and model policy
 

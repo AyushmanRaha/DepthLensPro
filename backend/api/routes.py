@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import platform
-import shutil
 import time
 from typing import Any, cast
 
@@ -17,11 +15,34 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from backend.api import device_state
+from backend.api.errors import (
+    benchmark_timeout as benchmark_timeout_error,
+)
+from backend.api.errors import (
+    detector_unavailable,
+    generic_detector_failure,
+    generic_inference_failure,
+    generic_reconstruction_failure,
+    inference_dependency_unavailable,
+    model_assets_unavailable,
+)
+from backend.api.errors import (
+    reconstruction_timeout as reconstruction_timeout_error,
+)
 from backend.api.live import SERVICE_VERSION
+from backend.api.system_telemetry import disk_telemetry, memory_telemetry, telemetry_status
+from backend.api.validation import (
+    normalize_request_colormap,
+    normalize_request_metrics_and_outputs,
+    normalize_request_model,
+    validate_image_upload_content_type,
+    validate_upload_size,
+)
 from backend.config import settings
 from backend.constants import MAX_UPLOAD_SIZE_MB
 from backend.model_metadata import COLORMAP_NAMES
-from backend.model_registry import UnknownModelError, normalize_model_id, supported_models_payload
+from backend.model_registry import supported_models_payload
 from backend.services import observability
 from backend.services.model_assets import ModelAssetsUnavailableError
 
@@ -129,39 +150,64 @@ router = APIRouter()
 
 
 def _dependency_unavailable(exc: Exception) -> HTTPException:
-    log.warning("Inference runtime dependency unavailable: %s: %s", type(exc).__name__, exc)
-    return HTTPException(
-        503,
-        {
-            "error_code": "INFERENCE_RUNTIME_UNAVAILABLE",
-            "message": "Inference runtime is not ready. Check /ready for dependency diagnostics.",
-        },
+    return inference_dependency_unavailable(exc, log)
+
+
+_DEVICE_CACHE = device_state.DEVICE_CACHE
+_ACCEL_CACHE = device_state.ACCEL_CACHE
+_READINESS_CACHE = device_state.READINESS_CACHE
+
+
+def _elapsed_ms(start: float) -> float:
+    return device_state.elapsed_ms(start)
+
+
+def _fallback_cpu(error: str | None = None) -> dict[str, Any]:
+    return device_state.fallback_cpu(error)
+
+
+def _cached_devices(force: bool = False) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    device_state.DEVICE_CACHE = _DEVICE_CACHE
+    return device_state.cached_devices(
+        available_devices=_available_devices,
+        default_device_key=_default_device_key,
+        log=log,
+        force=force,
     )
 
 
-MEMORY_PRESSURE_LIMIT_PERCENT = 90.0
-BENCHMARK_TIMEOUT_MESSAGE = "Benchmark timed out · depth engine remains available"
-DISK_USAGE_LIMIT_PERCENT = 90.0
-DISK_TELEMETRY_PATH = "/"
-_PROBE_TTL_SECONDS = 10.0
-_DEVICE_CACHE: dict[str, Any] = {
-    "expires_at": 0.0,
-    "devices": None,
-    "primary": "cpu",
-    "error": None,
-}
-_ACCEL_CACHE: dict[str, Any] = {
-    "expires_at": 0.0,
-    "checks": None,
-    "error": None,
-    "device_keys": (),
-}
-_READINESS_CACHE: dict[str, Any] = {
-    "expires_at": 0.0,
-    "device": None,
-    "payload": None,
-    "error": None,
-}
+def _cached_acceleration_checks(
+    devs: dict[str, Any], force: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    device_state.ACCEL_CACHE = _ACCEL_CACHE
+    return device_state.cached_acceleration_checks(
+        devs, acceleration_checks=_acceleration_checks, log=log, force=force
+    )
+
+
+def _cached_readiness_payload(device: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    device_state.READINESS_CACHE = _READINESS_CACHE
+    return device_state.cached_readiness_payload(
+        device, readiness_payload=readiness_payload, log=log
+    )
+
+
+def _validated_device_or_422(device: str) -> str:
+    return device_state.validated_device_or_422(
+        device, cached_devices_func=_cached_devices, resolve=_resolve, log=log
+    )
+
+
+def _memory_telemetry() -> dict[str, Any]:
+    return memory_telemetry()
+
+
+def _disk_telemetry() -> dict[str, Any]:
+    return disk_telemetry()
+
+
+def _telemetry_status(*checks: dict[str, Any]) -> str:
+    return telemetry_status(*checks)
 
 
 async def process_image_async(
@@ -254,260 +300,6 @@ async def reconstruct_point_cloud_async(
             coordinate_system=coordinate_system,
         ),
     )
-
-
-def _elapsed_ms(start: float) -> float:
-    return round((time.perf_counter() - start) * 1000, 2)
-
-
-def _fallback_cpu(error: str | None = None) -> dict[str, Any]:
-    cpu_name = platform.processor() or os.environ.get("PROCESSOR_IDENTIFIER") or "System CPU"
-    return {
-        "cpu": {
-            "name": f"CPU · {cpu_name}",
-            "hardware_name": cpu_name,
-            "type": "cpu",
-            "compute_classes": ["cpu"],
-            "available": True,
-            **({"discovery_error": error} if error else {}),
-        }
-    }
-
-
-def _cached_devices(force: bool = False) -> tuple[dict[str, Any], str, dict[str, Any]]:
-    now = time.time()
-    if (
-        not force
-        and _DEVICE_CACHE.get("devices") is not None
-        and float(_DEVICE_CACHE.get("expires_at", 0.0)) > now
-    ):
-        return (
-            _DEVICE_CACHE["devices"],
-            str(_DEVICE_CACHE.get("primary") or "cpu"),
-            {
-                "cached": True,
-                "error": _DEVICE_CACHE.get("error"),
-            },
-        )
-
-    started = time.perf_counter()
-    error = None
-    try:
-        devs = _available_devices()
-        if "cpu" not in devs:
-            devs = {**_fallback_cpu("device discovery omitted CPU"), **devs}
-        primary = _default_device_key()
-        if primary not in devs:
-            primary = "cpu"
-    except Exception as exc:
-        error = str(exc)
-        log.warning("Device discovery degraded: %s", exc)
-        devs = _fallback_cpu(error)
-        primary = "cpu"
-
-    _DEVICE_CACHE.update(
-        {
-            "expires_at": now + _PROBE_TTL_SECONDS,
-            "devices": devs,
-            "primary": primary,
-            "error": error,
-        }
-    )
-    return devs, primary, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
-
-
-def _cached_acceleration_checks(
-    devs: dict[str, Any], force: bool = False
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    now = time.time()
-    device_keys = tuple(sorted(devs))
-    if (
-        not force
-        and _ACCEL_CACHE.get("checks") is not None
-        and _ACCEL_CACHE.get("device_keys") == device_keys
-        and float(_ACCEL_CACHE.get("expires_at", 0.0)) > now
-    ):
-        return _ACCEL_CACHE["checks"], {"cached": True, "error": _ACCEL_CACHE.get("error")}
-
-    started = time.perf_counter()
-    error = None
-    try:
-        checks = _acceleration_checks(devs)
-    except Exception as exc:
-        error = str(exc)
-        log.warning("Acceleration probe degraded: %s", exc)
-        checks = {
-            "cuda": {
-                "available": any(k.startswith("cuda:") for k in devs),
-                "operational": False,
-                "error": error,
-            },
-            "mps": {"available": "mps" in devs, "operational": False, "error": error},
-            "xpu": {
-                "available": any(k.startswith("xpu:") for k in devs),
-                "operational": False,
-                "error": error,
-            },
-        }
-    _ACCEL_CACHE.update(
-        {
-            "expires_at": now + _PROBE_TTL_SECONDS,
-            "checks": checks,
-            "error": error,
-            "device_keys": device_keys,
-        }
-    )
-    return checks, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
-
-
-def _cached_readiness_payload(device: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Cache heavier ONNX/model readiness diagnostics for health polling."""
-
-    now = time.time()
-    if (
-        _READINESS_CACHE.get("payload") is not None
-        and _READINESS_CACHE.get("device") == device
-        and float(_READINESS_CACHE.get("expires_at", 0.0)) > now
-    ):
-        return _READINESS_CACHE["payload"], {"cached": True, "error": _READINESS_CACHE.get("error")}
-
-    started = time.perf_counter()
-    error = None
-    try:
-        payload = readiness_payload(device)
-    except Exception as exc:
-        error = str(exc)
-        log.warning("Readiness diagnostics degraded: %s", exc)
-        payload = {
-            "status": "degraded",
-            "overall_status": "diagnostics_unavailable",
-            "error": error,
-        }
-    _READINESS_CACHE.update(
-        {
-            "expires_at": now + _PROBE_TTL_SECONDS,
-            "device": device,
-            "payload": payload,
-            "error": error,
-        }
-    )
-    return payload, {"cached": False, "error": error, "duration_ms": _elapsed_ms(started)}
-
-
-def _validated_device_or_422(device: str) -> str:
-    """Resolve a requested device with one stale-cache refresh before returning 422."""
-
-    def available_options(force: bool = False) -> list[str]:
-        devs, _, _ = _cached_devices(force=force)
-        return [*devs.keys(), "auto"]
-
-    avail = available_options()
-    if device not in avail:
-        raise HTTPException(422, f"Device '{device}' is unavailable. Options: {avail}")
-    try:
-        return str(_resolve(device))
-    except asyncio.TimeoutError as exc:
-        log.warning("Benchmark timed out", extra={"device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
-    except ValueError as exc:
-        refreshed = available_options(force=True)
-        if device not in refreshed:
-            detail = f"Device '{device}' is unavailable. Options: {refreshed}"
-            raise HTTPException(422, detail) from exc
-        try:
-            return str(_resolve(device))
-        except ValueError as refreshed_exc:
-            raise HTTPException(422, str(refreshed_exc)) from refreshed_exc
-
-
-def _percent(numerator: int, denominator: int) -> float:
-    if denominator <= 0:
-        return 0.0
-    return round((numerator / denominator) * 100, 2)
-
-
-def _memory_telemetry() -> dict[str, Any]:
-    """Return local memory pressure telemetry without external system dependencies."""
-
-    meminfo: dict[str, int] = {}
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as meminfo_file:
-            for line in meminfo_file:
-                key, raw_value = line.split(":", 1)
-                meminfo[key] = int(raw_value.strip().split()[0]) * 1024
-    except (FileNotFoundError, OSError, ValueError):
-        meminfo = {}
-
-    if meminfo.get("MemTotal") and meminfo.get("MemAvailable") is not None:
-        total_bytes = meminfo["MemTotal"]
-        available_bytes = meminfo["MemAvailable"]
-    elif hasattr(os, "sysconf"):
-        try:
-            page_size = int(os.sysconf("SC_PAGE_SIZE"))
-            physical_pages = int(os.sysconf("SC_PHYS_PAGES"))
-            available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
-            total_bytes = page_size * physical_pages
-            available_bytes = page_size * available_pages
-        except (ValueError, OSError, AttributeError):
-            return {
-                "status": "unknown",
-                "pressure_percent": None,
-                "limit_percent": MEMORY_PRESSURE_LIMIT_PERCENT,
-            }
-    else:
-        return {
-            "status": "unknown",
-            "pressure_percent": None,
-            "limit_percent": MEMORY_PRESSURE_LIMIT_PERCENT,
-        }
-
-    used_bytes = max(total_bytes - available_bytes, 0)
-    pressure_percent = _percent(used_bytes, total_bytes)
-    return {
-        "status": "ok" if pressure_percent < MEMORY_PRESSURE_LIMIT_PERCENT else "degraded",
-        "pressure_percent": pressure_percent,
-        "limit_percent": MEMORY_PRESSURE_LIMIT_PERCENT,
-        "total_bytes": total_bytes,
-        "available_bytes": available_bytes,
-        "used_bytes": used_bytes,
-    }
-
-
-def _disk_telemetry(path: str = DISK_TELEMETRY_PATH) -> dict[str, Any]:
-    """Return local disk utilization telemetry for the supplied filesystem path."""
-
-    try:
-        usage = shutil.disk_usage(path)
-    except OSError as exc:
-        return {
-            "status": "unknown",
-            "path": path,
-            "usage_percent": None,
-            "limit_percent": DISK_USAGE_LIMIT_PERCENT,
-            "error": str(exc),
-        }
-
-    used_bytes = usage.total - usage.free
-    usage_percent = _percent(used_bytes, usage.total)
-    return {
-        "status": "ok" if usage_percent < DISK_USAGE_LIMIT_PERCENT else "degraded",
-        "path": path,
-        "usage_percent": usage_percent,
-        "limit_percent": DISK_USAGE_LIMIT_PERCENT,
-        "total_bytes": usage.total,
-        "free_bytes": usage.free,
-        "used_bytes": used_bytes,
-    }
-
-
-def _telemetry_status(*checks: dict[str, Any]) -> str:
-    return "degraded" if any(check.get("status") == "degraded" for check in checks) else "ok"
 
 
 def _required_device_health_failed(devs: dict[str, Any]) -> bool:
@@ -658,13 +450,7 @@ async def benchmark(
             model, None, device, device, iterations, None, None, None, None, None, 1, "error"
         )
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
+        raise benchmark_timeout_error() from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -687,27 +473,18 @@ async def estimate(
     gt_scale: float | None = Form(None),
     gt_invalid_value: float | None = Form(None),
 ) -> JSONResponse:
+    model = normalize_request_model(model)
+    colormap = normalize_request_colormap(colormap)
     try:
-        model = normalize_model_id(model)
-    except UnknownModelError as exc:
-        raise HTTPException(
-            422,
-            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
-        ) from exc
-    if colormap not in COLORMAP_NAMES:
-        raise HTTPException(422, f"Unknown colormap '{colormap}'")
-    try:
-        metrics = normalize_metrics_mode(metrics)
-        outputs = ",".join(parse_outputs(outputs))
+        metrics, outputs = normalize_request_metrics_and_outputs(
+            metrics,
+            outputs,
+            normalize_metrics_mode=normalize_metrics_mode,
+            parse_outputs=parse_outputs,
+        )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
+        raise benchmark_timeout_error() from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
@@ -715,20 +492,17 @@ async def estimate(
 
     resolved = _validated_device_or_422(device)
 
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Expected an image file")
+    validate_image_upload_content_type(file)
 
     raw = await file.read()
-    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+    validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
 
     gt_raw: bytes | None = None
     gt_filename: str | None = None
     if gt_file is not None:
         gt_raw = await gt_file.read()
         gt_filename = gt_file.filename
-        if len(gt_raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-            raise HTTPException(413, f"GT depth file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+        validate_upload_size(gt_raw, label="GT depth file", max_size_mb=MAX_UPLOAD_SIZE_MB)
     elif gt_required:
         raise HTTPException(422, "GT mode requires one image and one GT depth file")
 
@@ -773,13 +547,7 @@ async def estimate(
         )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
+        raise benchmark_timeout_error() from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
@@ -793,7 +561,7 @@ async def estimate(
             outcome="error",
             error_code=exc.error_code,
         )
-        raise HTTPException(503, exc.to_payload()) from exc
+        raise model_assets_unavailable(exc) from exc
     except Exception as exc:
         observability.record_crash("inference", "INFERENCE_FAILED", exc, route="/estimate")
         observability.record_inference(
@@ -806,10 +574,7 @@ async def estimate(
             error_code="INFERENCE_FAILED",
         )
         log.exception("Inference failed")
-        raise HTTPException(
-            500,
-            {"error_code": "INFERENCE_FAILED", "message": "Depth inference failed"},
-        ) from exc
+        raise generic_inference_failure() from exc
 
     if ck is not None:
         _cache_service().set(ck, result)
@@ -846,16 +611,14 @@ async def detect(
     threshold: float = Form(0.35),
     max_detections: int = Form(5),
 ) -> JSONResponse:
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Expected an image file")
+    validate_image_upload_content_type(file)
     if threshold < 0.05 or threshold > 0.95:
         raise HTTPException(422, "threshold must be between 0.05 and 0.95")
     if max_detections < 1 or max_detections > 20:
         raise HTTPException(422, "max_detections must be between 1 and 20")
     resolved = _validated_device_or_422(device)
     raw = await file.read()
-    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+    validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
     try:
         result = await detect_objects_async(
             raw=raw,
@@ -882,17 +645,7 @@ async def detect(
                 isinstance(exc, ModuleNotFoundError) and exc.name in {"PIL", "torch", "torchvision"}
             )
         ):
-            raise HTTPException(
-                503,
-                {
-                    "error_code": getattr(exc, "error_code", "DETECTOR_UNAVAILABLE"),
-                    "message": str(exc) or "Local object detector is unavailable",
-                    "action": (
-                        "Run setup to install detector dependencies, or retry when network "
-                        "access is available for lazy weights download."
-                    ),
-                },
-            ) from exc
+            raise detector_unavailable(exc) from exc
         observability.record_crash("detector", "DETECTION_FAILED", exc, route="/detect")
         observability.record_inference(
             "object_detection",
@@ -903,10 +656,7 @@ async def detect(
             error_code="DETECTION_FAILED",
         )
         log.exception("Object detection failed")
-        raise HTTPException(
-            500,
-            {"error_code": "DETECTION_FAILED", "message": "Object detection failed"},
-        ) from exc
+        raise generic_detector_failure() from exc
 
 
 @router.post("/api/reconstruct")
@@ -928,24 +678,15 @@ async def reconstruct(
     include_rgb: bool = Form(True),
     coordinate_system: str = Form("y_up"),
 ) -> JSONResponse:
-    try:
-        model = normalize_model_id(model)
-    except UnknownModelError as exc:
-        raise HTTPException(
-            422,
-            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
-        ) from exc
-    if colormap not in COLORMAP_NAMES:
-        raise HTTPException(422, f"Unknown colormap '{colormap}'")
+    model = normalize_request_model(model)
+    colormap = normalize_request_colormap(colormap)
 
     resolved = _validated_device_or_422(device)
 
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(415, "Expected an image file")
+    validate_image_upload_content_type(file)
 
     raw = await file.read()
-    if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+    validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
 
     try:
         result = await reconstruct_point_cloud_async(
@@ -968,13 +709,7 @@ async def reconstruct(
         )
     except asyncio.TimeoutError as exc:
         log.warning("Reconstruction timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "RECONSTRUCTION_TIMEOUT",
-                "message": "Point cloud generation timed out · depth engine remains available",
-            },
-        ) from exc
+        raise reconstruction_timeout_error() from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
@@ -982,7 +717,7 @@ async def reconstruct(
         observability.record_inference(
             model, "reconstruction", resolved, None, outcome="error", error_code=exc.error_code
         )
-        raise HTTPException(503, exc.to_payload()) from exc
+        raise model_assets_unavailable(exc) from exc
     except Exception as exc:
         observability.record_crash(
             "reconstruction", "RECONSTRUCTION_FAILED", exc, route="/reconstruct"
@@ -996,10 +731,7 @@ async def reconstruct(
             error_code="RECONSTRUCTION_FAILED",
         )
         log.exception("Reconstruction failed")
-        raise HTTPException(
-            500,
-            {"error_code": "RECONSTRUCTION_FAILED", "message": "Point cloud generation failed"},
-        ) from exc
+        raise generic_reconstruction_failure() from exc
 
     observability.record_inference(
         model,
@@ -1032,27 +764,18 @@ async def batch(
 ) -> JSONResponse:
     if len(files) > 10:
         raise HTTPException(422, "Batch limit is 10 images")
+    model = normalize_request_model(model)
+    colormap = normalize_request_colormap(colormap)
     try:
-        model = normalize_model_id(model)
-    except UnknownModelError as exc:
-        raise HTTPException(
-            422,
-            {"error_code": exc.error_code, "message": str(exc), "valid_models": exc.valid_models},
-        ) from exc
-    if colormap not in COLORMAP_NAMES:
-        raise HTTPException(422, f"Unknown colormap '{colormap}'")
-    try:
-        metrics = normalize_metrics_mode(metrics)
-        outputs = ",".join(parse_outputs(outputs))
+        metrics, outputs = normalize_request_metrics_and_outputs(
+            metrics,
+            outputs,
+            normalize_metrics_mode=normalize_metrics_mode,
+            parse_outputs=parse_outputs,
+        )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
-        raise HTTPException(
-            504,
-            {
-                "error_code": "BENCHMARK_TIMEOUT",
-                "message": BENCHMARK_TIMEOUT_MESSAGE,
-            },
-        ) from exc
+        raise benchmark_timeout_error() from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:
