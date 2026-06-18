@@ -393,7 +393,7 @@ flowchart TB
 | Layer | Key files | Responsibility |
 |---|---|---|
 | Electron main process | `electron-app/main.js`, `electron-app/src/main/*.js` | Small composition entrypoint plus focused modules for paths, backend HTTP probes, port fallback, PID metadata, Python resolution, backend lifecycle, settings persistence, and windows. No UI or IPC contract changes. |
-| Renderer UI | `frontend/index.html`, `script.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide |
+| Renderer UI | `frontend/index.html`, `frontend/js/*.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide. Phase 7 only reorganized scripts into ordered frontend modules; UI, DOM, CSS, endpoint calls, persistence, and feature behavior are preserved. |
 | Preload bridge | `electron-app/preload.js` | Narrow `contextBridge` surface — backend URL, dialogs, platform info only |
 | Security policy | `electron-app/src/security-policy.js` | Navigation allowlist: local frontend file and `127.0.0.1:PORT` only |
 | Process policy | `electron-app/src/backend-process-policy.js` | Checks command-line and stored PID metadata before terminating backend processes |
@@ -1681,7 +1681,23 @@ DepthLensPro/
 │
 ├── frontend/
 │   ├── index.html                   # App shell and all workspace panels (Workspace, Webcam, Compare, Performance, Experiments, 3D, Guide)
-│   ├── script.js                    # Frontend behaviour — fetch, charts, gallery, lightbox, webcam, 3D viewer
+│   ├── js/                          # Ordered browser scripts; behavior-preserving split from the former monolithic script.js
+│   │   ├── settings.js              # Theme, settings, localStorage, Electron settings bridge
+│   │   ├── api-client.js            # Backend URL resolution, fetch wrappers, health/device/status calls
+│   │   ├── dom.js                   # DOM lookup map and safe element helpers
+│   │   ├── uploads.js               # File queue, validation, drag/drop
+│   │   ├── inference-ui.js          # Estimate/batch progress and result rendering
+│   │   ├── webcam.js                # Real-time camera inference lifecycle and cleanup
+│   │   ├── compare.js               # Model comparison workspace
+│   │   ├── benchmark.js             # PyTorch/ONNX benchmark panel
+│   │   ├── experiments.js           # Experiment run/export workspace
+│   │   ├── reconstruction.js        # 3D reconstruction and point-cloud preview
+│   │   ├── charts.js                # Chart.js setup and theme handling
+│   │   ├── notifications.js         # Settings panels, persistence hooks, toasts/navigation helpers
+│   │   ├── observability.js         # Gallery/lightbox and observability dashboard
+│   │   ├── performance.js           # Metrics dashboard refresh helpers
+│   │   └── compat.js                # Final initialization, cleanup, utility compatibility
+│   ├── script.js                    # Compatibility breadcrumb; index.html loads frontend/js directly
 │   ├── style.css                    # Full design system (dark + light theme, CSS variables, animations)
 │   └── welcome-anim.js              # Depth Field Calibration canvas animation (self-contained)
 │
@@ -1749,7 +1765,7 @@ cd ..
 
 - Python is formatted with Black (`line-length = 100`) and linted with Ruff (`E`, `F`, `W`, `I` rules)
 - Type annotations are checked with mypy in strict mode (excluding `backend/tests/`)
-- JavaScript follows the style already present in `main.js` and `script.js` — no separate formatter is enforced, but the Electron test suite (`npm test`) must pass
+- JavaScript follows the style already present in `main.js` and the ordered `frontend/js/` browser scripts — no separate formatter is enforced, but the Electron test suite (`npm test`) must pass
 
 ---
 
