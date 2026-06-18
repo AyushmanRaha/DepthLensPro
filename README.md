@@ -1619,7 +1619,13 @@ DepthLensPro/
 │   │   ├── cache_service.py         # Redis + in-memory LRU, versioned JSON serialisation
 │   │   ├── diagnostics.py           # Module importability, ONNX weight inventory
 │   │   ├── ground_truth.py          # GT decode, nearest-neighbour resize, median-scale align, metrics
-│   │   ├── inference.py             # Core image-to-depth pipeline, depth cache, ONNX/PyTorch dispatch
+│   │   ├── inference.py             # Public façade/orchestrator for image-to-depth responses
+│   │   ├── inference_types.py       # Shared typed payload metadata for inference internals
+│   │   ├── image_io.py              # Decode, depth normalization, colorization, PNG base64 encoding
+│   │   ├── inference_cache.py       # Stable inference/depth cache keys and in-memory depth cache
+│   │   ├── model_runtime.py         # PyTorch MiDaS model/transform caches, locks, inference
+│   │   ├── onnx_inference.py        # ONNX engine cache, locks, inference, PyTorch fallback metadata
+│   │   ├── metrics.py               # Metrics mode parsing, fast/full metrics, grouped payloads
 │   │   ├── onnx_diagnostics.py      # ONNX session creation, provider selection, checker validation
 │   │   └── reconstruction.py        # Pinhole projection, PLY/OBJ serialisation, preview downsampling
 │   ├── scripts/
@@ -1679,6 +1685,8 @@ DepthLensPro/
 ```
 
 ### Backend route organization
+
+The inference service decomposition is internal only: `backend/services/inference.py` preserves the existing public imports and response payloads while delegating image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
 
 The FastAPI route layer stays thin: public route declarations and high-level orchestration remain in `backend/api/routes.py`, while reusable validation, error mapping, device/readiness cache, and health telemetry helpers live in the neighboring `backend/api/` modules listed above. This is an internal organization change only; no public API routes, request fields, status codes, or response shapes were changed.
 
