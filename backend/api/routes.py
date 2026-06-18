@@ -555,13 +555,7 @@ async def health() -> dict[str, Any]:
     readiness, readiness_meta = _cached_readiness_payload(best)
 
     status = _telemetry_status(memory, disk)
-    if (
-        device_meta.get("error")
-        or accel_meta.get("error")
-        or cache_error
-        or onnx_error
-        or readiness_meta.get("error")
-    ):
+    if device_meta.get("error") or cache_error or onnx_error or readiness_meta.get("error"):
         status = "degraded"
     return {
         "status": status,

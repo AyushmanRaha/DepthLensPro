@@ -15,14 +15,17 @@ import uuid
 from collections import Counter, deque
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import ModuleType
 from typing import Any, Iterator, cast
 
 from backend.config import settings
 
 try:  # graceful optional dependency path
-    import prometheus_client as _prometheus_client
+    import prometheus_client as _prometheus_module
 except Exception:  # pragma: no cover - exercised by partial installs
-    _prometheus_client = None
+    _prometheus_client: ModuleType | None = None
+else:
+    _prometheus_client = _prometheus_module
 
 CollectorRegistry: Any = (
     getattr(_prometheus_client, "CollectorRegistry", None)

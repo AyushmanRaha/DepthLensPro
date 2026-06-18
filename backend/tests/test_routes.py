@@ -163,7 +163,7 @@ def test_estimate_generic_failure_uses_sanitized_error(monkeypatch: Any) -> None
     assert response.status_code == 500
     assert response.json()["detail"] == {
         "error_code": "INFERENCE_FAILED",
-        "message": "Inference failed",
+        "message": "Depth inference failed",
     }
 
 
@@ -248,7 +248,7 @@ def test_devices_always_include_cpu_on_discovery_failure(monkeypatch: Any) -> No
     assert payload["primary_device"] == "cpu"
 
 
-def test_health_degrades_when_acceleration_probe_fails(monkeypatch: Any) -> None:
+def test_health_stays_ok_when_optional_acceleration_probe_fails(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         "backend.api.routes._DEVICE_CACHE",
         {"expires_at": 0.0, "devices": None, "primary": "cpu", "error": None},
@@ -284,7 +284,7 @@ def test_health_degrades_when_acceleration_probe_fails(monkeypatch: Any) -> None
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "degraded"
+    assert payload["status"] == "ok"
     assert payload["acceleration_checks"]["mps"]["operational"] is False
     assert "timings_ms" in payload
 
