@@ -214,6 +214,48 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     assert calls["count"] == 1
 
 
+def test_estimate_telemetry_failure_does_not_break_success(monkeypatch: Any) -> None:
+    cache_service.clear()
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+    monkeypatch.setattr(
+        "backend.api.routes.observability.record_inference",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("telemetry unavailable")),
+    )
+
+    def fake_process(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "depth_map": "depth-png",
+            "metrics": {"mean": 0.5},
+            "latency_ms": 1.2,
+            "model": "midas_small",
+            "colormap": "inferno",
+            "engine_used": "pytorch",
+            "device_used": "cpu",
+            "resolution": {"width": 8, "height": 8},
+            "filename": "sample.png",
+            "cached": False,
+        }
+
+    monkeypatch.setattr("backend.api.routes.process_image", fake_process)
+
+    response = client.post(
+        "/estimate",
+        files={"file": ("sample.png", io.BytesIO(_png_bytes()), "image/png")},
+        data={"model": "MiDaS_small", "colormap": "inferno", "device": "auto"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["depth_map"] == "depth-png"
+
+
 def test_estimate_generic_failure_uses_sanitized_error(monkeypatch: Any) -> None:
     cache_service.clear()
     monkeypatch.setattr(

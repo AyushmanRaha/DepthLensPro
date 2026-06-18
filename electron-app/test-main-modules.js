@@ -5,7 +5,7 @@ const path = require('path');
 const { getAppRoot, getResourcePath } = require('./src/main/paths');
 const { getPythonCandidates } = require('./src/main/python-resolver');
 const { sanitizeSettings, readPersistedSettings, writePersistedSettings } = require('./src/main/settings-store');
-const { missingResourceEntries, createStartupDetails, parsePidFromText, isLikelyInstalledAppPath } = require('./src/main/backend-lifecycle');
+const { missingResourceEntries, createStartupDetails, parsePidFromText, isLikelyInstalledAppPath, createBackendLifecycle } = require('./src/main/backend-lifecycle');
 
 function fakeApp(userData, isPackaged = false) {
   return { isPackaged, getPath(name) { assert.strictEqual(name, 'userData'); return userData; }, getVersion() { return 'test'; } };
@@ -50,5 +50,28 @@ assert(!missing.includes('models/'));
 assert.strictEqual(parsePidFromText('users:(pid=1234,fd=7)'), 1234);
 assert.strictEqual(parsePidFromText('PID: 5678'), 5678);
 assert.strictEqual(isLikelyInstalledAppPath('/Applications/DepthLens Pro.app/Contents/MacOS/DepthLens Pro', 'darwin'), true);
+
+const lifecycleState = { backendOwnedByElectron: true, backendPid: 999999, shutdownInProgress: true };
+const lifecycle = createBackendLifecycle({
+  app: fakeApp(tmp, false),
+  log: { info() {}, warn() {}, error() {} },
+  getAppRoot: () => detailRoot,
+  getResourcePath: (...parts) => path.join(detailRoot, ...parts),
+  getPythonPath: () => 'python3',
+  pidStore: { readStoredBackendPid: () => null, readStoredBackendMetadata: () => null, writeBackendPidFiles() {}, removeBackendPidFiles() {} },
+  BACKEND_HOST: '127.0.0.1',
+  getBackendPort: () => 8765,
+  setBackendPort() {},
+  getBackendUrl: () => 'http://127.0.0.1:8765',
+  setBackendUrl() {},
+  getState: () => lifecycleState,
+  setState: (patch) => Object.assign(lifecycleState, patch),
+  logPath: () => '/tmp/log',
+});
+lifecycle.rememberBackendOutput('stdout', 'x'.repeat(12000));
+lifecycle.rememberBackendOutput('stderr', 'last-line');
+assert(lifecycle.backendOutputExcerpt().length <= 8000);
+assert(lifecycle.backendOutputExcerpt().includes('last-line'));
+lifecycle.shutdownOwnedBackend().then((ok) => assert.strictEqual(ok, true));
 
 console.log('main process module tests passed');

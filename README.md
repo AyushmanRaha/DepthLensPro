@@ -1735,6 +1735,10 @@ The FastAPI route layer stays thin: public route declarations and high-level orc
 
 DepthLens Pro now keeps low-risk shared literals and path resolution in small central modules so setup, backend runtime, and packaging checks can stay in sync without changing public commands or API payloads. Backend upload/mode/model constants live in `backend/constants.py`, filesystem roots and ONNX environment override priority live in `backend/core/paths.py`, and Electron platform support remains centralized in `electron-app/src/platform-targets.js`. Standard builds still treat ONNX files as optional, while ONNX builds continue to require all supported ONNX model files.
 
+### Reliability/performance hardening
+
+Recent internal hardening keeps the public API, UI, and four-step install flow unchanged while reducing avoidable runtime work. Estimate cache hits now reuse normalized output metadata instead of reparsing it for telemetry, local observability hooks are failure-safe around inference paths, ONNX provider/device metadata is normalized before selection without changing provider priority, and Electron startup diagnostics keep a bounded backend-output tail with setup-remediation context.
+
 ---
 
 ## Contributing

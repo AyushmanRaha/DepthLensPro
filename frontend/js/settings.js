@@ -216,8 +216,9 @@ function requestSignal(signal, timeoutMs) {
 async function apiFetch(path, options = {}) {
   const base = await resolveApiBaseUrl();
   const url = buildApiUrl(base, path);
+  const fetchOptions = { ...options, signal: options.signal || timeoutSignal(30_000) };
   try {
-    const res = await fetch(url, options);
+    const res = await fetch(url, fetchOptions);
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try {

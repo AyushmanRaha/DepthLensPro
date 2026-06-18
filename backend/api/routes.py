@@ -512,12 +512,20 @@ async def estimate(
         if gt_raw is not None or gt_required
         else _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
     )
+    output_set = parse_outputs(outputs)
     cached = _cache_service().get(ck) if ck is not None else None
     if ck is not None:
-        observability.record_cache_event("hit" if cached is not None else "miss", "route")
+        observability.safe_observe(
+            "cache_event",
+            observability.record_cache_event,
+            "hit" if cached is not None else "miss",
+            "route",
+        )
     if cached is not None:
         log.info("Cache hit: %r", file.filename)
-        observability.record_inference(
+        observability.safe_observe(
+            "route_cache_hit_inference",
+            observability.record_inference,
             model,
             cached.get("engine_used", "cache"),
             resolved,
@@ -525,7 +533,7 @@ async def estimate(
             cached=True,
             outcome="ok",
             metrics_mode=metrics,
-            outputs_count=len(parse_outputs(outputs)),
+            outputs_count=len(output_set),
         )
         return JSONResponse({**cached, "cached": True})
 
@@ -578,8 +586,10 @@ async def estimate(
 
     if ck is not None:
         _cache_service().set(ck, result)
-        observability.record_cache_event("set", "route")
-    observability.record_inference(
+        observability.safe_observe("cache_event", observability.record_cache_event, "set", "route")
+    observability.safe_observe(
+        "route_inference",
+        observability.record_inference,
         model,
         result.get("engine_used", "pytorch"),
         resolved,
@@ -591,7 +601,7 @@ async def estimate(
         cached=False,
         outcome="ok",
         metrics_mode=metrics,
-        outputs_count=len(parse_outputs(outputs)),
+        outputs_count=len(output_set),
     )
     log.info(
         "✅ %r | %s | %s | %s ms",

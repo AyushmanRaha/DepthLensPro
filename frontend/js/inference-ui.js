@@ -40,8 +40,12 @@ el.cancelBtn?.addEventListener("click",cancelBatch);
 
 function cancelBatch() {
   if (state.abort) { state.abort.abort(); state.abort=null; }
+  pendingRunningFiles().forEach(entry => { entry.status = "pending"; setFileSt(entry.id, "pending", "Cancelled"); });
+  el.runBtn.disabled = false; el.clearBtn.disabled = false; el.cancelBtn.hidden = true;
   toast("Batch cancelled","warning");
 }
+
+function pendingRunningFiles() { return state.files.filter(f => f.status === "running"); }
 
 async function runBatch() {
   if (!engineReady()) {
@@ -96,7 +100,7 @@ async function runBatch() {
       el.resultsCard.hidden=false;
     } catch(err) {
       clearInterval(tick);
-      if (err.name==="AbortError") { setFileSt(entry.id,"pending","Cancelled"); break; }
+      if (err.name==="AbortError") { entry.status = "pending"; setFileSt(entry.id,"pending","Cancelled"); break; }
       entry.status="error"; setFileSt(entry.id,"error","Error");
       state.session.errors++; updateMetrics();
       toast(`"${entry.file.name}": ${err.message}`,"error");
@@ -117,6 +121,7 @@ async function runBatch() {
   } finally {
     setTimeout(()=>{ el.progressBlock.hidden=true; },3000);
     state.abort=null;
+    el.runBtn.disabled = false; el.clearBtn.disabled = false;
     el.cancelBtn.hidden=true;
     syncQueueControls();
   }

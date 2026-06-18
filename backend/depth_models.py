@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -19,6 +20,7 @@ from backend.model_registry import (
 from backend.utils.hardware import _default_device_key
 
 MIDAS_REPO = "intel-isl/MiDaS"
+log = logging.getLogger("depthlens")
 
 
 def _torch_hub_load(*args: Any, **kwargs: Any) -> Any:
@@ -110,9 +112,16 @@ class ONNXExecutionEngine:
             self.model_id, device, model_path=self.model_path, session_options=self.session_options
         )
         if not session_result.get("ok"):
-            raise RuntimeError(
-                session_result.get("technical_detail") or session_result.get("message")
+            log.warning(
+                "ONNX_SESSION_CREATE_FAILED model=%s device=%s provider_state=%s "
+                "providers=%s detail=%s",
+                self.model_id,
+                device,
+                session_result.get("provider_state"),
+                session_result.get("providers_used") or session_result.get("available_providers"),
+                session_result.get("technical_detail") or session_result.get("message"),
             )
+            raise RuntimeError(session_result.get("message") or "ONNX Runtime session unavailable")
         self.available_providers = list(session_result.get("available_providers", []))
         self.providers = list(session_result.get("providers_used", []))
         self.session = session_result["session"]
@@ -154,7 +163,17 @@ class ONNXExecutionEngine:
         """Execute an ONNX Runtime forward pass and return the raw depth plane."""
 
         batch = self.transform(img_rgb).detach().cpu().numpy().astype(np.float32)
-        outputs = self.session.run([self.output_name], {self.input_name: batch})
+        try:
+            outputs = self.session.run([self.output_name], {self.input_name: batch})
+        except Exception as exc:
+            log.warning(
+                "ONNX_SESSION_RUN_FAILED model=%s provider=%s input_shape=%s error=%s",
+                self.model_id,
+                self.provider,
+                tuple(batch.shape),
+                exc,
+            )
+            raise RuntimeError("ONNX Runtime inference failed") from exc
         pred = np.asarray(outputs[0], dtype=np.float32)
         pred = np.squeeze(pred)
         return resize_onnx_depth(pred, img_rgb.shape[:2])
