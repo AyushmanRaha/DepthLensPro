@@ -28,35 +28,48 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 
 ---
 
+## Official v1.0 Tech Stack
 
-## Refactor Safety Contract
-
-DepthLens Pro now tracks a behavior-preservation baseline for internal refactor phases. See [`docs/refactor-contract.md`](docs/refactor-contract.md) for the public API, UI, install/build, platform, and allowed-file-change contract, and [`docs/refactor-test-matrix.md`](docs/refactor-test-matrix.md) for the required phase-gate commands.
-
-The existing native installation workflow remains the public workflow for both standard and ONNX builds: **clone → setup → build → launch**. Subsequent internal refactors must preserve all public setup, build, launch, resource verification, and ONNX verification commands.
+| Component | Locked version / support | Source | Role |
+|---|---:|---|---|
+| Electron | `^42.3.0` | `electron-app/package.json` | Desktop shell, window lifecycle, preload bridge, packaged app builds |
+| FastAPI | `0.135.3` | `backend/requirements.txt` | Local HTTP API framework |
+| Python | `3.10–3.12` | `scripts/doctor.py`, setup checks | Backend runtime and ML environment |
+| PyTorch | `2.11.0` | `backend/requirements.txt` | MiDaS/DPT model runtime through Torch Hub |
+| ONNX Runtime | `1.24.3` | `backend/requirements.txt` | Optional accelerated inference and benchmark engine |
+| Node.js / npm | Node LTS recommended / npm bundled with Node | setup diagnostics | Build tooling and Electron dependency installation |
+| Redis | `6.4.0` Python client; Redis server optional | `backend/requirements.txt`, `docker-compose.yml` | Optional TTL cache backend |
+| OpenCV | `opencv-python-headless==4.13.0.92` | `backend/requirements.txt` | Image decode, resizing, colorization, GT alignment |
+| NumPy | `2.4.4` | `backend/requirements.txt` | Depth array arithmetic and metric computation |
+| Pillow | `12.2.0` | `backend/requirements.txt` | PNG/TIFF image handling |
+| Chart.js | `4.4.0` | `frontend/index.html` | Frontend latency, comparison, benchmark, and observability charts |
 
 ## Table of Contents
 
 | Section | What it covers |
 |---|---|
+| [Official v1.0 Tech Stack](#official-v10-tech-stack) | Locked dependency versions verified from manifests |
 | [Overview](#overview) | What the app does and who it is useful for |
 | [How Monocular Depth Estimation Works](#how-monocular-depth-estimation-works) | The ML pipeline explained step by step |
 | [Highlights](#highlights) | Core capabilities at a glance |
 | [Feature Tour](#feature-tour) | Workspace, webcam, comparison, experiments, performance, and 3D tools |
-| [Architecture](#architecture) | How Electron, FastAPI, PyTorch, ONNX, and cache layers work together |
+| [System Architecture](#system-architecture) | Electron, FastAPI, PyTorch, ONNX, and cache data flow |
 | [Quick Start](#quick-start) | Fast setup for local use |
 | [Installation Guide](#installation-guide) | Native, development, backend-only, Docker, and ONNX setup |
+| [Terminal-Only Dev Verification](#terminal-only-dev-verification) | Multi-OS dev-mode checks without packaging |
 | [Configuration](#configuration) | Environment variables and runtime settings |
 | [API Reference](#api-reference) | HTTP endpoints, request fields, and response behavior |
 | [Models, Colormaps & Metrics](#models-colormaps--metrics) | Supported MiDaS/DPT models and evaluation modes |
 | [Ground Truth Evaluation](#ground-truth-evaluation) | GT file support and benchmark metric flow |
 | [Understanding Depth Metrics](#understanding-depth-metrics) | What each metric measures and when to use it |
 | [Testing & CI](#testing--ci) | Local checks and GitHub Actions pipeline |
-| [Production & Packaging](#production--packaging) | Platform-specific 4-step builds, ONNX variants, and Docker deployment |
+| [Production & Packaging](#production--packaging) | Platform-specific builds, ONNX variants, and Docker deployment |
 | [Troubleshooting](#troubleshooting) | Common setup/runtime problems and fixes |
 | [Security](#security) | Local-first design, renderer isolation, and process safeguards |
 | [Project Structure](#project-structure) | Repository map |
 | [Contributing](#contributing) | Development and PR checklist |
+| [License](#license) | MIT License |
+| [Acknowledgements](#acknowledgements) | Open-source projects powering DepthLens Pro |
 
 ---
 
@@ -152,13 +165,15 @@ The full `(model, colormap, device, metrics_mode, outputs, max_dim, image_conten
 
 ## Feature Tour
 
-### Phase 7 / Observability — Local Runtime Telemetry
+### Observability — Local Runtime Telemetry
 
 Observability lives inside the existing **Performance** panel as a second sub-view next to Benchmark. It exposes local-only runtime snapshots, Prometheus metrics, inference latency history, bounded trace spans, sanitized crash analytics, cache events, and benchmark history without adding a new top-level header tab.
 
 The backend provides `GET /metrics` for Prometheus exposition plus `GET /api/observability` and `GET /observability` for JSON snapshots used by the UI. Telemetry is bounded in memory and avoids raw images, base64 image payloads, filenames, image hashes, cache keys, local paths, and high-cardinality user data in labels or history.
 
 ### 1. Workspace — Generate Depth Maps
+
+![DepthLensPro Workspace — Depth Map Generation](docs/assets/screenshot-workspace.png)
 
 The main workspace handles the complete image-processing flow:
 
@@ -208,6 +223,8 @@ Rules:
 
 ### 3. Webcam — Live Depth Streaming
 
+![DepthLensPro Webcam — Live Depth Streaming](docs/assets/screenshot-webcam.png)
+
 The Webcam tab processes a live camera feed into repeated depth predictions.
 
 Controls:
@@ -235,6 +252,8 @@ The live view shows real-time backend latency, end-to-end latency (including bro
 
 ### 4. Compare — Run All Models on One Image
 
+![DepthLensPro Compare — Side-by-Side Model View](docs/assets/screenshot-compare.png)
+
 The Compare tab answers the practical question of which model is right for a scene:
 
 > Should I use the fastest model, the balanced model, or the highest-detail model?
@@ -250,6 +269,8 @@ The comparison view shows side-by-side depth previews, latency badges, and a swi
 ---
 
 ### 5. Performance — PyTorch vs ONNX Runtime
+
+![DepthLensPro Performance — Benchmark Dashboard](docs/assets/screenshot-performance.png)
 
 The Performance tab benchmarks the standard PyTorch path against optional ONNX Runtime execution using a synthetic 384×384 gradient frame (deterministic, no file upload needed).
 
@@ -298,6 +319,8 @@ Exported fields include:
 
 ### 7. 3D Reconstruction
 
+![DepthLensPro 3D — Point Cloud Viewer](docs/assets/screenshot-3d-point-cloud.png)
+
 The 3D tab converts a source image and its predicted depth into an approximate coloured point cloud using a pinhole camera projection model.
 
 **Projection formula:**
@@ -336,7 +359,7 @@ The Guide tab provides a fully offline accordion reference covering the complete
 
 ---
 
-## Architecture
+## System Architecture
 
 DepthLens Pro is split into a desktop shell, a local inference HTTP server, a model runtime, and a cache/storage layer.
 
@@ -388,12 +411,14 @@ flowchart TB
     Inference --> Redis
 ```
 
+A single `/estimate` request starts in the renderer when the user submits an image. The renderer sends a localhost request through the backend URL exposed by the preload bridge; Electron main owns backend startup and port discovery, while the FastAPI route validates upload size, model, colormap, metrics, output mode, and optional GT fields. The inference service decodes and possibly downsizes the image, builds a stable cache key from the full parameter tuple plus the image-content SHA-1, and checks Redis first when configured. Redis outages do not fail user requests; the service falls back to an in-memory LRU so inference remains available on local machines without external services. On a cache miss, dispatch enters the global `INFERENCE_MAX_CONCURRENCY` semaphore, then the selected PyTorch or ONNX model/device forward lock. The raw depth plane is resized, normalized, colorized/encoded, recorded in bounded telemetry, cached when eligible, and returned to the renderer for preview and export.
+
 ### Layer Responsibilities
 
 | Layer | Key files | Responsibility |
 |---|---|---|
-| Electron main process | `electron-app/main.js`, `electron-app/src/main/*.js` | Small composition entrypoint plus focused modules for paths, backend HTTP probes, port fallback, PID metadata, Python resolution, backend lifecycle, settings persistence, and windows. No UI or IPC contract changes. |
-| Renderer UI | `frontend/index.html`, `frontend/js/*.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide. Phase 7 only reorganized scripts into ordered frontend modules; UI, DOM, CSS, endpoint calls, persistence, and feature behavior are preserved. |
+| Electron main process | `electron-app/main.js`, `electron-app/src/main/*.js` | Small composition entrypoint plus focused modules for paths, backend HTTP probes, port fallback, PID metadata, Python resolution, backend lifecycle, settings persistence, and windows. Stable desktop lifecycle, backend control, and IPC wiring. |
+| Renderer UI | `frontend/index.html`, `frontend/js/*.js`, `style.css` | Workspace tabs, charts, uploads, previews, 3D viewer, status orb, guide. Ordered frontend modules provide UI tabs, DOM integration, CSS-driven presentation, endpoint calls, persistence, and feature behavior. |
 | Preload bridge | `electron-app/preload.js` | Narrow `contextBridge` surface — backend URL, dialogs, platform info only |
 | Security policy | `electron-app/src/security-policy.js` | Navigation allowlist: local frontend file and `127.0.0.1:PORT` only |
 | Process policy | `electron-app/src/backend-process-policy.js` | Checks command-line and stored PID metadata before terminating backend processes |
@@ -510,117 +535,220 @@ Windows arm64 and x64 are supported, Linux arm64 and x64 are supported, and macO
 
 The native workflow is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. Setup is the only normal step that performs heavyweight dependency installs or model downloads. Standard setup installs the Python venv, backend dependencies, Electron dependencies, PyTorch MiDaS Torch Hub cache, and detector weights; it does **not** generate ONNX by default. ONNX setup adds export/validation for all three files in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`. Standard builds require `models/torch-cache` and treat ONNX as optional; ONNX builds require both the PyTorch cache and all three ONNX files.
 
-#### macOS — standard build
+#### macOS — Standard native build
 
 ```bash
-# 1. Clone
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-
-# 2. Setup
-npm run setup:mac
-
-# 3. Build
-npm run build:mac:arm64
-
-# 4. Launch
-npm run launch:mac
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:mac # Install macOS dependencies and standard PyTorch model cache
+npm run verify:resources # Verify required standard resources before packaging
+npm run build:mac:arm64 # Build the macOS Apple Silicon native app
+npm run launch:mac # Launch the packaged macOS app
 ```
 
-#### macOS — ONNX build
+#### macOS — ONNX native build
 
 ```bash
-# 1. Clone
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-
-# 2. Setup with ONNX
-npm run setup:mac:onnx
-
-# 3. Build with ONNX
-npm run build:mac:arm64:onnx
-
-# 4. Launch
-npm run launch:mac
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:mac:onnx # Install macOS dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run build:mac:arm64:onnx # Build the macOS Apple Silicon native app with ONNX resources required
+npm run launch:mac # Launch the packaged macOS app
 ```
 
-#### Windows — standard build
+#### Windows ARM64 — Standard native build
 
 ```powershell
-# 1. Clone
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-
-# 2. Setup
-npm run setup:win
-
-# 3. Build x64 or arm64
-npm run build:win:x64
-npm run build:win:arm64
-
-# 4. Launch
-npm run launch:win
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win # Install Windows dependencies and standard PyTorch model cache
+npm run verify:resources # Verify required standard resources before packaging
+npm run build:win:arm64 # Build the Windows ARM64 native app
+npm run launch:win # Launch the packaged Windows app
 ```
 
-#### Windows — ONNX build
+#### Windows ARM64 — ONNX native build
 
 ```powershell
-# 1. Clone
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-
-# 2. Setup with ONNX
-npm run setup:win:onnx
-
-# 3. Build with ONNX for x64 or arm64
-npm run build:win:x64:onnx
-npm run build:win:arm64:onnx
-
-# 4. Launch
-npm run launch:win
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win:onnx # Install Windows dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run build:win:arm64:onnx # Build the Windows ARM64 native app with ONNX resources required
+npm run launch:win # Launch the packaged Windows app
 ```
 
-#### Linux — standard build
+#### Windows x86/x64 — Standard native build
+
+```powershell
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win # Install Windows dependencies and standard PyTorch model cache
+npm run verify:resources # Verify required standard resources before packaging
+npm run build:win:x64 # Build the Windows x64/x86_64 native app
+npm run launch:win # Launch the packaged Windows app
+```
+
+#### Windows x86/x64 — ONNX native build
+
+```powershell
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win:onnx # Install Windows dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run build:win:x64:onnx # Build the Windows x64/x86_64 native app with ONNX resources required
+npm run launch:win # Launch the packaged Windows app
+```
+
+#### Linux ARM64 — Standard native build
 
 ```bash
-# 1. Clone
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-
-# 2. Setup
-npm run setup:linux
-
-# 3. Build x64 or arm64
-npm run build:linux:x64
-npm run build:linux:arm64
-
-# 4. Launch
-npm run launch:linux
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux # Install Linux dependencies and standard PyTorch model cache
+npm run verify:resources # Verify required standard resources before packaging
+npm run build:linux:arm64 # Build the Linux ARM64 native app
+npm run launch:linux # Launch the packaged Linux app
 ```
 
-#### Linux — ONNX build
+#### Linux ARM64 — ONNX native build
 
 ```bash
-# 1. Clone
-git clone https://github.com/AyushmanRaha/DepthLensPro.git
-cd DepthLensPro
-
-# 2. Setup with ONNX
-npm run setup:linux:onnx
-
-# 3. Build with ONNX for x64 or arm64
-npm run build:linux:x64:onnx
-npm run build:linux:arm64:onnx
-
-# 4. Launch
-npm run launch:linux
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux:onnx # Install Linux dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run build:linux:arm64:onnx # Build the Linux ARM64 native app with ONNX resources required
+npm run launch:linux # Launch the packaged Linux app
 ```
 
+#### Linux x86/x64 — Standard native build
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux # Install Linux dependencies and standard PyTorch model cache
+npm run verify:resources # Verify required standard resources before packaging
+npm run build:linux:x64 # Build the Linux x64/x86_64 native app
+npm run launch:linux # Launch the packaged Linux app
+```
+
+#### Linux x86/x64 — ONNX native build
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux:onnx # Install Linux dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run build:linux:x64:onnx # Build the Linux x64/x86_64 native app with ONNX resources required
+npm run launch:linux # Launch the packaged Linux app
+```
 
 
 #### Setup report and diagnostics
 
-After a successful setup, `scripts/doctor.py` writes a machine-readable report to `.depthlens/setup-report.json`. The report records the detected platform and CPU architecture, selected Python executable, virtualenv path, Node/npm versions, PyTorch MiDaS cache status, detector cache status, ONNX status, and the exact resource verification command that setup used. This file is diagnostic only for this phase: build scripts still verify the actual files in `models/torch-cache` and `models/onnx` instead of trusting the report.
+After a successful setup, `scripts/doctor.py` writes a machine-readable report to `.depthlens/setup-report.json`. The report records the detected platform and CPU architecture, selected Python executable, virtualenv path, Node/npm versions, PyTorch MiDaS cache status, detector cache status, ONNX status, and the exact resource verification command that setup used. This file is diagnostic only: build scripts still verify the actual files in `models/torch-cache` and `models/onnx` instead of trusting the report.
 
 Setup is safe to rerun. If pip, npm, MiDaS prefetch, detector prefetch, ONNX handling, or resource verification fails, rerun the platform setup command printed by the failure message. Use the standard setup command for PyTorch builds (`npm run setup:mac`, `npm run setup:linux`, or `npm run setup:win`) and the ONNX setup command when all three ONNX files are required (`npm run setup:mac:onnx`, `npm run setup:linux:onnx`, or `npm run setup:win:onnx`). Passing `--offline` validates existing caches only and does not download model assets; `--onnx-validate-only` validates existing ONNX files and never exports new ones.
 
@@ -729,7 +857,7 @@ The `backend.app` entry point (`backend/app.py`) is a backward-compatible ASGI s
 
 ```bash
 uvicorn backend.app:app    # repo-root CWD
-uvicorn app:app            # backend/ CWD (legacy packaged flow)
+uvicorn app:app            # backend/ CWD packaged compatibility flow
 ```
 
 ---
@@ -795,6 +923,258 @@ models/onnx/
 ├── midas_small.onnx
 ├── dpt_hybrid.onnx
 └── dpt_large.onnx
+```
+
+---
+
+## Terminal-Only Dev Verification
+
+This flow uses the project from the terminal in dev mode — it sets up dependencies, starts the FastAPI backend, checks the backend, then opens the Electron dev shell without creating a native installer/package. The repo exposes `backend:dev` and `frontend:dev` for this.
+
+### macOS — Standard terminal-only test
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:mac # Install macOS dependencies and standard PyTorch model cache
+npm run verify:resources # Verify standard resources
+npm run backend:dev & # Start the FastAPI backend from terminal
+BACKEND_PID=$! # Store the backend process ID
+sleep 5 # Give the backend time to start
+curl http://127.0.0.1:8765/live # Check that the backend is live
+npm run frontend:dev # Open the dev app without building a native package
+kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
+```
+
+### macOS — ONNX terminal-only test
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:mac:onnx # Install macOS dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run backend:dev & # Start the FastAPI backend from terminal
+BACKEND_PID=$! # Store the backend process ID
+sleep 5 # Give the backend time to start
+curl http://127.0.0.1:8765/onnx/status # Check ONNX model/provider status
+npm run frontend:dev # Open the dev app without building a native package
+kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
+```
+
+### Windows ARM64 — Standard terminal-only test
+
+```powershell
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win # Install Windows dependencies and standard PyTorch model cache
+npm run verify:resources # Verify standard resources
+$backend = Start-Process -FilePath "npm.cmd" -ArgumentList "run backend:dev" -PassThru # Start the FastAPI backend from terminal
+Start-Sleep -Seconds 5 # Give the backend time to start
+Invoke-RestMethod http://127.0.0.1:8765/live # Check that the backend is live
+npm run frontend:dev # Open the dev app without building a native package
+Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
+```
+
+### Windows ARM64 — ONNX terminal-only test
+
+```powershell
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win:onnx # Install Windows dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+$backend = Start-Process -FilePath "npm.cmd" -ArgumentList "run backend:dev" -PassThru # Start the FastAPI backend from terminal
+Start-Sleep -Seconds 5 # Give the backend time to start
+Invoke-RestMethod http://127.0.0.1:8765/onnx/status # Check ONNX model/provider status
+npm run frontend:dev # Open the dev app without building a native package
+Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
+```
+
+### Windows x86/x64 — Standard terminal-only test
+
+```powershell
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win # Install Windows x64/x86_64 dependencies and standard PyTorch model cache
+npm run verify:resources # Verify standard resources
+$backend = Start-Process -FilePath "npm.cmd" -ArgumentList "run backend:dev" -PassThru # Start the FastAPI backend from terminal
+Start-Sleep -Seconds 5 # Give the backend time to start
+Invoke-RestMethod http://127.0.0.1:8765/live # Check that the backend is live
+npm run frontend:dev # Open the dev app without building a native package
+Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
+```
+
+### Windows x86/x64 — ONNX terminal-only test
+
+```powershell
+cd "$HOME\Downloads" # Go to the Downloads folder
+if (Test-Path "DepthLensPro\.git") { # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+} elseif (Test-Path "DepthLensPro") { # Check if a non-git folder with the same name exists
+Write-Error "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+} else { # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads\DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+} # Finish project folder setup
+npm run setup:win:onnx # Install Windows x64/x86_64 dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+$backend = Start-Process -FilePath "npm.cmd" -ArgumentList "run backend:dev" -PassThru # Start the FastAPI backend from terminal
+Start-Sleep -Seconds 5 # Give the backend time to start
+Invoke-RestMethod http://127.0.0.1:8765/onnx/status # Check ONNX model/provider status
+npm run frontend:dev # Open the dev app without building a native package
+Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
+```
+
+### Linux ARM64 — Standard terminal-only test
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux # Install Linux ARM64 dependencies and standard PyTorch model cache
+npm run verify:resources # Verify standard resources
+npm run backend:dev & # Start the FastAPI backend from terminal
+BACKEND_PID=$! # Store the backend process ID
+sleep 5 # Give the backend time to start
+curl http://127.0.0.1:8765/live # Check that the backend is live
+npm run frontend:dev # Open the dev app without building a native package
+kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
+```
+
+### Linux ARM64 — ONNX terminal-only test
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux:onnx # Install Linux ARM64 dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run backend:dev & # Start the FastAPI backend from terminal
+BACKEND_PID=$! # Store the backend process ID
+sleep 5 # Give the backend time to start
+curl http://127.0.0.1:8765/onnx/status # Check ONNX model/provider status
+npm run frontend:dev # Open the dev app without building a native package
+kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
+```
+
+### Linux x86/x64 — Standard terminal-only test
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux # Install Linux x64/x86_64 dependencies and standard PyTorch model cache
+npm run verify:resources # Verify standard resources
+npm run backend:dev & # Start the FastAPI backend from terminal
+BACKEND_PID=$! # Store the backend process ID
+sleep 5 # Give the backend time to start
+curl http://127.0.0.1:8765/live # Check that the backend is live
+npm run frontend:dev # Open the dev app without building a native package
+kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
+```
+
+### Linux x86/x64 — ONNX terminal-only test
+
+```bash
+cd "$HOME/Downloads" # Go to the Downloads folder
+if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
+cd "DepthLensPro" # Enter the existing project folder
+git checkout main # Switch to the main branch
+git pull --ff-only # Update the repo without creating merge commits
+elif [ -e "DepthLensPro" ]; then # Check if a non-git folder with the same name exists
+echo "DepthLensPro exists but is not a Git repo; rename/delete it first." # Warn without overwriting files
+exit 1 # Stop safely
+else # Run this if the repo is not downloaded yet
+git clone https://github.com/AyushmanRaha/DepthLensPro.git "DepthLensPro" # Clone the project into Downloads/DepthLensPro
+cd "DepthLensPro" # Enter the cloned project folder
+fi # Finish project folder setup
+npm run setup:linux:onnx # Install Linux x64/x86_64 dependencies and generate/validate all ONNX models
+npm run verify:onnx:required # Verify that all required ONNX models exist
+npm run backend:dev & # Start the FastAPI backend from terminal
+BACKEND_PID=$! # Store the backend process ID
+sleep 5 # Give the backend time to start
+curl http://127.0.0.1:8765/onnx/status # Check ONNX model/provider status
+npm run frontend:dev # Open the dev app without building a native package
+kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
 
 ---
@@ -890,7 +1270,7 @@ DEPTHLENS_TRACE_SAMPLE_RATE=1.0
 
 ### Observability Privacy
 
-Phase 7 telemetry is local-only: DepthLens Pro does not send analytics to cloud services or external telemetry endpoints. Histories are bounded in process memory, Prometheus labels intentionally avoid high-cardinality user data, and telemetry avoids raw images, base64 payloads, uploaded filenames, image hashes, cache keys, local full paths, and private exception details.
+Telemetry is local-only: DepthLens Pro does not send analytics to cloud services or external telemetry endpoints. Histories are bounded in process memory, Prometheus labels intentionally avoid high-cardinality user data, and telemetry avoids raw images, base64 payloads, uploaded filenames, image hashes, cache keys, local full paths, and private exception details.
 
 ### CI / Test Flags
 
@@ -1207,8 +1587,7 @@ These are standard monocular depth estimation benchmark metrics used in papers l
 
 ### Run Local Checks
 
-Phase 1 repair verification assumes the backend dependencies are installed before
-full pytest collection. Use the normal four-step workflow (`clone → setup → build
+Install backend dependencies before full pytest collection. Use the normal four-step workflow (`clone → setup → build
 → launch`) and run the appropriate setup command first, for example
 `npm run setup:<platform>` for standard builds or `npm run setup:<platform>:onnx`
 when validating the required ONNX files (`midas_small.onnx`, `dpt_hybrid.onnx`,
@@ -1394,7 +1773,7 @@ Renderer startup is dependency-ordered and failure-isolated in both packaged Ele
 
 ### “Depth engine ready” but inference fails
 
-Older builds could report backend readiness when Python imports succeeded even though MiDaS runtime assets were missing. `/ready` now separates `backend_alive`, `runtime_imports_ready`, `model_assets_ready`, `pytorch_hub_cache_ready`, `onnx_any_ready`, `onnx_all_ready`, and `inference_ready`. If `inference_ready` is false, inspect `fatal_reason` and `recommended_action`:
+`/ready` separates `backend_alive`, `runtime_imports_ready`, `model_assets_ready`, `pytorch_hub_cache_ready`, `onnx_any_ready`, `onnx_all_ready`, and `inference_ready`. If `inference_ready` is false, inspect `fatal_reason` and `recommended_action`:
 
 ```bash
 curl http://127.0.0.1:8765/ready
@@ -1655,14 +2034,14 @@ DepthLensPro/
 │   │   ├── onnx_diagnostics.py      # ONNX session creation, provider selection, checker validation
 │   │   └── reconstruction.py        # Pinhole projection, PLY/OBJ serialisation, preview downsampling
 │   ├── scripts/
-│   │   └── export_onnx.py           # ONNX export (legacy + dynamo strategies), quarantine, validation
+│   │   └── export_onnx.py           # ONNX export (torch.onnx + dynamo strategies), quarantine, validation
 │   ├── tests/                       # Pytest suite — no GPU, Redis, or real model weights required
 │   ├── utils/
 │   │   └── hardware.py              # Device discovery, ONNX provider mapping, acceleration probe
 │   ├── app.py                       # ASGI compatibility entry point (adds repo root to sys.path)
 │   ├── constants.py                 # Shared lightweight literals for upload, modes, ONNX IDs, resource modes
 │   ├── config.py                    # Pydantic settings with dotenv fallback
-│   ├── depth_models.py              # ONNXExecutionEngine, DepthEstimator (legacy)
+│   ├── depth_models.py              # ONNXExecutionEngine and DepthEstimator compatibility imports
 │   ├── main.py                      # FastAPI app factory, CORS, JSON logging, lifespan
 │   ├── model_metadata.py            # Lightweight aliases for backwards-compatible imports
 │   ├── model_registry.py            # Canonical model specs, alias normalisation, ONNX path resolution
@@ -1672,7 +2051,7 @@ DepthLensPro/
 │   ├── assets/                      # App icons for all platforms
 │   ├── scripts/                     # Packaging, verification, lifecycle helpers
 │   ├── src/
-│   │   ├── main/                    # Focused main-process modules; no UI or IPC contract changes
+│   │   ├── main/                    # Focused main-process modules for desktop lifecycle and backend control
 │   │   │   ├── backend-http.js       # /live JSON probes and DepthLens backend detection
 │   │   │   ├── backend-lifecycle.js  # Backend startup, missing-resource errors, stale cleanup, safe shutdown
 │   │   │   ├── backend-pid-store.js  # Private PID and backend metadata files
@@ -1690,7 +2069,7 @@ DepthLensPro/
 │
 ├── frontend/
 │   ├── index.html                   # App shell and all workspace panels (Workspace, Webcam, Compare, Performance, Experiments, 3D, Guide)
-│   ├── js/                          # Ordered browser scripts; behavior-preserving split from the former monolithic script.js
+│   ├── js/                          # Ordered browser scripts; ordered browser modules loaded directly by index.html
 │   │   ├── state.js                 # Shared renderer state containers and defaults
 │   │   ├── settings.js              # Theme, settings, localStorage, Electron settings bridge
 │   │   ├── api-client.js            # Backend URL resolution, fetch wrappers, health/device/status calls
@@ -1729,10 +2108,7 @@ DepthLensPro/
 │
 ├── docs/
 │   ├── debugging.md                 # Startup, asset, ONNX, port, packaged-resource, and settings troubleshooting
-│   ├── maintenance.md               # Safe extension guide for models, routes, installer/build, frontend modules, tests
-│   ├── refactor-completion-report.md # Final refactor contracts, phase summary, test matrix, known limits
-│   ├── refactor-contract.md
-│   └── refactor-test-matrix.md
+│   └── maintenance.md               # Safe extension guide for models, routes, installer/build, frontend modules, tests
 │
 ├── .github/
 │   └── workflows/ci.yml             # GitHub Actions — lint, type-check, pytest, Electron tests, resource dry-run
@@ -1747,21 +2123,21 @@ DepthLensPro/
 
 ### Backend route organization
 
-The inference service decomposition is internal only: `backend/services/inference.py` preserves the existing public imports and response payloads while delegating image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
+The inference service `backend/services/inference.py` preserves the existing public imports and response payloads delegates image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
 
-The FastAPI route layer stays thin: public route declarations and high-level orchestration remain in `backend/api/routes.py`, while reusable validation, error mapping, device/readiness cache, and health telemetry helpers live in the neighboring `backend/api/` modules listed above. This is an internal organization change only; no public API routes, request fields, status codes, or response shapes were changed.
+The FastAPI route layer stays thin: public route declarations and high-level orchestration remain in `backend/api/routes.py`, while reusable validation, error mapping, device/readiness cache, and health telemetry helpers live in the neighboring `backend/api/` modules listed above. Public API routes, request fields, status codes, and response shapes are documented in the API Reference.
 
 ### Centralized path, platform, and model policy
 
-DepthLens Pro now keeps low-risk shared literals and path resolution in small central modules so setup, backend runtime, and packaging checks can stay in sync without changing public commands or API payloads. Backend upload/mode/model constants live in `backend/constants.py`, filesystem roots and ONNX environment override priority live in `backend/core/paths.py`, and Electron platform support remains centralized in `electron-app/src/platform-targets.js`. Standard builds still treat ONNX files as optional, while ONNX builds continue to require all supported ONNX model files.
+DepthLens Pro keeps low-risk shared literals and path resolution in small central modules so setup, backend runtime, and packaging checks can stay in sync without changing public commands or API payloads. Backend upload/mode/model constants live in `backend/constants.py`, filesystem roots and ONNX environment override priority live in `backend/core/paths.py`, and Electron platform support remains centralized in `electron-app/src/platform-targets.js`. Standard builds still treat ONNX files as optional, while ONNX builds continue to require all supported ONNX model files.
 
 ### Reliability/performance hardening
 
-Recent internal hardening keeps the public API, UI, and four-step install flow unchanged while reducing avoidable runtime work. Estimate cache hits now reuse normalized output metadata instead of reparsing it for telemetry, local observability hooks are failure-safe around inference paths, ONNX provider/device metadata is normalized before selection without changing provider priority, and Electron startup diagnostics keep a bounded backend-output tail with setup-remediation context.
+Runtime hardening reduces avoidable work: Estimate cache hits now reuse normalized output metadata instead of reparsing it for telemetry, local observability hooks are failure-safe around inference paths, ONNX provider/device metadata is normalized before selection without changing provider priority, and Electron startup diagnostics keep a bounded backend-output tail with setup-remediation context.
 
 ---
 
-The final refactor maintenance docs live in [`docs/maintenance.md`](docs/maintenance.md), [`docs/debugging.md`](docs/debugging.md), and [`docs/refactor-completion-report.md`](docs/refactor-completion-report.md).
+Maintainer documentation lives in [`docs/maintenance.md`](docs/maintenance.md) and [`docs/debugging.md`](docs/debugging.md).
 
 ## Contributing
 
