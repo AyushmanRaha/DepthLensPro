@@ -12,7 +12,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 
 import torch
 
@@ -30,6 +30,11 @@ from backend.model_registry import (
 from backend.services.onnx_diagnostics import create_onnx_session
 
 OPTIONAL_ONNX_MODELS = {"dpt_hybrid", "dpt_large"}
+
+
+def _torch_hub_load(*args: Any, **kwargs: Any) -> Any:
+    hub_load = cast(Callable[..., Any], torch.hub.load)
+    return hub_load(*args, **kwargs)
 
 
 def parse_model_list(value: str) -> list[str]:
@@ -182,7 +187,7 @@ def export_model_to_onnx(
             "technical_detail": error,
         }
 
-    model = torch.hub.load(
+    model = _torch_hub_load(
         MIDAS_REPO,
         spec.pytorch_model_name,
         trust_repo=True,

@@ -21,7 +21,17 @@ OPTIONAL_RUNTIME_MODULES = ("onnxruntime", "redis", "pydantic_settings")
 def _module_check(name: str, *, required: bool) -> dict[str, Any]:
     started = time.perf_counter()
     result: dict[str, Any] = {"required": required, "available": False}
-    spec = importlib.util.find_spec(name)
+    try:
+        spec = importlib.util.find_spec(name)
+    except ValueError as exc:
+        result.update(
+            {
+                "status": "missing_required" if required else "missing_optional",
+                "error": f"Python module {name!r} is unavailable: {exc}",
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            }
+        )
+        return result
     if spec is None:
         result.update(
             {

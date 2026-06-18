@@ -15,28 +15,39 @@ import uuid
 from collections import Counter, deque
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 from backend.config import settings
 
 try:  # graceful optional dependency path
     from prometheus_client import (
-        CollectorRegistry,
-        Gauge,
-        Histogram,
-        generate_latest,
+        CollectorRegistry as _CollectorRegistry,
     )
     from prometheus_client import (
-        Counter as PromCounter,
+        Counter as _PromCounter,
     )
-    from prometheus_client.openmetrics.exposition import CONTENT_TYPE_LATEST
+    from prometheus_client import (
+        Gauge as _Gauge,
+    )
+    from prometheus_client import (
+        Histogram as _Histogram,
+    )
+    from prometheus_client import (
+        generate_latest as _generate_latest,
+    )
 except Exception:  # pragma: no cover - exercised by partial installs
-    CollectorRegistry = None
-    PromCounter = None
-    Gauge = None
-    Histogram = None
-    generate_latest = None
-    CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+    _CollectorRegistry = None
+    _PromCounter = None
+    _Gauge = None
+    _Histogram = None
+    _generate_latest = None
+
+CollectorRegistry: Any = _CollectorRegistry
+PromCounter: Any = _PromCounter
+Gauge: Any = _Gauge
+Histogram: Any = _Histogram
+generate_latest: Any = _generate_latest
+CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
 _LOCK = threading.RLock()
 _STARTED = time.perf_counter()
@@ -113,6 +124,9 @@ def sanitize_message(value: Any) -> str:
         text = text.replace(_HOME, "[home]")
     text = _WIN_PATH.sub("[path]", text)
     text = _UNIX_PATH.sub("[path]", text)
+    text = re.sub(
+        r"\b[^\s/\\]+\.(?:png|jpe?g|webp|bmp|gif|tiff?|npy)\b", "[file]", text, flags=re.IGNORECASE
+    )
     text = re.sub(r"\s+", " ", text).strip()
     return text[:240]
 
@@ -574,4 +588,4 @@ def prometheus_text() -> tuple[str, str]:
         return "# DepthLens observability disabled\n", CONTENT_TYPE_LATEST
     if not prometheus_enabled() or _registry is None:
         return "# DepthLens Prometheus disabled or unavailable\n", CONTENT_TYPE_LATEST
-    return generate_latest(_registry).decode("utf-8"), CONTENT_TYPE_LATEST
+    return cast(bytes, generate_latest(_registry)).decode("utf-8"), CONTENT_TYPE_LATEST

@@ -10,7 +10,7 @@ PACKAGE = json.loads((ROOT / "electron-app" / "package.json").read_text())
 README = (ROOT / "README.md").read_text()
 
 
-def test_package_builds_only_arm_desktop_targets() -> None:
+def test_package_builds_supported_desktop_targets() -> None:
     scripts = PACKAGE["scripts"]
     assert "--arm64" in scripts["build:mac:arm64:raw"]
     assert "--arm64" in scripts["build:win:arm64:raw"]
@@ -18,17 +18,19 @@ def test_package_builds_only_arm_desktop_targets() -> None:
     assert "verify:resources:native" in scripts["build:mac:arm64"]
     assert "verify:resources:native" in scripts["build:win:arm64"]
     assert "verify:resources:native" in scripts["build:linux:arm64"]
-    for name in ("build:mac:x64", "build:mac:universal", "build:win:x64", "build:linux:x64"):
+    for name in ("build:mac:x64", "build:mac:universal"):
         assert "unsupported-arch.js" in scripts[name]
+    assert "build:win:x64:raw" in scripts["build:win:x64"]
+    assert "build:linux:x64:raw" in scripts["build:linux:x64"]
     assert PACKAGE["build"]["mac"]["target"][0]["arch"] == ["arm64"]
-    assert PACKAGE["build"]["win"]["target"][0]["arch"] == ["arm64"]
-    assert PACKAGE["build"]["linux"]["target"][0]["arch"] == ["arm64"]
+    assert PACKAGE["build"]["win"]["target"][0]["arch"] == ["arm64", "x64"]
+    assert PACKAGE["build"]["linux"]["target"][0]["arch"] == ["arm64", "x64"]
 
 
 def test_readme_platform_table_matches_package_scripts() -> None:
     assert "macOS Apple Silicon only" in README
-    assert "Windows ARM only" in README
-    assert "Linux ARM only" in README
+    assert "Windows arm64 and x64" in README
+    assert "Linux arm64 and x64" in README
     assert "Intel Mac / macOS x64" in README
     assert "npm run build:mac" in README
     assert "dist/mac-arm64/DepthLens Pro.app" in README

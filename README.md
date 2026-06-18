@@ -494,7 +494,7 @@ Expected `/live` response:
 
 ### A. Native Desktop App
 
-Platform support is explicit and architecture-specific:
+Platform support is explicit and architecture-specific. The setup entry points are `scripts/setup-macos.sh`, `scripts/setup-linux.sh`, and `scripts/setup-windows.ps1` (also exposed through the Electron npm setup scripts).
 
 | Platform / architecture | Status | Build command |
 |---|---|---|
@@ -505,6 +505,8 @@ Platform support is explicit and architecture-specific:
 | Windows x64 | Supported | `npm run build:win:x64` |
 | Linux arm64 | Supported | `npm run build:linux:arm64` |
 | Linux x64 | Supported | `npm run build:linux:x64` |
+
+Windows arm64 and x64 are supported, Linux arm64 and x64 are supported, and macOS remains Apple Silicon only.
 
 The native workflow is deliberately split into **four repeatable steps per platform**: clone, setup, build, and launch. Setup is the only normal step that performs heavyweight dependency installs or model downloads. Standard setup installs the Python venv, backend dependencies, Electron dependencies, PyTorch MiDaS Torch Hub cache, and detector weights; it does **not** generate ONNX by default. ONNX setup adds export/validation for all three files in `models/onnx`: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`. Standard builds require `models/torch-cache` and treat ONNX as optional; ONNX builds require both the PyTorch cache and all three ONNX files.
 
