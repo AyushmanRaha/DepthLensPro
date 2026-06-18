@@ -811,7 +811,7 @@ async def estimate(
         log.exception("Inference failed")
         raise HTTPException(
             500,
-            {"error_code": "INFERENCE_FAILED", "message": "Inference failed"},
+            {"error_code": "INFERENCE_FAILED", "message": "Depth inference failed"},
         ) from exc
 
     if ck is not None:

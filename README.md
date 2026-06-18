@@ -499,7 +499,7 @@ Platform support is explicit and architecture-specific. The setup entry points a
 | Platform / architecture | Status | Build command |
 |---|---|---|
 | macOS Apple Silicon arm64 | Supported | `npm run build:mac:arm64` |
-| macOS x64 | Not supported | `npm run build:mac:x64` exits with a clear error |
+| Intel Mac / macOS x64 | Not supported | `npm run build:mac:x64` exits with a clear error |
 | macOS universal | Not supported | `npm run build:mac:universal` exits with a clear error |
 | Windows arm64 | Supported | `npm run build:win:arm64` |
 | Windows x64 | Supported | `npm run build:win:x64` |

@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -15,19 +13,19 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import Field, field_validator
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel as BaseSettings
-    from pydantic import ConfigDict as SettingsConfigDict
-elif importlib.util.find_spec("pydantic_settings") is not None:
-    pydantic_settings = importlib.import_module("pydantic_settings")
-    BaseSettings = cast(type[Any], pydantic_settings.BaseSettings)
-    SettingsConfigDict = cast(Any, pydantic_settings.SettingsConfigDict)
+    SettingsConfigDict: Any
 else:
-    from pydantic import BaseModel as BaseSettings
+    try:
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+    except (
+        ImportError
+    ):  # pragma: no cover - compatibility path before dev dependencies are installed
+        from pydantic import BaseModel as BaseSettings
 
-    def SettingsConfigDict(**kwargs: Any) -> dict[str, Any]:
-        """Compatibility shim when local dev dependencies are not installed yet."""
+        def SettingsConfigDict(**kwargs: Any) -> dict[str, Any]:
+            """Compatibility shim when local dev dependencies are not installed yet."""
 
-        return kwargs
+            return kwargs
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -62,7 +60,16 @@ _ENV_KEYS = (
 )
 
 
-class Settings(BaseSettings):  # type: ignore[misc]
+if TYPE_CHECKING:
+
+    class _SettingsBase:
+        def __init__(self, **data: Any) -> None: ...
+
+else:
+    _SettingsBase = BaseSettings
+
+
+class Settings(_SettingsBase):
     """Environment-backed application settings.
 
     Values are loaded from process environment variables first and then from a
