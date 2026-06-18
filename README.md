@@ -1640,7 +1640,10 @@ DepthLensPro/
 │   │   ├── inference_types.py       # Shared typed payload metadata for inference internals
 │   │   ├── image_io.py              # Decode, depth normalization, colorization, PNG base64 encoding
 │   │   ├── inference_cache.py       # Stable inference/depth cache keys and in-memory depth cache
+│   │   ├── model_assets.py          # Runtime model asset readiness and remediation helpers
 │   │   ├── model_runtime.py         # PyTorch MiDaS model/transform caches, locks, inference
+│   │   ├── object_detection.py      # TorchVision RGB detection weight checks and inference
+│   │   ├── observability.py         # Local-only counters, timings, and bounded histories
 │   │   ├── onnx_inference.py        # ONNX engine cache, locks, inference, PyTorch fallback metadata
 │   │   ├── metrics.py               # Metrics mode parsing, fast/full metrics, grouped payloads
 │   │   ├── onnx_diagnostics.py      # ONNX session creation, provider selection, checker validation
@@ -1682,6 +1685,7 @@ DepthLensPro/
 ├── frontend/
 │   ├── index.html                   # App shell and all workspace panels (Workspace, Webcam, Compare, Performance, Experiments, 3D, Guide)
 │   ├── js/                          # Ordered browser scripts; behavior-preserving split from the former monolithic script.js
+│   │   ├── state.js                 # Shared renderer state containers and defaults
 │   │   ├── settings.js              # Theme, settings, localStorage, Electron settings bridge
 │   │   ├── api-client.js            # Backend URL resolution, fetch wrappers, health/device/status calls
 │   │   ├── dom.js                   # DOM lookup map and safe element helpers
@@ -1707,6 +1711,9 @@ DepthLensPro/
 ├── scripts/
 │   ├── doctor.py                    # Cross-platform setup and environment verification
 │   ├── diagnose_backend.py          # Port/process/endpoint diagnostics
+│   ├── prefetch-detector-weights.py # Optional detector-weight cache prefetch
+│   ├── prefetch-midas-assets.py     # MiDaS Torch Hub/checkpoint cache prefetch
+│   ├── setup_state.py               # Shared setup report/status helpers
 │   ├── setup-macos.sh
 │   ├── setup-linux.sh
 │   ├── setup-windows.ps1
@@ -1714,8 +1721,15 @@ DepthLensPro/
 │   ├── build-native-linux.sh
 │   └── build-native-windows.ps1
 │
+├── docs/
+│   ├── debugging.md                 # Startup, asset, ONNX, port, packaged-resource, and settings troubleshooting
+│   ├── maintenance.md               # Safe extension guide for models, routes, installer/build, frontend modules, tests
+│   ├── refactor-completion-report.md # Final refactor contracts, phase summary, test matrix, known limits
+│   ├── refactor-contract.md
+│   └── refactor-test-matrix.md
+│
 ├── .github/
-│   └── workflows/ci.yml             # GitHub Actions — lint, type-check, test, Electron tests
+│   └── workflows/ci.yml             # GitHub Actions — lint, type-check, pytest, Electron tests, resource dry-run
 ├── Dockerfile                       # Two-stage Python 3.12 slim build
 ├── docker-compose.yml
 ├── package.json                     # Root npm scripts
@@ -1740,6 +1754,8 @@ DepthLens Pro now keeps low-risk shared literals and path resolution in small ce
 Recent internal hardening keeps the public API, UI, and four-step install flow unchanged while reducing avoidable runtime work. Estimate cache hits now reuse normalized output metadata instead of reparsing it for telemetry, local observability hooks are failure-safe around inference paths, ONNX provider/device metadata is normalized before selection without changing provider priority, and Electron startup diagnostics keep a bounded backend-output tail with setup-remediation context.
 
 ---
+
+The final refactor maintenance docs live in [`docs/maintenance.md`](docs/maintenance.md), [`docs/debugging.md`](docs/debugging.md), and [`docs/refactor-completion-report.md`](docs/refactor-completion-report.md).
 
 ## Contributing
 

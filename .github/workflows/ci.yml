@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [refactor-perf-tests, main, master]
   pull_request:
-    branches: [main, master]
+    branches: [refactor-perf-tests, main, master]
 
 jobs:
   validate:
@@ -13,7 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -35,7 +35,18 @@ jobs:
       - name: Pytest
         run: pytest
 
+      - name: Install Electron dependencies
+        run: npm ci
+        working-directory: electron-app
+
       - name: Electron lightweight tests
+        run: npm test
+        working-directory: electron-app
+
+      - name: Resource verification dry run
         run: |
-          cd electron-app
-          npm test
+          tmp_root=$(mktemp -d)
+          mkdir -p "$tmp_root/backend" "$tmp_root/frontend" "$tmp_root/venv/bin"
+          touch "$tmp_root/backend/app.py" "$tmp_root/frontend/index.html" "$tmp_root/venv/bin/python"
+          node scripts/verify-resources.js --root-kind repo --mode basic --torch-cache off --detector-cache off --onnx off --json "$tmp_root"
+        working-directory: electron-app
