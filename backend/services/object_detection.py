@@ -13,15 +13,87 @@ MODEL_NAME = "fasterrcnn_mobilenet_v3_large_320_fpn"
 MAX_INTERNAL_DIM = 960
 
 COCO_LABELS = [
-    "__background__", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse",
-    "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie",
-    "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
-    "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
-    "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
-    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-    "teddy bear", "hair drier", "toothbrush",
+    "__background__",
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
 ]
 GENERIC_LABELS = {label for label in COCO_LABELS if label != "__background__"}
 
@@ -31,6 +103,8 @@ _model_cache: dict[str, Any] = {}
 
 class DetectorUnavailableError(RuntimeError):
     """Raised when local detector dependencies or weights are unavailable."""
+
+    error_code = "DETECTOR_UNAVAILABLE"
 
 
 def _resolve_device(requested: str) -> str:
@@ -49,10 +123,15 @@ def get_detector(device: str = "auto") -> tuple[Any, str, Any]:
 
     try:
         import torch
-        from torchvision.models.detection import FasterRCNN_MobileNet_V3_Large_320_FPN_Weights
-        from torchvision.models.detection import fasterrcnn_mobilenet_v3_large_320_fpn
+        from torchvision.models.detection import (
+            FasterRCNN_MobileNet_V3_Large_320_FPN_Weights,
+            fasterrcnn_mobilenet_v3_large_320_fpn,
+        )
     except Exception as exc:  # pragma: no cover - depends on optional runtime wheels
-        err = DetectorUnavailableError("TorchVision detector dependencies are unavailable; install backend requirements including torch and torchvision.")
+        err = DetectorUnavailableError(
+            "TorchVision detector dependencies are unavailable; install backend requirements "
+            "including torch and torchvision."
+        )
         err.error_code = "DETECTOR_DEPENDENCY_MISSING"
         raise err from exc
 
@@ -71,7 +150,10 @@ def get_detector(device: str = "auto") -> tuple[Any, str, Any]:
             model = fasterrcnn_mobilenet_v3_large_320_fpn(weights=weights)
             model.to(torch_device).eval()
         except Exception as exc:
-            err = DetectorUnavailableError("Local object detector weights are missing or could not be downloaded; run setup with network access or retry detection.")
+            err = DetectorUnavailableError(
+                "Local object detector weights are missing or could not be downloaded; run setup "
+                "with network access or retry detection."
+            )
             err.error_code = "DETECTOR_WEIGHTS_UNAVAILABLE"
             raise err from exc
         _model_cache[key] = model
@@ -117,7 +199,9 @@ def detect_objects(
             with torch.inference_mode():
                 output = model([tensor])[0]
         else:
-            err = DetectorUnavailableError("Local object detector inference failed; try CPU device or lower camera resolution.")
+            err = DetectorUnavailableError(
+                "Local object detector inference failed; try CPU device or lower camera resolution."
+            )
             err.error_code = "DETECTOR_INFERENCE_FAILED"
             raise err from exc
 
@@ -134,7 +218,13 @@ def detect_objects(
         if label not in GENERIC_LABELS:
             continue
         coords = box.detach().cpu().tolist() if hasattr(box, "detach") else list(box)
-        detections.append({"label": label, "score": round(score_f, 4), "box": [round(float(v), 2) for v in coords]})
+        detections.append(
+            {
+                "label": label,
+                "score": round(score_f, 4),
+                "box": [round(float(v), 2) for v in coords],
+            }
+        )
         if len(detections) >= max_detections:
             break
 

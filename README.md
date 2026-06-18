@@ -1188,11 +1188,19 @@ These are standard monocular depth estimation benchmark metrics used in papers l
 
 ### Run Local Checks
 
+Phase 1 repair verification assumes the backend dependencies are installed before
+full pytest collection. Use the normal four-step workflow (`clone → setup → build
+→ launch`) and run the appropriate setup command first, for example
+`npm run setup:<platform>` for standard builds or `npm run setup:<platform>:onnx`
+when validating the required ONNX files (`midas_small.onnx`, `dpt_hybrid.onnx`,
+and `dpt_large.onnx`). Standard setup/build does not require ONNX generation.
+
 ```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
+python -m black --check .
+python -m ruff check .
+python -m mypy backend/
+python -m pytest backend/tests/test_install_contract.py
+python -m pytest
 
 cd electron-app
 npm test
@@ -1202,7 +1210,7 @@ cd ..
 Or as a single pipeline:
 
 ```bash
-black --check . && ruff check . && mypy backend/ && pytest && cd electron-app && npm test && cd ..
+python -m black --check . && python -m ruff check . && python -m mypy backend/ && python -m pytest backend/tests/test_install_contract.py && python -m pytest && cd electron-app && npm test && cd ..
 ```
 
 ### Useful Test Commands

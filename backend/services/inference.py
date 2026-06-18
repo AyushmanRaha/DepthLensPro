@@ -22,11 +22,16 @@ from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import COLORMAP_NAMES, SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services import observability
-from backend.services.model_assets import ModelAssetsUnavailableError, classify_torch_hub_failure, ensure_assets_before_load, inspect_model_assets
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
     decode_ground_truth,
+)
+from backend.services.model_assets import (
+    ModelAssetsUnavailableError,
+    classify_torch_hub_failure,
+    ensure_assets_before_load,
+    inspect_model_assets,
 )
 
 log = logging.getLogger("depthlens")
@@ -97,13 +102,15 @@ def _load_model(
         ensure_assets_before_load()
         if model_id not in TRANSFORMS:
             try:
-                transforms = torch.hub.load(  # type: ignore[no-untyped-call]
-                "intel-isl/MiDaS", "transforms", trust_repo=True
-                )
+                transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
             except Exception as exc:
-                log.exception("MiDaS transforms load failed; TORCH_HOME=%s", os.getenv("TORCH_HOME"))
+                log.exception(
+                    "MiDaS transforms load failed; TORCH_HOME=%s", os.getenv("TORCH_HOME")
+                )
                 if classify_torch_hub_failure(exc):
-                    raise ModelAssetsUnavailableError(status=inspect_model_assets(), cause=exc) from exc
+                    raise ModelAssetsUnavailableError(
+                        status=inspect_model_assets(), cause=exc
+                    ) from exc
                 raise
             TRANSFORMS[model_id] = (
                 transforms.small_transform
@@ -114,9 +121,13 @@ def _load_model(
         device = torch.device(device_str)
         log.info("Loading '%s' (%s) → %s …", spec.display_name, spec.pytorch_model_name, device)
         try:
-            model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)  # type: ignore[no-untyped-call]
+            model = torch.hub.load("intel-isl/MiDaS", spec.pytorch_model_name, trust_repo=True)
         except Exception as exc:
-            log.exception("MiDaS model load failed for %s; TORCH_HOME=%s", spec.pytorch_model_name, os.getenv("TORCH_HOME"))
+            log.exception(
+                "MiDaS model load failed for %s; TORCH_HOME=%s",
+                spec.pytorch_model_name,
+                os.getenv("TORCH_HOME"),
+            )
             if classify_torch_hub_failure(exc):
                 raise ModelAssetsUnavailableError(status=inspect_model_assets(), cause=exc) from exc
             raise
@@ -820,19 +831,22 @@ async def process_image_async(
     """Run the blocking decode/inference/encode pipeline off the ASGI event loop."""
 
     async with _INFERENCE_SEMAPHORE:
-        return await run_in_threadpool(
-            process_image,
-            raw,
-            model,
-            colormap,
-            device,
-            filename,
-            metrics,
-            outputs,
-            max_dim,
-            gt_raw,
-            gt_filename,
-            gt_required,
-            gt_scale,
-            gt_invalid_value,
+        return cast(
+            dict[str, Any],
+            await run_in_threadpool(
+                process_image,
+                raw,
+                model,
+                colormap,
+                device,
+                filename,
+                metrics,
+                outputs,
+                max_dim,
+                gt_raw,
+                gt_filename,
+                gt_required,
+                gt_scale,
+                gt_invalid_value,
+            ),
         )

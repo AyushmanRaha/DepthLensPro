@@ -12,7 +12,11 @@ import diagnose_backend  # type: ignore  # noqa: E402
 
 def test_diagnostic_port_free_continues(monkeypatch) -> None:
     monkeypatch.setattr(diagnose_backend, "socket_port_open", lambda: False)
-    monkeypatch.setattr(diagnose_backend, "http_json", lambda path, timeout=2.0: {"ok": False, "error": "connection refused", "url": path})
+    monkeypatch.setattr(
+        diagnose_backend,
+        "http_json",
+        lambda path, timeout=2.0: {"ok": False, "error": "connection refused", "url": path},
+    )
     assert diagnose_backend.socket_port_open() is False
     assert diagnose_backend.http_json("/live")["ok"] is False
 
@@ -31,4 +35,7 @@ def test_electron_log_paths_are_platform_specific(monkeypatch) -> None:
     monkeypatch.setattr(diagnose_backend.platform, "system", lambda: "Windows")
     assert "DepthLens Pro" in diagnose_backend.electron_log_path()
     monkeypatch.setattr(diagnose_backend.platform, "system", lambda: "Linux")
-    assert ".config" in diagnose_backend.electron_log_path() or "DepthLens Pro" in diagnose_backend.electron_log_path()
+    assert (
+        ".config" in diagnose_backend.electron_log_path()
+        or "DepthLens Pro" in diagnose_backend.electron_log_path()
+    )

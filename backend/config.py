@@ -1,3 +1,6 @@
+# Pydantic's runtime validator decorator is dynamically typed in the installed stubs.
+# mypy: disable-error-code=untyped-decorator
+
 """Structured runtime configuration for the DepthLens Pro backend."""
 
 from __future__ import annotations
@@ -58,7 +61,7 @@ _ENV_KEYS = (
 )
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # type: ignore[misc]
     """Environment-backed application settings.
 
     Values are loaded from process environment variables first and then from a

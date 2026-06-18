@@ -136,6 +136,7 @@ def test_estimate_uses_mocked_processing_and_cache(monkeypatch: Any) -> None:
     assert second.json()["cached"] is True
     assert calls["count"] == 1
 
+
 def test_estimate_generic_failure_uses_sanitized_error(monkeypatch: Any) -> None:
     cache_service.clear()
     monkeypatch.setattr(
