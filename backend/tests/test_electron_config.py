@@ -81,14 +81,23 @@ def test_backend_lifecycle_rejects_unrelated_uvicorn_processes() -> None:
 
 
 def test_backend_spawn_keeps_shell_disabled_and_args_array() -> None:
+    lifecycle = (ROOT / "electron-app" / "src" / "main" / "backend-lifecycle.js").read_text()
     main = (ROOT / "electron-app" / "main.js").read_text()
-    assert "spawn(pythonPath, args" in main
-    assert "shell: false" in main
-    assert "argument array" in main
+
+    assert 'require("./src/main/backend-lifecycle")' in main
+    assert "createBackendLifecycle({" in main
+    assert "backendLifecycle.startBackend()" in main
+    assert 'const args = ["-m", "uvicorn", "backend.app:app"' in lifecycle
+    assert "spawn(pythonPath, args" in lifecycle
+    assert "shell: false" in lifecycle
 
 
 def test_packaged_startup_requires_models_and_onnx() -> None:
+    lifecycle = (ROOT / "electron-app" / "src" / "main" / "backend-lifecycle.js").read_text()
     main = (ROOT / "electron-app" / "main.js").read_text()
-    assert '["models/", details.modelsDir]' in main
-    assert '["models/onnx/", details.onnxDir]' in main
-    assert "stale installed copy" in main
+
+    assert 'require("./src/main/backend-lifecycle")' in main
+    assert "backendLifecycle.startBackend()" in main
+    assert '["models/", details.modelsDir]' in lifecycle
+    assert '["models/onnx/", details.onnxDir]' in lifecycle
+    assert "stale installed copy" in lifecycle
