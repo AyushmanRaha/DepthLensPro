@@ -14,19 +14,20 @@ function fmtBenchLatency(result) {
 function renderBenchmarkChart(data) {
   const results = data?.results || [];
   const values = results.map(r => Number(r?.latency_ms?.avg));
+  if (typeof Chart !== "function") return;
   const c = chartColors();
-  const ctx = $("#benchmarkChart")?.getContext("2d");
+  const ctx = $("#benchmarkChart")?.getContext?.("2d");
   if (!ctx) return;
   const labels = results.map(r => r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch");
   const dataValues = values.map(v => Number.isFinite(v) ? v : null);
-  if (state.observability.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update("none"); }
+  if (state.observability.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update?.("none"); }
   if (benchmarkChart) {
     benchmarkChart.data.labels = labels;
     benchmarkChart.data.datasets[0].data = dataValues;
     benchmarkChart.data.datasets[0].backgroundColor = dataValues.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
     benchmarkChart.data.datasets[0].borderColor = dataValues.map(v => v === null ? "#5e6f81" : c.barBrd);
     applyChartPalette(benchmarkChart, c);
-    benchmarkChart.update("none");
+    benchmarkChart.update?.("none");
     return;
   }
   benchmarkChart = new Chart(ctx, {
