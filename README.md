@@ -173,7 +173,9 @@ The backend provides `GET /metrics` for Prometheus exposition plus `GET /api/obs
 
 ### 1. Workspace — Generate Depth Maps
 
-![DepthLensPro Workspace — Depth Map Generation](docs/assets/screenshot-workspace.png)
+<p align="center">
+  <img src="docs/screenshots/workspace-generate-depth-maps.png" alt="Workspace — Generate Depth Maps" width="900">
+</p>
 
 The main workspace handles the complete image-processing flow:
 
@@ -200,6 +202,10 @@ The workspace also includes a live session dashboard:
 
 ### 2. Ground Truth Mode
 
+<p align="center">
+  <img src="docs/screenshots/ground-truth-mode.png" alt="Ground Truth Mode" width="900">
+</p>
+
 Ground Truth mode processes **one image and one depth label file** together, computing standard benchmark metrics with median-scale alignment.
 
 Supported GT formats:
@@ -223,7 +229,9 @@ Rules:
 
 ### 3. Webcam — Live Depth Streaming
 
-![DepthLensPro Webcam — Live Depth Streaming](docs/assets/screenshot-webcam.png)
+<p align="center">
+  <img src="docs/screenshots/webcam-live-depth-streaming.png" alt="Webcam — Live Depth Streaming" width="900">
+</p>
 
 The Webcam tab processes a live camera feed into repeated depth predictions.
 
@@ -252,7 +260,9 @@ The live view shows real-time backend latency, end-to-end latency (including bro
 
 ### 4. Compare — Run All Models on One Image
 
-![DepthLensPro Compare — Side-by-Side Model View](docs/assets/screenshot-compare.png)
+<p align="center">
+  <img src="docs/screenshots/compare-run-all-models.png" alt="Compare — Run All Models on One Image" width="900">
+</p>
 
 The Compare tab answers the practical question of which model is right for a scene:
 
@@ -270,7 +280,9 @@ The comparison view shows side-by-side depth previews, latency badges, and a swi
 
 ### 5. Performance — PyTorch vs ONNX Runtime
 
-![DepthLensPro Performance — Benchmark Dashboard](docs/assets/screenshot-performance.png)
+<p align="center">
+  <img src="docs/screenshots/performance-pytorch-vs-onnx.png" alt="Performance — PyTorch vs ONNX Runtime" width="900">
+</p>
 
 The Performance tab benchmarks the standard PyTorch path against optional ONNX Runtime execution using a synthetic 384×384 gradient frame (deterministic, no file upload needed).
 
@@ -290,6 +302,10 @@ ONNX weights are **not committed** to this repository and must be generated loca
 ---
 
 ### 6. Experiments — Reproducible Validation Runs
+
+<p align="center">
+  <img src="docs/screenshots/experiments-validation-runs.png" alt="Experiments — Reproducible Validation Runs" width="900">
+</p>
 
 The Experiments tab records structured results from the current workspace queue into named runs.
 
@@ -319,7 +335,9 @@ Exported fields include:
 
 ### 7. 3D Reconstruction
 
-![DepthLensPro 3D — Point Cloud Viewer](docs/assets/screenshot-3d-point-cloud.png)
+<p align="center">
+  <img src="docs/screenshots/3d-reconstruction.png" alt="3D Reconstruction" width="900">
+</p>
 
 The 3D tab converts a source image and its predicted depth into an approximate coloured point cloud using a pinhole camera projection model.
 
@@ -354,6 +372,10 @@ Available controls:
 ---
 
 ### 8. Guide — Offline In-App Reference
+
+<p align="center">
+  <img src="docs/screenshots/guide-offline-reference.png" alt="Guide — Offline In-App Reference" width="900">
+</p>
 
 The Guide tab provides a fully offline accordion reference covering the complete workflow, metric definitions, model trade-offs, 3D reconstruction parameters, and troubleshooting steps. It does not call the backend and works even when the inference engine is offline.
 
