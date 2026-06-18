@@ -1,13 +1,51 @@
 "use strict";
 
 // ══════════════════════════════════════════════════════════════
+// CHARTS
+// ══════════════════════════════════════════════════════════════
+let latencyChart = null;
+let compareChart = null;
+let benchmarkChart = null;
+
+const COMPARE_METRICS = [
+  { key:"latency_ms",    label:"Latency (ms)",        source:"root",    better:"lower",  fmt:(v)=>`${Math.round(v)} ms` },
+  { key:"ssim",          label:"SSIM",                source:"metrics", better:"higher", fmt:(v)=>Number(v).toFixed(3) },
+  { key:"silog",         label:"SILog",               source:"metrics", better:"lower",  fmt:(v)=>Number(v).toFixed(2) },
+  { key:"psnr",          label:"PSNR (dB)",           source:"metrics", better:"higher", fmt:(v)=>`${Number(v).toFixed(2)} dB` },
+  { key:"gradient_mean", label:"Gradient Mean",       source:"metrics", better:"higher", fmt:(v)=>Number(v).toFixed(3) },
+  { key:"edge_density",  label:"Edge Density",        source:"metrics", better:"higher", fmt:(v)=>`${(Number(v)*100).toFixed(1)}%` },
+  { key:"entropy",       label:"Entropy (bits)",      source:"metrics", better:"higher", fmt:(v)=>Number(v).toFixed(2) },
+  { key:"dynamic_range", label:"Dynamic Range (bits)",source:"metrics", better:"higher", fmt:(v)=>`${Number(v).toFixed(2)} bits` },
+];
+
+// ══════════════════════════════════════════════════════════════
 // BACKGROUND CANVAS (workspace)
 // ══════════════════════════════════════════════════════════════
-(function bgCanvas() {
-  const cv = el.bgCanvas, ctx = cv.getContext("2d");
+function safePrefersReducedMotion() {
+  try {
+    return typeof prefersReducedMotion === "function" ? prefersReducedMotion() : false;
+  } catch (err) {
+    console.warn("[DepthLens] Reduced motion preference unavailable; using animated canvas fallback", err);
+    return false;
+  }
+}
+
+(function startBackgroundCanvas() {
+  try {
+    bgCanvas();
+  } catch (err) {
+    console.warn("[DepthLens] Background canvas initialization skipped", err);
+  }
+})();
+
+function bgCanvas() {
+  const cv = el?.bgCanvas;
+  if (!cv?.getContext) return;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
   let W, H, pts = [];
   const N = 50;
-  const reduce = prefersReducedMotion();
+  const reduce = safePrefersReducedMotion();
   function accentRgb() {
     const c = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
     const m = c.match(/^#?([0-9a-f]{6})$/i);
@@ -54,23 +92,7 @@
   }
   window.addEventListener("resize",resize);
   reset(); draw();
-})();
-
-// ══════════════════════════════════════════════════════════════
-// CHARTS
-// ══════════════════════════════════════════════════════════════
-let latencyChart, compareChart, benchmarkChart;
-
-const COMPARE_METRICS = [
-  { key:"latency_ms",    label:"Latency (ms)",        source:"root",    better:"lower",  fmt:(v)=>`${Math.round(v)} ms` },
-  { key:"ssim",          label:"SSIM",                source:"metrics", better:"higher", fmt:(v)=>Number(v).toFixed(3) },
-  { key:"silog",         label:"SILog",               source:"metrics", better:"lower",  fmt:(v)=>Number(v).toFixed(2) },
-  { key:"psnr",          label:"PSNR (dB)",           source:"metrics", better:"higher", fmt:(v)=>`${Number(v).toFixed(2)} dB` },
-  { key:"gradient_mean", label:"Gradient Mean",       source:"metrics", better:"higher", fmt:(v)=>Number(v).toFixed(3) },
-  { key:"edge_density",  label:"Edge Density",        source:"metrics", better:"higher", fmt:(v)=>`${(Number(v)*100).toFixed(1)}%` },
-  { key:"entropy",       label:"Entropy (bits)",      source:"metrics", better:"higher", fmt:(v)=>Number(v).toFixed(2) },
-  { key:"dynamic_range", label:"Dynamic Range (bits)",source:"metrics", better:"higher", fmt:(v)=>`${Number(v).toFixed(2)} bits` },
-];
+}
 
 function chartColors() {
   const isDark = document.documentElement.getAttribute("data-theme") !== "light";
@@ -89,8 +111,12 @@ function chartColors() {
 }
 
 function initLatencyChart() {
+  if (typeof Chart !== "function") return null;
+  const canvas = $("#latencyChart");
+  const ctx = canvas?.getContext?.("2d");
+  if (!ctx) return null;
   const c = chartColors();
-  latencyChart = new Chart($("#latencyChart").getContext("2d"), {
+  latencyChart = new Chart(ctx, {
     type: "line",
     data: {
       labels: [],
@@ -123,6 +149,7 @@ function initLatencyChart() {
       },
     },
   });
+  return latencyChart;
 }
 
 function applyChartPalette(chart, c) {
@@ -155,10 +182,10 @@ function updateChartTheme() {
     latencyChart.update("none");
   }
 
-  if (compareChart && state.compareView.results.length) {
+  if (compareChart && state?.compareView?.results?.length) {
     renderCompareChart(state.compareView.results, state.compareView.metricKey, { preserveInstance: true });
   }
-  if (state.observability.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update("none"); }
+  if (state?.observability?.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update?.("none"); }
   if (benchmarkChart) {
     applyChartPalette(benchmarkChart, c);
     const ds = benchmarkChart.data?.datasets?.[0];
@@ -166,15 +193,17 @@ function updateChartTheme() {
       ds.backgroundColor = ds.data.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
       ds.borderColor = ds.data.map(v => v === null ? "#5e6f81" : c.barBrd);
     }
-    benchmarkChart.update("none");
+    benchmarkChart.update?.("none");
   }
 }
 
 function pushLatency(ms) {
+  if (!latencyChart && !initLatencyChart()) return;
   const d = state.session.latencies.slice(-20);
+  if (!latencyChart?.data?.datasets?.[0]) return;
   latencyChart.data.labels = d.map((_,i) => i+1);
   latencyChart.data.datasets[0].data = d;
-  latencyChart.update("none");
+  latencyChart.update?.("none");
 }
 
 function compareMetricValue(result, spec) {
@@ -216,9 +245,10 @@ function renderCompareChart(results, metricKey = state.compareView.metricKey, { 
     return Number.isFinite(v) ? v : null;
   });
   const labels = results.map(r => escText(r.model).replace("MiDaS_","").replace("DPT_","DPT "));
-  el.compareChartCard.hidden = false;
+  if (el.compareChartCard) el.compareChartCard.hidden = false;
+  if (typeof Chart !== "function") return;
   const c = chartColors();
-  const ctx = $("#compareChart")?.getContext("2d");
+  const ctx = $("#compareChart")?.getContext?.("2d");
   if (!ctx) return;
   if (compareChart && preserveInstance) {
     compareChart.data.labels = labels;
@@ -229,13 +259,13 @@ function renderCompareChart(results, metricKey = state.compareView.metricKey, { 
     compareChart.options.scales.y.ticks.callback = v => metric.fmt(v);
     compareChart.options.plugins.tooltip.callbacks.label = ctx => ctx.raw === null ? "Not available" : metric.fmt(ctx.raw);
     applyChartPalette(compareChart, c);
-    compareChart.update("none");
+    compareChart.update?.("none");
     return;
   }
   if (compareChart) {
     const oldChart = compareChart;
     compareChart = null;
-    oldChart.destroy();
+    oldChart.destroy?.();
   }
   compareChart = new Chart(ctx, {
     type: "bar",
@@ -275,6 +305,7 @@ function renderCompareChart(results, metricKey = state.compareView.metricKey, { 
 }
 
 function initCompareControls() {
+  if (!el.compareMetricSelect || !el.compareChartToggle || !el.compareChartBody) return;
   el.compareMetricSelect.innerHTML = COMPARE_METRICS.map(m =>
     `<option value="${m.key}">${m.label}</option>`
   ).join("");

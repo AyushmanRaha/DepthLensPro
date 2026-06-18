@@ -153,55 +153,69 @@ document.addEventListener("visibilitychange", () => {
 // ══════════════════════════════════════════════════════════════
 // INITIALIZATION
 // ══════════════════════════════════════════════════════════════
+function runOptionalInitializer(label, fn) {
+  try {
+    return fn?.();
+  } catch (err) {
+    console.warn(`[DepthLens] Optional initializer failed: ${label}`, err);
+    return undefined;
+  }
+}
+
 async function init() {
   if (el.appShell) el.appShell.classList.remove("ready");
   state.initializingBackend = true;
   loadPrefs();
   applySettings({ notify: false });
   setStatus("connecting", "Starting depth engine", DEFAULT_API_BASE_URL);
-  syncQueueControls();
-  initReconstructionPanel();
-  initSettingsPanel();
-  initScrollableNav();
-  initGuideAccordion();
-  bindPointerGlow(".logo-group", { tilt: 3 });
-  bindPointerGlow(".nav-btn", { tilt: 5 });
-  bindPointerGlow(".guide-section-toggle", { tilt: 3 });
-  bindPointerGlow(".guide-card, .guide-section", { tilt: 1.5 });
+
+  runOptionalInitializer("engine status panel", initEngineStatusPanel);
+  runOptionalInitializer("queue controls", syncQueueControls);
+  runOptionalInitializer("reconstruction panel", initReconstructionPanel);
+  runOptionalInitializer("settings panel", initSettingsPanel);
+  runOptionalInitializer("scrollable nav", initScrollableNav);
+  runOptionalInitializer("guide accordion", initGuideAccordion);
+  runOptionalInitializer("logo pointer glow", () => bindPointerGlow(".logo-group", { tilt: 3 }));
+  runOptionalInitializer("nav pointer glow", () => bindPointerGlow(".nav-btn", { tilt: 5 }));
+  runOptionalInitializer("guide toggle pointer glow", () => bindPointerGlow(".guide-section-toggle", { tilt: 3 }));
+  runOptionalInitializer("guide card pointer glow", () => bindPointerGlow(".guide-card, .guide-section", { tilt: 1.5 }));
+  runOptionalInitializer("latency chart", initLatencyChart);
+  runOptionalInitializer("compare controls", initCompareControls);
+  runOptionalInitializer("webcam controls", syncWebcamControls);
+  runOptionalInitializer("webcam telemetry", updateWebcamTelemetry);
+  runOptionalInitializer("saved panel", () => {
+    const savedPanel = settings.rememberLastTab ? (() => { try { return localStorage.getItem(LAST_TAB_KEY) || "main"; } catch { return "main"; } })() : "main";
+    switchPanel(savedPanel);
+  });
+  runOptionalInitializer("welcome state", () => {
+    if (settings.skipWelcome && el.welcomeScreen && el.appShell) {
+      el.welcomeScreen.hidden = true;
+      el.appShell.classList.add("ready");
+      el.themeToggleHeader?.appendChild(el.themeToggleBtn);
+      el.themeToggleBtn?.classList.add("visible");
+    }
+  });
+
   try {
     await resolveApiBaseUrl();
     if (!runningInElectron) toastOnce("Browser mode detected — start the depth engine manually for inference", "warning", 7000);
-    initLatencyChart();
-    initCompareControls();
-    initEngineStatusPanel();
-    syncWebcamControls();
-    updateWebcamTelemetry();
-    const savedPanel = settings.rememberLastTab ? (() => { try { return localStorage.getItem(LAST_TAB_KEY) || "main"; } catch { return "main"; } })() : "main";
-    switchPanel(savedPanel);
-    if (settings.skipWelcome && el.welcomeScreen && el.appShell) { el.welcomeScreen.hidden = true; el.appShell.classList.add("ready"); el.themeToggleHeader?.appendChild(el.themeToggleBtn); el.themeToggleBtn?.classList.add("visible"); }
-    if (settings.autoCheckEngine) {
-      await checkLive();
-      await checkReadiness({ quiet: false });
-    } else {
-      await checkLive({ quiet: true });
+    const live = settings.autoCheckEngine ? await checkLive() : await checkLive({ quiet: true });
+    if (live) {
+      await checkReadiness({ quiet: !settings.autoCheckEngine });
+      await checkDiagnostics({ quiet: true });
     }
-    state.initializingBackend = false;
-    syncQueueControls();
-    syncReconstructControls();
-    syncWebcamControls();
-    updateWebcamTelemetry();
-    startPollingLoops();
-    if (settings.autoCheckEngine) Promise.allSettled([checkDiagnostics({ quiet: true }), loadCacheMetrics()]);
   } catch (err) {
     backendOnline = false;
     setStatus("offline", "Depth engine offline", `Depth engine URL resolution failed · ${err.message}`);
     toast(`Depth engine initialization failed · ${err.message}`, "error", 6000);
   } finally {
     state.initializingBackend = false;
-    syncQueueControls();
-    syncReconstructControls();
-    syncWebcamControls();
-    updateWebcamTelemetry();
+    runOptionalInitializer("queue controls", syncQueueControls);
+    runOptionalInitializer("reconstruction controls", syncReconstructControls);
+    runOptionalInitializer("webcam controls", syncWebcamControls);
+    runOptionalInitializer("webcam telemetry", updateWebcamTelemetry);
+    startPollingLoops();
+    if (backendOnline) Promise.allSettled([checkDiagnostics({ quiet: true }), loadCacheMetrics()]);
   }
 }
 

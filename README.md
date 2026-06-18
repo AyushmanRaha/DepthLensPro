@@ -1384,6 +1384,12 @@ npm run backend:dev
 
 ---
 
+### Renderer Startup Initialization
+
+Renderer startup is dependency-ordered and failure-isolated in both packaged Electron installs and development runs. Foundational state helpers now load before chart/decorative scripts, and optional renderer initialization such as background canvas animation, Chart.js setup, Compare controls, pointer glow, guide accordion, and scroll navigation is isolated from backend startup. If a decorative or chart dependency is unavailable, the app should log a console warning while backend URL resolution, `/live`, `/ready`, `/health` diagnostics, device discovery, polling, and the Depth Engine status panel continue to initialize normally.
+
+---
+
 
 
 ### “Depth engine ready” but inference fails
