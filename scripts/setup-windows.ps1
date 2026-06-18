@@ -1,5 +1,8 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw "DepthLens setup requires Node.js on PATH as node. Install Node.js, then re-run: npm run setup:win" }
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "DepthLens setup requires npm on PATH. Install Node.js/npm, then re-run: npm run setup:win" }
 $candidates = @(@("py", "-3.12"), @("py", "-3.11"), @("py", "-3.10"), @("python"))
 $probeFailures = @()
 foreach ($candidate in $candidates) {

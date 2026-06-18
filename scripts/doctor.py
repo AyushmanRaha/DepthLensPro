@@ -17,8 +17,9 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -41,6 +42,10 @@ except ImportError:  # Runs before the venv exists; keep stdlib-only fallbacks i
     SUPPORTED_ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
     TORCH_CACHE_ROOT = ROOT / "models" / "torch-cache"
 ONNX_MODEL_IDS = SUPPORTED_ONNX_MODEL_IDS
+try:
+    from scripts.setup_state import write_setup_report
+except ImportError:
+    from setup_state import write_setup_report
 DETECTOR_TORCH_CACHE = TORCH_CACHE_ROOT
 MIDAS_TORCH_CACHE = DETECTOR_TORCH_CACHE
 
@@ -163,6 +168,29 @@ class CheckResult:
     version: tuple[int, int, int] | None = None
     executable: str | None = None
     error: str | None = None
+
+
+def remediation_command(kind: str, args: argparse.Namespace | None = None) -> str:
+    """Return an exact setup command users can retry after a failed setup step."""
+    platform_key = {"Darwin": "mac", "Linux": "linux", "Windows": "win"}.get(
+        platform.system(), "<platform>"
+    )
+    suffix = ":onnx" if args is not None and getattr(args, "with_onnx", False) else ""
+    if kind == "midas":
+        return f"npm run setup:{platform_key}{suffix}"
+    if kind == "onnx":
+        return f"npm run setup:{platform_key}:onnx"
+    return f"npm run setup:{platform_key}{suffix}"
+
+
+def onnx_verify_mode(args: argparse.Namespace, *, export_onnx: bool | None = None) -> str:
+    """Map setup arguments to verify-resources ONNX modes."""
+    if args.without_onnx:
+        return "off"
+    if args.with_onnx or args.onnx_validate_only or export_onnx:
+        models = parse_onnx_model_list(args.onnx_models)
+        return "require-all" if models == list(ONNX_MODEL_IDS) else "required"
+    return "optional"
 
 
 def _run(
@@ -381,7 +409,7 @@ def cert_env(py: Path) -> dict[str, str]:
     return env
 
 
-def setup(args: argparse.Namespace) -> dict[str, str]:
+def select_python(args: argparse.Namespace) -> tuple[list[str], CheckResult]:
     arch = platform.machine().lower()
     system = platform.system()
     if args.enforce_arch:
@@ -395,13 +423,7 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
                 f"Unsupported native app architecture {platform.machine()}. "
                 "Supported Windows/Linux native builds are arm64/aarch64 and x64/x86_64."
             )
-    total_steps = 8
-
-    def step(n: int, title: str):
-        print(f"\n[{n}/{total_steps}] {title}", flush=True)
-
-    step(1, "Selecting Python")
-    selected_cmd, selected, failures = find_python()
+    selected_cmd, selected, _failures = find_python()
     if selected.version and selected.version[:2] == (3, 10):
         print(f"WARNING: {PYTHON_310_WARNING}")
     if platform.system() == "Darwin" and "zsh" in os.environ.get("SHELL", ""):
@@ -409,105 +431,202 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
             "Tip: if pasting multi-line command blocks into Terminal causes "
             "'zsh: command not found: #', run: setopt interactivecomments"
         )
-    step(2, "Creating or validating venv")
+    return selected_cmd, selected
+
+
+def ensure_venv(selected_cmd: list[str]) -> Path:
     status = existing_venv_status()
     if status is None or not status.ok:
         recreate_venv(selected_cmd)
     else:
         version = ".".join(map(str, status.version or ()))
         print(f"Existing venv is valid: Python {version} at {status.executable}")
-    py = venv_python()
-    step(3, "Upgrading pip/setuptools/wheel/certifi")
-    _run(
-        [str(py), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "certifi"],
-        stream=True,
-    )
-    env = cert_env(py)
-    step(4, "Installing backend dependencies")
-    if not args.doctor_only:
+    return venv_python()
+
+
+def upgrade_python_tooling(py: Path, args: argparse.Namespace) -> dict[str, str]:
+    try:
         _run(
-            [str(py), "-m", "pip", "install", "-r", str(ROOT / "backend" / "requirements.txt")],
-            env=env,
+            [
+                str(py),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pip",
+                "setuptools",
+                "wheel",
+                "certifi",
+            ],
             stream=True,
         )
-    else:
-        print("SKIPPED backend dependency install (--doctor-only)")
-    pip_check = _run([str(py), "-m", "pip", "check"], check=False, env=env)
-    if pip_check.returncode != 0:
-        raise SystemExit(pip_check.stdout)
-    step(5, "Installing Electron dependencies")
-    if not args.doctor_only:
-        _run(["npm", "install"], cwd=ROOT / "electron-app", stream=True)
-    else:
+        return cert_env(py)
+    except subprocess.CalledProcessError as exc:
+        print(f"Retry/remediation command: {remediation_command('pip', args)}", file=sys.stderr)
+        raise SystemExit(
+            f"Python tooling upgrade failed. Re-run: {remediation_command('pip', args)}"
+        ) from exc
+
+
+def install_python_dependencies(py: Path, env: dict[str, str], args: argparse.Namespace) -> None:
+    try:
+        if not args.doctor_only:
+            _run(
+                [
+                    str(py),
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    str(ROOT / "backend" / "requirements.txt"),
+                ],
+                env=env,
+                stream=True,
+            )
+        else:
+            print("SKIPPED backend dependency install (--doctor-only)")
+        pip_check = _run([str(py), "-m", "pip", "check"], check=False, env=env)
+        if pip_check.returncode != 0:
+            raise SystemExit(pip_check.stdout)
+    except subprocess.CalledProcessError as exc:
+        print(f"Retry/remediation command: {remediation_command('pip', args)}", file=sys.stderr)
+        raise SystemExit(
+            f"Python dependency installation failed. Re-run: {remediation_command('pip', args)}"
+        ) from exc
+
+
+def install_electron_dependencies(args: argparse.Namespace) -> None:
+    if args.doctor_only:
         print("SKIPPED Electron dependency install (--doctor-only)")
+        return
+    try:
+        _run(["npm", "install"], cwd=ROOT / "electron-app", stream=True)
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        print(f"Retry/remediation command: {remediation_command('npm', args)}", file=sys.stderr)
+        raise SystemExit(
+            f"Electron dependency installation failed. Re-run: {remediation_command('npm', args)}"
+        ) from exc
+
+
+def ensure_model_dirs() -> None:
     DETECTOR_TORCH_CACHE.mkdir(parents=True, exist_ok=True)
     (ROOT / "models" / "onnx").mkdir(parents=True, exist_ok=True)
     for keep in [ROOT / "models" / ".gitkeep", ROOT / "models" / "onnx" / ".gitkeep"]:
         if not keep.exists():
             keep.touch()
     print("Ensured models/onnx and models/torch-cache directory structure.")
-    step(6, "Caching PyTorch MiDaS assets")
-    if not args.doctor_only:
-        midas_env = env.copy()
-        midas_env.pop("DEPTHLENS_DISABLE_MODEL_DOWNLOADS", None)
-        midas_env["TORCH_HOME"] = str(MIDAS_TORCH_CACHE)
-        midas_cmd = [
-            str(py),
-            str(ROOT / "scripts" / "prefetch-midas-assets.py"),
-            "--models",
-            args.models,
-            "--timeout-seconds",
-            str(args.timeout_seconds),
-            "--retries",
-            str(args.retries),
-        ]
-        if args.offline:
-            midas_cmd.append("--offline")
-        _run(midas_cmd, env=midas_env, stream=True)
-        print("OK PyTorch MiDaS assets cached/verified.")
-    else:
+
+
+def cache_midas_assets(py: Path, env: dict[str, str], args: argparse.Namespace) -> str:
+    if args.doctor_only:
         print("SKIPPED MiDaS asset caching (--doctor-only)")
+        return "skipped"
+    if args.offline:
+        print("Offline mode: validating PyTorch MiDaS cache only; no downloads will be attempted.")
+    midas_env = env.copy()
+    midas_env.pop("DEPTHLENS_DISABLE_MODEL_DOWNLOADS", None)
+    midas_env["TORCH_HOME"] = str(MIDAS_TORCH_CACHE)
+    midas_cmd = [
+        str(py),
+        str(ROOT / "scripts" / "prefetch-midas-assets.py"),
+        "--models",
+        args.models,
+        "--timeout-seconds",
+        str(args.timeout_seconds),
+        "--retries",
+        str(args.retries),
+    ]
+    if args.offline:
+        midas_cmd.append("--offline")
+    try:
+        _run(midas_cmd, env=midas_env, stream=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"Retry/remediation command: {remediation_command('midas', args)}", file=sys.stderr)
+        raise SystemExit(
+            f"PyTorch MiDaS asset caching failed. Re-run: {remediation_command('midas', args)}"
+        ) from exc
+    print("OK PyTorch MiDaS assets cached/verified.")
+    return "ok"
+
+
+def cache_detector_assets(py: Path, env: dict[str, str], args: argparse.Namespace) -> str:
     if should_prefetch_detector_weights(args):
         try:
             prefetch_detector_weights(py, env)
+            return "ok"
         except subprocess.CalledProcessError as exc:
+            cmd = remediation_command("detector", args)
             raise SystemExit(
-                "RGB detector weights could not be cached. Re-run setup with network "
-                "access, or pass --without-detector-weights to skip RGB object detection "
-                "support."
+                "RGB detector weights could not be cached. Re-run setup with network access "
+                f"using `{cmd}`, or pass --without-detector-weights to skip "
+                "RGB object detection support."
             ) from exc
-    else:
-        print("WARNING: RGB Camera detection may fail until detector weights are cached.")
-    step(7, "Handling optional ONNX assets")
+    print("WARNING: RGB Camera detection may fail until detector weights are cached.")
+    return "skipped"
+
+
+def handle_onnx_assets(py: Path, env: dict[str, str], args: argparse.Namespace) -> bool:
     export_onnx = should_export_onnx(args)
     if export_onnx:
-        _run(onnx_export_command(py, args), env=env, stream=True)
+        if args.onnx_validate_only:
+            print("ONNX validation-only mode: validating requested files without exporting.")
+        try:
+            _run(onnx_export_command(py, args), env=env, stream=True)
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"Retry/remediation command: {remediation_command('onnx', args)}", file=sys.stderr
+            )
+            raise SystemExit(
+                f"ONNX asset handling failed. Re-run: {remediation_command('onnx', args)}"
+            ) from exc
     else:
         print(
-            "SKIPPED ONNX export intentionally; PyTorch MiDaS cache is required and "
-            "ONNX remains optional for standard builds."
+            "SKIPPED ONNX export intentionally; PyTorch MiDaS cache is required "
+            "and ONNX remains optional for standard builds."
         )
-    step(8, "Verifying resources")
-    resources = _run(
-        [
-            "node",
-            "scripts/verify-resources.js",
-            "--root-kind",
-            "repo",
-            "--mode",
-            "native",
-            "--torch-cache",
-            "required",
-            "--onnx",
-            "require-all" if export_onnx else "optional",
-            "--models",
-            "all" if export_onnx else "midas_small",
-            "..",
-        ],
-        cwd=ROOT / "electron-app",
-        check=False,
-        stream=True,
-    )
+    return export_onnx
+
+
+def verify_resources(
+    py: Path, env: dict[str, str], args: argparse.Namespace, export_onnx: bool
+) -> tuple[subprocess.CompletedProcess[str], str, str, str]:
+    mode = onnx_verify_mode(args, export_onnx=export_onnx)
+    models = "all" if mode == "require-all" else args.onnx_models
+    cmd = [
+        "node",
+        "scripts/verify-resources.js",
+        "--root-kind",
+        "repo",
+        "--mode",
+        "native",
+        "--torch-cache",
+        "required",
+        "--onnx",
+        mode,
+        "--models",
+        models,
+        "..",
+    ]
+    resources = _run(cmd, cwd=ROOT / "electron-app", check=False, stream=True)
+    verify_command = "cd electron-app && " + " ".join(cmd)
+    if resources.returncode != 0:
+        raise SystemExit(
+            "Resource verification failed. Re-run setup with "
+            f"`{remediation_command('verify', args)}` then retry `{verify_command}`."
+        )
+    return resources, verify_command, mode, models
+
+
+def build_setup_report(
+    py: Path,
+    env: dict[str, str],
+    selected_cmd: list[str],
+    selected: CheckResult,
+    verify_command: str,
+    mode: str,
+    midas_status: str,
+    detector_status: str,
+) -> dict[str, Any]:
     node_v = (
         _run(["node", "--version"], check=False).stdout.strip()
         if shutil.which("node")
@@ -529,27 +648,56 @@ def setup(args: argparse.Namespace) -> dict[str, str]:
         check=False,
         env={**env, "PYTHONPATH": str(ROOT)},
     )
-    summary = {
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "platform": platform.system(),
         "arch": platform.machine(),
         "selected_python": selected.executable or " ".join(selected_cmd),
         "python_version": ".".join(map(str, selected.version or ())),
+        "venv_path": str(VENV),
         "venv_python": str(py),
         "pip_version": _run([str(py), "-m", "pip", "--version"], check=False).stdout.strip(),
         "node_version": node_v,
         "npm_version": npm_v,
-        "backend_dependency_status": "ok",
-        "resource_verification_status": "ok" if resources.returncode == 0 else "failed",
-        "onnx_status_summary": "ok" if onnx.returncode == 0 else "unavailable/degraded",
+        "torch_cache_status": midas_status,
+        "detector_cache_status": detector_status,
+        "onnx_status": "ok" if onnx.returncode == 0 else "unavailable/degraded",
+        "onnx_verify_mode": mode,
+        "verification_command": verify_command,
     }
+
+
+def setup(args: argparse.Namespace) -> dict[str, Any]:
+    total_steps = 8
+
+    def step(n: int, title: str) -> None:
+        print(f"\n[{n}/{total_steps}] {title}", flush=True)
+
+    step(1, "Selecting Python")
+    selected_cmd, selected = select_python(args)
+    step(2, "Creating or validating venv")
+    py = ensure_venv(selected_cmd)
+    step(3, "Upgrading pip/setuptools/wheel/certifi")
+    env = upgrade_python_tooling(py, args)
+    step(4, "Installing backend dependencies")
+    install_python_dependencies(py, env, args)
+    step(5, "Installing Electron dependencies")
+    install_electron_dependencies(args)
+    ensure_model_dirs()
+    step(6, "Caching PyTorch MiDaS assets")
+    midas_status = cache_midas_assets(py, env, args)
+    detector_status = cache_detector_assets(py, env, args)
+    step(7, "Handling optional ONNX assets")
+    export_onnx = handle_onnx_assets(py, env, args)
+    step(8, "Verifying resources")
+    _resources, verify_command, mode, _models = verify_resources(py, env, args, export_onnx)
+    summary = build_setup_report(
+        py, env, selected_cmd, selected, verify_command, mode, midas_status, detector_status
+    )
+    report_path = write_setup_report(summary)
+    print(f"Wrote setup report: {report_path.relative_to(ROOT)}")
     print("\nDepthLens Pro environment summary")
     print(json.dumps(summary, indent=2))
-    if resources.returncode != 0:
-        raise SystemExit(
-            "Resource verification failed. Run the printed verify-resources command after "
-            "completing setup; for standard builds run npm run setup:<platform>, for ONNX "
-            "builds run npm run setup:<platform>:onnx."
-        )
     return summary
 
 
