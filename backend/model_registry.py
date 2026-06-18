@@ -7,6 +7,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from backend.constants import SUPPORTED_ONNX_MODEL_IDS
+from backend.core import paths
+
 
 class UnknownModelError(ValueError):
     """Raised when a model identifier cannot be normalized to a supported model."""
@@ -38,13 +41,11 @@ class ModelSpec:
         return payload
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_DIR = REPO_ROOT / "models"
-DEFAULT_ONNX_DIR = DEFAULT_MODEL_DIR / "onnx"
-LEGACY_ONNX_DIR = Path(__file__).resolve().parent / "onnx_weights"
-USER_CACHE_ONNX_DIR = (
-    Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")) / "DepthLensPro" / "onnx"
-)
+REPO_ROOT = paths.REPO_ROOT
+DEFAULT_MODEL_DIR = paths.MODEL_ROOT
+DEFAULT_ONNX_DIR = paths.ONNX_ROOT
+LEGACY_ONNX_DIR = paths.LEGACY_ONNX_ROOT
+USER_CACHE_ONNX_DIR = paths.user_cache_onnx_root()
 
 MODEL_REGISTRY: dict[str, ModelSpec] = {
     "midas_small": ModelSpec(
@@ -87,6 +88,8 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         notes="Largest supported model; ONNX export is optional and may fail on some runtimes.",
     ),
 }
+
+assert tuple(MODEL_REGISTRY) == SUPPORTED_ONNX_MODEL_IDS
 
 _ALIASES: dict[str, str] = {}
 for canonical, spec in MODEL_REGISTRY.items():
@@ -141,16 +144,7 @@ def supported_models_legacy_payload() -> dict[str, dict[str, str]]:
 def _candidate_dirs(output_dir: str | os.PathLike[str] | None = None) -> list[tuple[str, Path]]:
     """Return deterministic ONNX search/write directories in priority order."""
 
-    if output_dir:
-        return [("explicit", Path(output_dir).expanduser())]
-    if os.getenv("DEPTHLENSPRO_MODEL_DIR"):
-        base = Path(os.environ["DEPTHLENSPRO_MODEL_DIR"]).expanduser()
-        return [("env_model_dir", base / "onnx"), ("env_model_dir_legacy", base)]
-    if os.getenv("DEPTHLENS_ONNX_DIR"):
-        return [("env_onnx_dir", Path(os.environ["DEPTHLENS_ONNX_DIR"]).expanduser())]
-    if os.getenv("ONNX_WEIGHTS_DIR"):
-        return [("env_weights_dir", Path(os.environ["ONNX_WEIGHTS_DIR"]).expanduser())]
-    return [("repo", DEFAULT_ONNX_DIR), ("legacy", LEGACY_ONNX_DIR), ("cache", USER_CACHE_ONNX_DIR)]
+    return paths.onnx_candidate_dirs(output_dir)
 
 
 def _path_payload(

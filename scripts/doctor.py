@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 VENV = ROOT / "venv"
 MIN_VERSION = (3, 10)
 MAX_VERSION = (3, 12)
@@ -31,8 +33,15 @@ PYTHON_310_WARNING = (
     "python.org and re-run."
 )
 SUPPORTED_ARCHES = {"arm64", "aarch64", "x86_64", "amd64"}
-ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
-DETECTOR_TORCH_CACHE = ROOT / "models" / "torch-cache"
+
+try:
+    from backend.constants import SUPPORTED_ONNX_MODEL_IDS
+    from backend.core.paths import TORCH_CACHE_ROOT
+except ImportError:  # Runs before the venv exists; keep stdlib-only fallbacks in sync.
+    SUPPORTED_ONNX_MODEL_IDS = ("midas_small", "dpt_hybrid", "dpt_large")
+    TORCH_CACHE_ROOT = ROOT / "models" / "torch-cache"
+ONNX_MODEL_IDS = SUPPORTED_ONNX_MODEL_IDS
+DETECTOR_TORCH_CACHE = TORCH_CACHE_ROOT
 MIDAS_TORCH_CACHE = DETECTOR_TORCH_CACHE
 
 
