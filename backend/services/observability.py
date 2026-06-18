@@ -20,33 +20,25 @@ from typing import Any, Iterator, cast
 from backend.config import settings
 
 try:  # graceful optional dependency path
-    from prometheus_client import (
-        CollectorRegistry as _CollectorRegistry,
-    )
-    from prometheus_client import (
-        Counter as _PromCounter,
-    )
-    from prometheus_client import (
-        Gauge as _Gauge,
-    )
-    from prometheus_client import (
-        Histogram as _Histogram,
-    )
-    from prometheus_client import (
-        generate_latest as _generate_latest,
-    )
+    import prometheus_client as _prometheus_client
 except Exception:  # pragma: no cover - exercised by partial installs
-    _CollectorRegistry = None
-    _PromCounter = None
-    _Gauge = None
-    _Histogram = None
-    _generate_latest = None
+    _prometheus_client = None
 
-CollectorRegistry: Any = _CollectorRegistry
-PromCounter: Any = _PromCounter
-Gauge: Any = _Gauge
-Histogram: Any = _Histogram
-generate_latest: Any = _generate_latest
+CollectorRegistry: Any = (
+    getattr(_prometheus_client, "CollectorRegistry", None)
+    if _prometheus_client is not None
+    else None
+)
+PromCounter: Any = (
+    getattr(_prometheus_client, "Counter", None) if _prometheus_client is not None else None
+)
+Gauge: Any = getattr(_prometheus_client, "Gauge", None) if _prometheus_client is not None else None
+Histogram: Any = (
+    getattr(_prometheus_client, "Histogram", None) if _prometheus_client is not None else None
+)
+generate_latest: Any = (
+    getattr(_prometheus_client, "generate_latest", None) if _prometheus_client is not None else None
+)
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
 _LOCK = threading.RLock()

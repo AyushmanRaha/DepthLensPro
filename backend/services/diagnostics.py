@@ -24,10 +24,23 @@ def _module_check(name: str, *, required: bool) -> dict[str, Any]:
     try:
         spec = importlib.util.find_spec(name)
     except ValueError as exc:
+        try:
+            module = importlib.import_module(name)
+        except Exception:
+            result.update(
+                {
+                    "status": "missing_required" if required else "missing_optional",
+                    "error": f"Python module {name!r} is unavailable: {exc}",
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
+            return result
         result.update(
             {
-                "status": "missing_required" if required else "missing_optional",
-                "error": f"Python module {name!r} is unavailable: {exc}",
+                "status": "ok",
+                "available": True,
+                "version": getattr(module, "__version__", None),
+                "origin": getattr(getattr(module, "__spec__", None), "origin", None),
                 "duration_ms": round((time.perf_counter() - started) * 1000, 2),
             }
         )
