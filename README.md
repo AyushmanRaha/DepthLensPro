@@ -28,6 +28,13 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 
 ---
 
+
+## Refactor Safety Contract
+
+DepthLens Pro now tracks a behavior-preservation baseline for internal refactor phases. See [`docs/refactor-contract.md`](docs/refactor-contract.md) for the public API, UI, install/build, platform, and allowed-file-change contract, and [`docs/refactor-test-matrix.md`](docs/refactor-test-matrix.md) for the required phase-gate commands.
+
+The existing native installation workflow remains the public workflow for both standard and ONNX builds: **clone → setup → build → launch**. Subsequent internal refactors must preserve all public setup, build, launch, resource verification, and ONNX verification commands.
+
 ## Table of Contents
 
 | Section | What it covers |
