@@ -1,6 +1,6 @@
 {
   "name": "depthlens-pro",
-  "version": "4.0.0",
+  "version": "1.0.0",
   "description": "AI-Powered 2D to 3D Depth Map Generation",
   "main": "main.js",
   "scripts": {

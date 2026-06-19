@@ -21,7 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.live import router as live_router
+from backend.api.live import SERVICE_VERSION, router as live_router
 from backend.api.routes import router
 from backend.config import settings
 from backend.services import observability
@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             log.warning("Cache cleanup degraded: %s", exc)
 
 
-app = FastAPI(title="DepthLens Pro API", version="3.1.0", debug=settings.DEBUG, lifespan=lifespan)
+app = FastAPI(title="DepthLens Pro API", version=SERVICE_VERSION, debug=settings.DEBUG, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

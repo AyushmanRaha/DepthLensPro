@@ -15,7 +15,7 @@ from fastapi import APIRouter
 log = logging.getLogger("depthlens")
 router = APIRouter()
 
-SERVICE_VERSION = "3.1.0"
+SERVICE_VERSION = "1.0.0"
 _SERVICE_STARTED_AT = time.time()
 _FIRST_LIVE_REQUEST_LOGGED = False
 
