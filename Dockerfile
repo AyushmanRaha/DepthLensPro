@@ -21,9 +21,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /build
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --upgrade pip wheel setuptools \
-    && pip wheel --wheel-dir /tmp/wheels -r requirements.txt \
-    && pip install --no-index --find-links=/tmp/wheels -r requirements.txt
+RUN pip install --disable-pip-version-check --requirement requirements.txt \
+    && pip wheel --wheel-dir /tmp/wheels --requirement requirements.txt \
+    && pip install --no-index --find-links=/tmp/wheels --requirement requirements.txt
 
 FROM python:3.12-slim AS runner
 
