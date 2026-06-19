@@ -172,16 +172,14 @@ Detailed platform setup, native builds, ONNX flows, backend-only usage, and Dock
 
 ## Supported Platforms
 
-| Platform | Support |
-|---|---|
-| macOS Apple Silicon `arm64` | Supported |
-| macOS `x64` / universal | Unsupported by the current native target scripts |
-| Windows `arm64` | Supported |
-| Windows `x64` | Supported |
-| Linux `arm64` | Supported |
-| Linux `x64` | Supported |
+| Platform | Support | Build notes |
+|---|---|---|
+| macOS Apple Silicon only (`arm64`) | Supported | `npm run build:mac` produces `dist/mac-arm64/DepthLens Pro.app`. |
+| Intel Mac / macOS x64 | Unsupported by the current native target scripts | The guard script exits with an actionable unsupported-architecture message. |
+| Windows arm64 and x64 | Supported | `npm run build:win` builds both Windows targets after resource verification. |
+| Linux arm64 and x64 | Supported | `npm run build:linux` builds both Linux targets after resource verification. |
 
-See [`docs/installation.md`](docs/installation.md) for exact setup, build, launch, standard, and ONNX commands.
+See [`docs/installation.md`](docs/installation.md) for exact setup, build, launch, standard, and ONNX commands. The public helper scripts include `scripts/setup-macos.sh`, `scripts/build-native-macos.sh`, and their Linux/Windows counterparts; packaged outputs are checked by `verify-packaged-resources.js`.
 
 ---
 
