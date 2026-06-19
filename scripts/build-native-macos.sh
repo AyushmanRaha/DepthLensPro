@@ -9,6 +9,8 @@ if [[ "$AUTO_SETUP" == 1 ]]; then echo "[DepthLens] --auto-setup requested; runn
 echo "[DepthLens] Verifying repo resources before packaging (no downloads)."
 (cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS" ..) || { echo "Run npm run setup:mac (standard) or npm run setup:mac:onnx (ONNX) first." >&2; exit 1; }
 (cd electron-app && npm run clean:dist)
+echo "[DepthLens] Running packaging size preflight."
+(cd electron-app && node scripts/package-size-preflight.js --platform darwin --arch "$ARCH" --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS")
 echo "[DepthLens] Packaging macOS arm64..."; (cd electron-app && npm run build:mac:arm64:raw)
 echo "[DepthLens] Verifying packaged macOS arm64 resources..."; (cd electron-app && node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS")
 echo "[DepthLens] SUCCESS macOS arm64 build. Outputs under electron-app/dist"

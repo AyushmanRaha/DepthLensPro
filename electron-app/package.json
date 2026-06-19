@@ -30,7 +30,7 @@
     "clean:spotlight": "node scripts/clean-spotlight.js",
     "reinstall:mac": "node scripts/reinstall-mac.js",
     "backend:ready": "node -e \"fetch('http://127.0.0.1:8765/ready').then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(j=>console.log(JSON.stringify(j,null,2))).catch(e=>{console.error(e);process.exit(1)})\"",
-    "test": "node test-security-policy.js && node test-verify-resources.js && node test-platform-targets.js && node test-persistence-schema.js && node test-refactor-contract.js && node test-main-modules.js && node test-frontend-contract.js",
+    "test": "node test-security-policy.js && node test-verify-resources.js && node test-platform-targets.js && node test-package-size-preflight.js && node test-persistence-schema.js && node test-refactor-contract.js && node test-main-modules.js && node test-frontend-contract.js",
     "doctor": "cd .. && python3 scripts/doctor.py --doctor-only",
     "setup": "cd .. && python3 scripts/doctor.py",
     "setup:mac": "cd .. && scripts/setup-macos.sh",
@@ -42,13 +42,14 @@
     "verify:packaged:mac": "node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --onnx optional",
     "verify:packaged:win": "node scripts/verify-packaged-resources.js --platform win32 --arch arm64 --mode native --onnx optional",
     "verify:packaged:linux": "node scripts/verify-packaged-resources.js --platform linux --arch arm64 --mode native --onnx optional",
-    "build:mac:arm64:raw": "electron-builder --mac dmg --arm64",
-    "build:win:arm64:raw": "electron-builder --win nsis --arm64",
-    "build:linux:arm64:raw": "electron-builder --linux AppImage --arm64",
+    "build:mac:arm64:raw": "node scripts/run-electron-builder.js --mac dmg --arm64",
+    "build:win:arm64:raw": "node scripts/run-electron-builder.js --win nsis --arm64",
+    "build:linux:arm64:raw": "node scripts/run-electron-builder.js --linux AppImage --arm64",
     "verify:packaged:win:x64": "node scripts/verify-packaged-resources.js --platform win32 --arch x64 --mode native --onnx optional",
     "verify:packaged:linux:x64": "node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --onnx optional",
-    "build:win:x64:raw": "electron-builder --win nsis --x64",
-    "build:linux:x64:raw": "electron-builder --linux AppImage --x64"
+    "build:win:x64:raw": "node scripts/run-electron-builder.js --win nsis --x64",
+    "build:linux:x64:raw": "node scripts/run-electron-builder.js --linux AppImage --x64",
+    "preflight:package": "node scripts/package-size-preflight.js"
   },
   "build": {
     "forceCodeSigning": false,
@@ -88,7 +89,14 @@
       "main.js",
       "preload.js",
       "src/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "!**/*.map",
+      "!**/.DS_Store",
+      "!**/*.log",
+      "!**/*.tmp",
+      "!**/.pytest_cache/**",
+      "!**/.mypy_cache/**",
+      "!**/.ruff_cache/**"
     ],
     "extraResources": [
       {
@@ -97,7 +105,16 @@
         "filter": [
           "**/*",
           "!__pycache__/**",
-          "!*.pyc"
+          "!*.pyc",
+          "!**/*.pyo",
+          "!**/*.log",
+          "!**/*.tmp",
+          "!**/*.temp",
+          "!**/.pytest_cache/**",
+          "!**/.mypy_cache/**",
+          "!**/.ruff_cache/**",
+          "!**/.git/**",
+          "!**/*.map"
         ]
       },
       {
@@ -106,12 +123,33 @@
         "filter": [
           "**/*",
           "!__pycache__/**",
-          "!*.pyc"
+          "!*.pyc",
+          "!**/*.pyo",
+          "!**/*.log",
+          "!**/*.tmp",
+          "!**/*.temp",
+          "!**/.pytest_cache/**",
+          "!**/.mypy_cache/**",
+          "!**/.ruff_cache/**",
+          "!**/.git/**",
+          "!**/*.map"
         ]
       },
       {
         "from": "../frontend",
-        "to": "frontend"
+        "to": "frontend",
+        "filter": [
+          "**/*",
+          "!**/*.pyo",
+          "!**/*.log",
+          "!**/*.tmp",
+          "!**/*.temp",
+          "!**/.pytest_cache/**",
+          "!**/.mypy_cache/**",
+          "!**/.ruff_cache/**",
+          "!**/.git/**",
+          "!**/*.map"
+        ]
       },
       {
         "from": "../models",
@@ -121,7 +159,16 @@
           "**/.*",
           "!**/.DS_Store",
           "!**/__pycache__/**",
-          "!**/*.pyc"
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!**/*.log",
+          "!**/*.tmp",
+          "!**/*.temp",
+          "!**/.pytest_cache/**",
+          "!**/.mypy_cache/**",
+          "!**/.ruff_cache/**",
+          "!**/.git/**",
+          "!**/*.map"
         ]
       }
     ],
