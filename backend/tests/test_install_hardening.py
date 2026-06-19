@@ -63,12 +63,6 @@ def test_direct_electron_builds_verify_packaged_resources() -> None:
     assert "verify:packaged:linux" in scripts["build:linux:arm64"]
 
 
-def test_readme_mentions_setup_scripts() -> None:
-    readme = Path("README.md").read_text(encoding="utf-8")
-    assert "scripts/setup-macos.sh" in readme
-    assert "scripts/build-native-macos.sh" in readme
-
-
 def test_setup_report_helper_shape(tmp_path: Path) -> None:
     from scripts.setup_state import write_setup_report
 

@@ -33,15 +33,20 @@ Existing packaged Electron flows that run from the `backend/` directory can cont
 uvicorn app:app --host 127.0.0.1 --port 8765
 ```
 
-## Validation before opening a pull request
+## CI policy and validation before opening a pull request
 
-Run the same checks used by CI:
+`ci-passed` is the only required branch-protection check. PR CI is dynamic: docs-only PRs run docs/policy checks only, backend changes run `backend-quality`, Electron/frontend changes run `electron-contract`, and workflow/tooling changes run `workflow-policy` plus the relevant checks. Pushes to `main` and manual `workflow_dispatch` runs are conservative/full.
+
+Docker support remains in the repository, but Docker builds are currently optional/manual and not part of required CI because Docker is not an active deployment path right now. Docker CI can be reintroduced later as a separate optional/manual workflow if Docker becomes active again.
+
+Run the same local entry points used by CI:
 
 ```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
+scripts/ci.sh workflow-policy
+scripts/ci.sh docs-contract
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh all
 ```
 
 ## Pull request guidelines

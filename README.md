@@ -1891,17 +1891,28 @@ pytest backend/tests/test_routes.py -v
 cd electron-app && npm test
 ```
 
-### CI Pipeline
+### CI Policy
 
-GitHub Actions runs on pushes and pull requests to `main` or `master`:
+`ci-passed` is the only required branch-protection check. It always appears, summarizes the dynamic jobs, and fails when a required job failed, was cancelled, or was skipped unexpectedly. PR CI is intentionally dynamic so ordinary documentation and Codex-created branches do not run unnecessary expensive checks.
 
+- Docs-only PRs run the fast docs/policy contract checks only.
+- Backend changes run `backend-quality`.
+- Electron or frontend changes run `electron-contract`.
+- Workflow/tooling changes run `workflow-policy` and the relevant contract checks.
+- Pushes to `main` and manual `workflow_dispatch` runs are conservative/full CI runs.
+- Docker support files remain in the repo, but Docker builds are currently optional/manual and intentionally removed from required CI because Docker is not an active deployment path right now. Docker CI can be reintroduced later as a separate optional/manual workflow if Docker becomes active again.
+
+Local CI entry points:
+
+```bash
+scripts/ci.sh workflow-policy
+scripts/ci.sh docs-contract
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh all
 ```
-Checkout → Python 3.12 setup → Install backend deps
-  → Black check → Ruff check → mypy backend/
-    → pytest → Electron lightweight tests
-```
 
-The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, or real model weights.
+The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, Docker daemon, or real model weights.
 
 #### What the Tests Stub
 
