@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640" role="img" aria-labelledby="title desc">
+  <title id="title">DepthLens Pro local-first system architecture</title>
+  <desc id="desc">Layered flow from user to Electron desktop app, localhost FastAPI backend, inference runtime, and local outputs and storage. All processing stays on the local machine.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .card { fill: #ffffff; stroke: #1e293b; stroke-width: 2; rx: 18; }
+      .local { fill: #ecfeff; stroke: #0891b2; stroke-width: 2; rx: 22; }
+      .title { font: 700 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .label { font: 700 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .small { font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334155; }
+      .note { font: 700 15px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0e7490; }
+      .arrow { stroke: #2563eb; stroke-width: 3; fill: none; marker-end: url(#arrowhead); }
+      .dashed { stroke: #0891b2; stroke-width: 2; stroke-dasharray: 8 6; fill: none; }
+    </style>
+    <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2563eb" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1100" height="640" />
+  <rect class="local" x="35" y="28" width="1030" height="580" />
+  <text class="title" x="55" y="62">DepthLens Pro local-first architecture</text>
+  <text class="note" x="760" y="62">All inference, cache, files, and exports stay on localhost</text>
+
+  <rect class="card" x="475" y="88" width="150" height="56" />
+  <text class="label" x="520" y="122">User</text>
+
+  <path class="arrow" d="M550 146 V176" />
+
+  <rect class="card" x="90" y="178" width="920" height="104" />
+  <text class="label" x="120" y="211">Electron Desktop App</text>
+  <text class="small" x="120" y="240">Renderer UI</text>
+  <text class="small" x="390" y="240">Preload Bridge</text>
+  <text class="small" x="660" y="240">Main Process</text>
+
+  <path class="arrow" d="M550 284 V326" />
+  <text class="small" x="575" y="310">localhost HTTP</text>
+
+  <rect class="card" x="90" y="328" width="920" height="104" />
+  <text class="label" x="120" y="361">FastAPI Backend</text>
+  <text class="small" x="120" y="390">/estimate</text>
+  <text class="small" x="335" y="390">/batch</text>
+  <text class="small" x="535" y="390">/benchmark</text>
+  <text class="small" x="765" y="390">/reconstruct</text>
+
+  <path class="arrow" d="M550 434 V476" />
+
+  <rect class="card" x="90" y="478" width="435" height="104" />
+  <text class="label" x="120" y="511">Inference Runtime</text>
+  <text class="small" x="120" y="540">PyTorch Torch Hub MiDaS/DPT</text>
+  <text class="small" x="120" y="562">ONNX Runtime optional path</text>
+  <text class="small" x="315" y="540">Ground truth evaluator</text>
+  <text class="small" x="315" y="562">Point cloud builder</text>
+
+  <rect class="card" x="575" y="478" width="435" height="104" />
+  <text class="label" x="605" y="511">Local Outputs / Storage</text>
+  <text class="small" x="605" y="540">depth map previews · exports · telemetry</text>
+  <text class="small" x="605" y="562">Redis or in-memory LRU cache · local ONNX files</text>
+
+  <path class="arrow" d="M525 530 H573" />
+  <path class="dashed" d="M75 80 H1025 V592 H75 Z" />
+</svg>
