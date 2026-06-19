@@ -24,6 +24,15 @@ Turn ordinary 2D images into depth maps, compare neural depth models, benchmark 
 **No cloud uploads. No API keys. No subscription.**
 Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 
+<p align="center">
+  <a href="#quick-start"><strong>Quick Start</strong></a> ·
+  <a href="#installation-guide"><strong>Installation</strong></a> ·
+  <a href="#api-reference"><strong>API Reference</strong></a> ·
+  <a href="#troubleshooting"><strong>Troubleshooting</strong></a> ·
+  <a href="#security"><strong>Security</strong></a> ·
+  <a href="#contributing"><strong>Contributing</strong></a>
+</p>
+
 ## Demo Video
 
 ### Quick Preview
@@ -85,6 +94,8 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 | [License](#license) | MIT License |
 | [Acknowledgements](#acknowledgements) | Open-source projects powering DepthLens Pro |
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Overview
@@ -107,6 +118,8 @@ Technically, the app combines:
 
 > DepthLens Pro predicts **relative depth**, not real-world metric distance. It is useful for visual depth understanding and approximate geometry, not survey-grade measurement.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## What I built vs what I used
@@ -126,6 +139,8 @@ DepthLens Pro is an application and systems engineering project built around **p
 | Packaging/deployment | Desktop packaging configuration, platform/resource/ONNX resolvers, Docker backend workflow, and local-first startup checks | Electron Builder, Docker Compose, native OS packages, PyTorch, ONNX Runtime, and optional Redis |
 
 In short, the project contribution is the productized local inference system: integration, orchestration, desktop UX, diagnostics, caching, benchmarking, evaluation, packaging, and export workflows around pretrained depth models.
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -176,6 +191,8 @@ The normalised depth plane is multiplied by 255, cast to `uint8`, and passed thr
 
 The full `(model, colormap, device, metrics_mode, outputs, max_dim, image_content_hash)` tuple forms the cache key (SHA-1 of the serialised parameters). If Redis is configured, results are stored as versioned JSON with a configurable TTL (default 3600 s). If Redis is unavailable, the service falls back to a thread-safe in-process LRU dict capped at `CACHE_MAX_ENTRIES` entries. GT depth uploads bypass the cache entirely to prevent stale payloads contaminating benchmark runs.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Highlights
@@ -194,6 +211,8 @@ The full `(model, colormap, device, metrics_mode, outputs, max_dim, image_conten
 | 📏 **Ground truth evaluation** | Compare predictions against PNG/TIFF/NPY depth labels with median-scale alignment |
 | 🧊 **3D point clouds** | Export approximate coloured point clouds as PLY or OBJ |
 | 🔒 **Local-first privacy** | Images are processed on `127.0.0.1`; no cloud inference is ever required |
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -413,6 +432,8 @@ Available controls:
 
 The Guide tab provides a fully offline accordion reference covering the complete workflow, metric definitions, model trade-offs, 3D reconstruction parameters, and troubleshooting steps. It does not call the backend and works even when the inference engine is offline.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## System Architecture
@@ -501,6 +522,8 @@ The backend uses two concurrency controls in combination:
 
 For ONNX, a matching `_ONNX_FORWARD_LOCKS` dict serialises `session.run()` calls per model/device pair.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## System Design Decisions
@@ -536,6 +559,8 @@ The tradeoff is that packaged desktop convenience must be balanced with large ML
 Images are processed on localhost, and no cloud upload or API key is required for normal inference. Telemetry and observability should avoid raw images, image hashes, local paths, filenames, or high-cardinality user data so diagnostics stay useful without exposing private inputs.
 
 The tradeoff is that privacy is prioritized over cloud scalability.
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -601,6 +626,8 @@ Expected `/live` response:
 
 > **Setup-time model cache:** The setup step downloads and validates the PyTorch MiDaS Torch Hub repo, transforms, and checkpoints for MiDaS Small, DPT Hybrid, and DPT Large under `models/torch-cache`. It also caches RGB detector weights when enabled. ONNX files are separate and optional under `models/onnx`.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Installation Guide
@@ -635,6 +662,9 @@ The native workflow is deliberately split into **four repeatable steps per platf
 
 #### macOS — Standard native build
 
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
+
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
 if [ -d "DepthLensPro/.git" ]; then # Check if DepthLensPro is already cloned
@@ -654,7 +684,12 @@ npm run build:mac:arm64 # Build the macOS Apple Silicon native app
 npm run launch:mac # Launch the packaged macOS app
 ```
 
+</details>
+
 #### macOS — ONNX native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -675,7 +710,12 @@ npm run build:mac:arm64:onnx # Build the macOS Apple Silicon native app with ONN
 npm run launch:mac # Launch the packaged macOS app
 ```
 
+</details>
+
 #### Windows ARM64 — Standard native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -696,7 +736,12 @@ npm run build:win:arm64 # Build the Windows ARM64 native app
 npm run launch:win # Launch the packaged Windows app
 ```
 
+</details>
+
 #### Windows ARM64 — ONNX native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -717,7 +762,12 @@ npm run build:win:arm64:onnx # Build the Windows ARM64 native app with ONNX reso
 npm run launch:win # Launch the packaged Windows app
 ```
 
+</details>
+
 #### Windows x86/x64 — Standard native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -738,7 +788,12 @@ npm run build:win:x64 # Build the Windows x64/x86_64 native app
 npm run launch:win # Launch the packaged Windows app
 ```
 
+</details>
+
 #### Windows x86/x64 — ONNX native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -759,7 +814,12 @@ npm run build:win:x64:onnx # Build the Windows x64/x86_64 native app with ONNX r
 npm run launch:win # Launch the packaged Windows app
 ```
 
+</details>
+
 #### Linux ARM64 — Standard native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -780,7 +840,12 @@ npm run build:linux:arm64 # Build the Linux ARM64 native app
 npm run launch:linux # Launch the packaged Linux app
 ```
 
+</details>
+
 #### Linux ARM64 — ONNX native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -801,7 +866,12 @@ npm run build:linux:arm64:onnx # Build the Linux ARM64 native app with ONNX reso
 npm run launch:linux # Launch the packaged Linux app
 ```
 
+</details>
+
 #### Linux x86/x64 — Standard native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -822,7 +892,12 @@ npm run build:linux:x64 # Build the Linux x64/x86_64 native app
 npm run launch:linux # Launch the packaged Linux app
 ```
 
+</details>
+
 #### Linux x86/x64 — ONNX native build
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -842,6 +917,8 @@ npm run verify:onnx:required # Verify that all required ONNX models exist
 npm run build:linux:x64:onnx # Build the Linux x64/x86_64 native app with ONNX resources required
 npm run launch:linux # Launch the packaged Linux app
 ```
+
+</details>
 
 
 #### Setup report and diagnostics
@@ -1023,6 +1100,8 @@ models/onnx/
 └── dpt_large.onnx
 ```
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Terminal-Only Dev Verification
@@ -1030,6 +1109,9 @@ models/onnx/
 This flow uses the project from the terminal in dev mode — it sets up dependencies, starts the FastAPI backend, checks the backend, then opens the Electron dev shell without creating a native installer/package. The repo exposes `backend:dev` and `frontend:dev` for this.
 
 ### macOS — Standard terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -1054,7 +1136,12 @@ npm run frontend:dev # Open the dev app without building a native package
 kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### macOS — ONNX terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -1079,7 +1166,12 @@ npm run frontend:dev # Open the dev app without building a native package
 kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Windows ARM64 — Standard terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -1103,7 +1195,12 @@ npm run frontend:dev # Open the dev app without building a native package
 Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Windows ARM64 — ONNX terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -1127,7 +1224,12 @@ npm run frontend:dev # Open the dev app without building a native package
 Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Windows x86/x64 — Standard terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -1151,7 +1253,12 @@ npm run frontend:dev # Open the dev app without building a native package
 Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Windows x86/x64 — ONNX terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```powershell
 cd "$HOME\Downloads" # Go to the Downloads folder
@@ -1175,7 +1282,12 @@ npm run frontend:dev # Open the dev app without building a native package
 Stop-Process -Id $backend.Id -Force # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Linux ARM64 — Standard terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -1200,7 +1312,12 @@ npm run frontend:dev # Open the dev app without building a native package
 kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Linux ARM64 — ONNX terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -1225,7 +1342,12 @@ npm run frontend:dev # Open the dev app without building a native package
 kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Linux x86/x64 — Standard terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -1250,7 +1372,12 @@ npm run frontend:dev # Open the dev app without building a native package
 kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
 
+</details>
+
 ### Linux x86/x64 — ONNX terminal-only test
+
+<details>
+<summary>Show clone → setup → build → launch commands</summary>
 
 ```bash
 cd "$HOME/Downloads" # Go to the Downloads folder
@@ -1274,6 +1401,10 @@ curl http://127.0.0.1:8765/onnx/status # Check ONNX model/provider status
 npm run frontend:dev # Open the dev app without building a native package
 kill "$BACKEND_PID" 2>/dev/null || true # Stop the backend after closing the dev app
 ```
+
+</details>
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -1378,6 +1509,8 @@ Telemetry is local-only: DepthLens Pro does not send analytics to cloud services
 | `CI=1` | CI marker used by test fixtures |
 | `CODEX_ENV=1` | Automation/sandboxed environment marker |
 | `DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1` | Prevents torch.hub from downloading weights (used in offline CI) |
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -1536,6 +1669,8 @@ Query parameters:
 
 The benchmark runs under a global mutex that prevents concurrent benchmark calls, and sets a `/live` response field `"state": "busy"` so the frontend can indicate that a benchmark is in progress.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Models, Colormaps & Metrics
@@ -1608,6 +1743,8 @@ inferno · plasma · viridis · magma · jet · hot · bone · turbo
 | Ground-truth metrics | Abs Rel, Sq Rel, GT RMSE, log RMSE, δ < 1.25 / 1.25² / 1.25³ | Yes |
 | Reported unavailable | GT SSIM, GT PSNR, ordinal error, surface normal error, LPIPS | Depends; not yet implemented |
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Ground Truth Evaluation
@@ -1648,6 +1785,8 @@ pred_scaled = pred * scale
 
 This removes the global scale ambiguity before computing error metrics, making results comparable across different scenes and model configurations. The scale factor is clamped to `[1e-3, 1000]` to reject implausible alignments (e.g. unit mismatches where GT is in millimetres but predictions are in normalised units).
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Understanding Depth Metrics
@@ -1678,6 +1817,8 @@ These are standard monocular depth estimation benchmark metrics used in papers l
 | **δ < 1.25** | `mean(max(pred/gt, gt/pred) < 1.25)` | Percentage of pixels within 25% of GT; higher is better |
 | **δ < 1.25²** | Same with threshold 1.5625 | Looser accuracy; higher is better |
 | **δ < 1.25³** | Same with threshold 1.953 | Loosest threshold; higher is better |
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -1742,6 +1883,8 @@ The test suite covers API behaviour, cache serialisation safety (no pickle deser
 - **Model downloads** — prevented via `DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1`
 - **Warmup** — skipped via `TESTING=1`
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Production & Packaging
@@ -1802,6 +1945,8 @@ docker compose up --build -d     # background
 ```
 
 The Docker image uses Python 3.12 slim, installs dependencies into an isolated venv, and runs as a non-root `depthlens` user. The two-stage build keeps the final image free of build-time dependencies.
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -1866,8 +2011,6 @@ npm run backend:dev
 Renderer startup is dependency-ordered and failure-isolated in both packaged Electron installs and development runs. Foundational state helpers now load before chart/decorative scripts, and optional renderer initialization such as background canvas animation, Chart.js setup, Compare controls, pointer glow, guide accordion, and scroll navigation is isolated from backend startup. If a decorative or chart dependency is unavailable, the app should log a console warning while backend URL resolution, `/live`, `/ready`, `/health` diagnostics, device discovery, polling, and the Depth Engine status panel continue to initialize normally.
 
 ---
-
-
 
 ### “Depth engine ready” but inference fails
 
@@ -2055,6 +2198,8 @@ Or run with an explicit policy bypass:
 powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
 ```
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Security
@@ -2098,9 +2243,14 @@ Include:
 
 See [`SECURITY.md`](SECURITY.md) for the full policy.
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## Project Structure
+
+<details>
+<summary>Show full repository tree</summary>
 
 ```text
 DepthLensPro/
@@ -2219,6 +2369,8 @@ DepthLensPro/
 └── README.md
 ```
 
+</details>
+
 ### Backend route organization
 
 The inference service `backend/services/inference.py` preserves the existing public imports and response payloads delegates image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
@@ -2267,6 +2419,8 @@ cd ..
 - Type annotations are checked with mypy in strict mode (excluding `backend/tests/`)
 - JavaScript follows the style already present in `main.js` and the ordered `frontend/js/` browser scripts — no separate formatter is enforced, but the Electron test suite (`npm test`) must pass
 
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
+
 ---
 
 ## License
@@ -2274,6 +2428,8 @@ cd ..
 DepthLens Pro is licensed under the **MIT License**.
 
 See [`LICENSE`](LICENSE) for the full terms.
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
@@ -2293,6 +2449,10 @@ DepthLens Pro builds on excellent open-source projects:
 | [Pillow](https://python-pillow.org) | PNG/TIFF/NPY GT file decoding |
 | [Redis](https://redis.io) | Optional distributed cache backend |
 | [Chart.js](https://www.chartjs.org) | Latency and benchmark charts in the frontend |
+
+---
+
+<div align="right"><sub><a href="#depthlens-pro">⬆ back to top</a></sub></div>
 
 ---
 
