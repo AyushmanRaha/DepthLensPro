@@ -139,7 +139,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             log.warning("Cache cleanup degraded: %s", exc)
 
 
-app = FastAPI(title="DepthLens Pro API", version=SERVICE_VERSION, debug=settings.DEBUG, lifespan=lifespan)
+app = FastAPI(
+    title="DepthLens Pro API", version=SERVICE_VERSION, debug=settings.DEBUG, lifespan=lifespan
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
