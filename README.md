@@ -26,11 +26,15 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 
 ## Demo Video
 
-<video src="https://github.com/AyushmanRaha/DepthLensPro/releases/download/v1.0-demo/demo.mp4" controls width="100%">
+### Quick Preview
+
+<video src="https://github.com/user-attachments/assets/6baef599-df4c-4d48-9fa5-7cbe43a08449" controls muted playsinline width="100%">
   Your browser does not support the video tag.
 </video>
 
-[Watch the demo video](https://github.com/AyushmanRaha/DepthLensPro/releases/download/v1.0-demo/demo.mp4)
+### Full Demo
+
+[Watch the full-quality 3:45 demo video](https://github.com/AyushmanRaha/DepthLensPro/releases/download/v1.0-demo/demo.mp4)
 
 </div>
 
