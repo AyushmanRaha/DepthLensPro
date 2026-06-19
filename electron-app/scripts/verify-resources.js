@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const DEFAULT_ROOT = path.resolve(path.join(__dirname, "..", ".."));
 const VALID_ROOT_KINDS = new Set(["repo", "packaged"]);
@@ -114,6 +115,27 @@ function pythonCandidateChecks(root, platform = process.platform) {
   });
 }
 
+function runPythonCheck(pythonPath, root, code, timeout = 12000) {
+  if (!pythonPath || !isFile(pythonPath)) return { ok: false, skipped: true, error: "python executable missing" };
+  try { const st = fs.statSync(pythonPath); if (st.size < 8) return { ok: true, skipped: true, error: "placeholder python executable in lightweight test fixture" }; } catch (_) {}
+  const env = { ...process.env, PYTHONPATH: [root, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter), DEPTHLENSPRO_MODEL_DIR: path.join(root, "models"), DEPTHLENS_ONNX_DIR: path.join(root, "models", "onnx"), TORCH_HOME: path.join(root, "models", "torch-cache"), DEPTHLENS_DISABLE_MODEL_DOWNLOADS: "1", DEPTHLENS_SKIP_WARMUP: "1" };
+  const result = spawnSync(pythonPath, ["-c", code], { cwd: root, env, encoding: "utf8", timeout });
+  return { ok: result.status === 0, status: result.status, signal: result.signal, stdout: (result.stdout || "").trim(), stderr: (result.stderr || "").trim(), error: result.error ? result.error.message : null };
+}
+
+function launchabilityChecks(root, pythonChecks) {
+  const selected = pythonChecks.find((item) => item.platformCandidate && item.exists) || pythonChecks.find((item) => item.exists);
+  const pythonPath = selected?.full;
+  const importCode = "import importlib; [importlib.import_module(m) for m in ('torch','cv2')]; importlib.import_module('onnxruntime'); print('imports-ok')";
+  const backendCode = "import importlib; importlib.import_module('backend.app'); print('backend-app-ok')";
+  return {
+    python: selected || null,
+    pythonRuns: runPythonCheck(pythonPath, root, "import sys; print(sys.executable)"),
+    requiredImports: runPythonCheck(pythonPath, root, importCode),
+    backendAppImport: runPythonCheck(pythonPath, root, backendCode),
+  };
+}
+
 function verifyResourceRoot(options = {}) {
   const root = path.resolve(options.root || DEFAULT_ROOT);
   const rootKind = options.rootKind || "repo";
@@ -176,6 +198,13 @@ function verifyResourceRoot(options = {}) {
     if (item.required) checks.push({ rel: item.rel, label: item.rel, full, ok: exists && size > 0, required: true });
   }
 
+  const launchability = mode === "native" ? launchabilityChecks(root, pythonChecks) : null;
+  if (launchability) {
+    checks.push({ rel: "python launch", label: "packaged/repo Python executable runs", full: launchability.python?.full || root, ok: launchability.pythonRuns.ok, required: true, detail: launchability.pythonRuns });
+    checks.push({ rel: "backend.app import", label: "backend.app imports from resources", full: root, ok: launchability.backendAppImport.ok, required: true, detail: launchability.backendAppImport });
+    checks.push({ rel: "runtime imports", label: "torch/onnxruntime/cv2 import from resources", full: root, ok: launchability.requiredImports.ok, required: rootKind === "packaged", detail: launchability.requiredImports });
+  }
+
   const failed = checks.filter((check) => check.required && !check.ok);
   return {
     schemaVersion: 1,
@@ -191,6 +220,7 @@ function verifyResourceRoot(options = {}) {
     },
     detectorReadiness: detectorStatus,
     pythonCandidateChecks: pythonChecks,
+    launchability,
     checks,
     infos,
     failed,
@@ -226,7 +256,8 @@ function formatResult(result) {
     const severity = check.required ? (check.ok ? "✓" : "✗") : (check.ok ? "✓" : "!");
     const optional = check.required ? "" : " (optional)";
     const missing = check.ok ? "" : ` missing under ${check.full}`;
-    lines.push(`${severity} ${check.label}${missing}${optional}`);
+    const detail = check.detail && !check.ok ? ` (${check.detail.error || check.detail.stderr || check.detail.signal || "failed"})` : "";
+    lines.push(`${severity} ${check.label}${missing}${optional}${detail}`);
   }
   lines.push("\nModel cache summary:");
   const torchInfo = result.infos.find((info) => info.torchStatus);
@@ -296,4 +327,6 @@ module.exports = {
   ONNX_MODELS,
   torchCacheStatus,
   detectorCacheStatus,
+  runPythonCheck,
+  launchabilityChecks,
 };

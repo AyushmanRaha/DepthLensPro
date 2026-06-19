@@ -6,15 +6,54 @@ import importlib
 import os
 import platform
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 from backend.model_registry import MODEL_REGISTRY, get_model_spec, resolve_onnx_path
-from backend.utils.hardware import (
-    _default_device_key,
-    _onnx_provider_candidates,
-    _onnx_providers_for_device,
-)
+
+
+def _default_device_key() -> str:
+    try:
+        from backend.utils.hardware import _default_device_key as impl
+
+        return impl()
+    except Exception:
+        return "cpu"
+
+
+def _normalize_device_key(device: str | None, *, resolve_auto: bool = False) -> str:
+    requested = str(device or "auto").strip().lower() or "auto"
+    return _default_device_key() if resolve_auto and requested == "auto" else requested
+
+
+def _onnx_provider_candidates(device: str) -> list[str]:
+    requested = _normalize_device_key(device, resolve_auto=True)
+    if requested.startswith("cuda"):
+        providers = ["CUDAExecutionProvider", "TensorrtExecutionProvider"]
+    elif requested in {"mps", "metal", "coreml", "ane"}:
+        providers = ["CoreMLExecutionProvider"]
+    elif requested.startswith("xpu") or requested.startswith("intel"):
+        providers = ["OpenVINOExecutionProvider", "DnnlExecutionProvider"]
+    elif requested.startswith("rocm") or requested.startswith("hip"):
+        providers = ["ROCMExecutionProvider", "MIGraphXExecutionProvider"]
+    elif requested.startswith("dml") or requested.startswith("directml"):
+        providers = ["DmlExecutionProvider"]
+    else:
+        providers = []
+    providers.append("CPUExecutionProvider")
+    return list(dict.fromkeys(providers))
+
+
+def _onnx_providers_for_device(device: str, available: list[str]) -> list[str]:
+    normalized_available = list(
+        dict.fromkeys(str(p).strip() for p in available or [] if str(p).strip())
+    )
+    available_set = set(normalized_available)
+    selected = [p for p in _onnx_provider_candidates(device) if p in available_set]
+    if "CPUExecutionProvider" in available_set and "CPUExecutionProvider" not in selected:
+        selected.append("CPUExecutionProvider")
+    return selected or normalized_available
 
 
 def export_command(model: str) -> str:
@@ -234,7 +273,73 @@ def _status_from_session_result(
     return "invalid_session"
 
 
-def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
+_STATUS_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+_STATUS_TTL_SECONDS = float(os.environ.get("DEPTHLENS_ONNX_STATUS_TTL_SECONDS", "30"))
+
+
+def _cache_get(key: tuple[str, str, str]) -> dict[str, Any] | None:
+    cached = _STATUS_CACHE.get(key)
+    if not cached:
+        return None
+    ts, payload = cached
+    if time.monotonic() - ts > _STATUS_TTL_SECONDS:
+        _STATUS_CACHE.pop(key, None)
+        return None
+    return dict(payload, cached=True, cache_ttl_seconds=_STATUS_TTL_SECONDS)
+
+
+def _cache_set(key: tuple[str, str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    _STATUS_CACHE[key] = (time.monotonic(), dict(payload))
+    return dict(payload, cached=False, cache_ttl_seconds=_STATUS_TTL_SECONDS)
+
+
+def _quick_model_status(model: str, device: str = "auto") -> dict[str, Any]:
+    resolved = resolve_onnx_path(model)
+    runtime = onnx_runtime_info(device)
+    exists = bool(resolved.get("exists"))
+    size = int(resolved.get("size_bytes") or 0)
+    state = (
+        "available_unverified"
+        if exists and size > 0 and runtime.get("importable")
+        else ("missing" if not exists else "runtime_unavailable")
+    )
+    try:
+        spec = get_model_spec(resolved.get("model_id") or model)
+        optional_onnx = spec.model_id in {"dpt_hybrid", "dpt_large"}
+    except Exception:
+        optional_onnx = False
+    if optional_onnx and state == "missing":
+        state = "optional_unavailable"
+    return {
+        "model": resolved.get("model_id") or model,
+        "display_name": resolved.get("display_name"),
+        "expected_path": resolved.get("expected_path") or resolved.get("onnx_path"),
+        "selected_path": resolved.get("onnx_path"),
+        "exists": exists,
+        "size_bytes": size,
+        "state": state,
+        "diagnostic_depth": "quick",
+        "session_checked": False,
+        "checker_error": None,
+        "fallback_behavior": "PyTorch fallback remains available",
+        "path": resolved,
+        "providers_used": runtime.get("selected_providers", []),
+        "available_providers": runtime.get("available_providers", []),
+        "runtime": runtime,
+        "recommended_export_command": (
+            None if exists else export_command(str(resolved.get("model_id") or model))
+        ),
+    }
+
+
+def onnx_model_status(
+    model: str, device: str = "auto", *, depth: str = "deep", force: bool = False
+) -> dict[str, Any]:
+    if depth != "deep":
+        key = ("model", device, model)
+        if not force and (cached := _cache_get(key)) is not None:
+            return cached
+        return _cache_set(key, _quick_model_status(model, device))
     resolved = resolve_onnx_path(model)
     runtime = onnx_runtime_info(device)
     if resolved.get("error") == "unknown_model":
@@ -293,20 +398,35 @@ def onnx_model_status(model: str, device: str = "auto") -> dict[str, Any]:
     }
 
 
-def onnx_status_payload(device: str = "auto") -> dict[str, Any]:
+def onnx_status_payload(
+    device: str = "auto", *, depth: str = "quick", force: bool = False
+) -> dict[str, Any]:
+    key = ("status", device, depth)
+    if not force and (cached := _cache_get(key)) is not None:
+        return cached
     runtime = onnx_runtime_info(device)
-    models = {model: onnx_model_status(model, device) for model in MODEL_REGISTRY}
-    onnx_ready = any(m.get("state") == "available" for m in models.values())
-    return {
+    models = {
+        model: onnx_model_status(model, device, depth=depth, force=force)
+        for model in MODEL_REGISTRY
+    }
+    onnx_ready = any(
+        m.get("state") in {"available", "available_unverified"} for m in models.values()
+    )
+    payload = {
         "supported_model_ids": list(MODEL_REGISTRY),
         "requested_device": device,
         "runtime": runtime,
         "models": models,
         "overall_status": "onnx_ready" if onnx_ready else "onnx_unavailable",
+        "diagnostic_depth": depth,
+        "cache_ttl_seconds": _STATUS_TTL_SECONDS,
     }
+    return _cache_set(key, payload)
 
 
-def readiness_payload(device: str = "auto") -> dict[str, Any]:
+def readiness_payload(
+    device: str = "auto", *, depth: str = "quick", force: bool = False
+) -> dict[str, Any]:
     """Detailed backend/model/device readiness for health endpoints."""
 
     try:
@@ -324,12 +444,12 @@ def readiness_payload(device: str = "auto") -> dict[str, Any]:
         mps = False
 
     selected = _default_device_key()
-    onnx = onnx_status_payload(device if device != "auto" else selected)
+    onnx = onnx_status_payload(device if device != "auto" else selected, depth=depth, force=force)
     models = {}
     onnx_any = False
     for model_id, spec in MODEL_REGISTRY.items():
         status = onnx["models"][model_id]
-        ready = status.get("state") == "available"
+        ready = status.get("state") in {"available", "available_unverified"}
         onnx_any = onnx_any or ready
         models[model_id] = {
             "display_name": spec.display_name,
