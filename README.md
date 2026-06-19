@@ -262,7 +262,7 @@ For terminal-only setup details, read [Terminal-Only Development](docs/terminal-
 
 | Platform | Standard native build | ONNX native build |
 |---|---|---|
-| macOS Apple Silicon arm64 | `npm run setup:mac` → `npm run verify:resources` → `npm run build:mac:arm64` → `npm run launch:mac` | `npm run setup:mac:onnx` → `npm run verify:onnx:required` → `npm run build:mac:arm64:onnx` → `npm run launch:mac` |
+| macOS Apple Silicon only arm64 | `npm run setup:mac` → `npm run verify:resources` → `npm run build:mac:arm64` → `npm run launch:mac` | `npm run setup:mac:onnx` → `npm run verify:onnx:required` → `npm run build:mac:arm64:onnx` → `npm run launch:mac` |
 | macOS x64 / universal | Not supported; build scripts fail with a clear unsupported-architecture message. | Not supported. |
 | Windows ARM64 | `npm run setup:win` → `npm run verify:resources` → `npm run build:win:arm64` → `npm run launch:win` | `npm run setup:win:onnx` → `npm run verify:onnx:required` → `npm run build:win:arm64:onnx` → `npm run launch:win` |
 | Windows x64 | `npm run setup:win` → `npm run verify:resources` → `npm run build:win:x64` → `npm run launch:win` | `npm run setup:win:onnx` → `npm run verify:onnx:required` → `npm run build:win:x64:onnx` → `npm run launch:win` |
