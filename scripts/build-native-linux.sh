@@ -10,6 +10,8 @@ if [[ "$AUTO_SETUP" == 1 ]]; then echo "[DepthLens] --auto-setup requested; runn
 echo "[DepthLens] Verifying repo resources before packaging (no downloads)."
 (cd electron-app && node scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS" ..) || { echo "Run npm run setup:linux (standard) or npm run setup:linux:onnx (ONNX) first." >&2; exit 1; }
 (cd electron-app && npm run clean:dist)
+echo "[DepthLens] Running packaging size preflight."
+(cd electron-app && node scripts/package-size-preflight.js --platform linux --arch "$ARCH" --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS")
 echo "[DepthLens] Packaging Linux $ARCH..."; (cd electron-app && npm run "build:linux:${ARCH}:raw")
 echo "[DepthLens] Verifying packaged Linux $ARCH resources..."; (cd electron-app && node scripts/verify-packaged-resources.js --platform linux --arch "$ARCH" --mode native --torch-cache required --onnx "$ONNX_VERIFY_MODE" --models "$ONNX_MODELS")
 echo "[DepthLens] SUCCESS Linux $ARCH build. Outputs under electron-app/dist"

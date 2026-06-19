@@ -10,6 +10,9 @@ try {
   node scripts/verify-resources.js --root-kind repo --mode native --torch-cache required --onnx $OnnxVerifyMode --models $OnnxModels ..
   if ($LASTEXITCODE -ne 0) { throw "Run npm run setup:win (standard) or npm run setup:win:onnx (ONNX) first." }
   npm run clean:dist
+  Write-Host "[DepthLens] Running packaging size preflight."
+  node scripts/package-size-preflight.js --platform win32 --arch $Arch --onnx $OnnxVerifyMode --models $OnnxModels
+  if ($LASTEXITCODE -ne 0) { throw "Packaging size preflight failed." }
   Write-Host "[DepthLens] Packaging Windows $Arch..."; npm run "build:win:$Arch`:raw"
   Write-Host "[DepthLens] Verifying packaged Windows $Arch resources..."; node scripts/verify-packaged-resources.js --platform win32 --arch $Arch --mode native --torch-cache required --onnx $OnnxVerifyMode --models $OnnxModels
   Write-Host "[DepthLens] SUCCESS Windows $Arch build. Outputs under electron-app/dist"

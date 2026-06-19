@@ -983,6 +983,34 @@ Platform-specific outputs:
 | Windows | `electron-app/dist/win-arm64-unpacked/` or `electron-app/dist/win-x64-unpacked/` and NSIS installer |
 | Linux | `electron-app/dist/*arm64*.AppImage`, `electron-app/dist/*x64*.AppImage`, and unpacked resources when retained by electron-builder |
 
+
+#### Packaging size preflight and automatic DMG sizing
+
+Every native packaging command now runs `electron-app/scripts/package-size-preflight.js` before Electron Builder starts. The preflight is deterministic and cross-platform: it walks the Electron app, backend, frontend, Python `venv`, `models/torch-cache`, `models/onnx`, and the local Electron runtime cache while ignoring avoidable junk such as `__pycache__`, `.pyc`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.git`, logs, temporary files, and source maps. It prints a per-directory footprint summary, checks free space for the host temp/build/output locations, and fails before packaging if required resources are missing or there is not enough room for a large offline artifact.
+
+For macOS DMG builds, the same preflight computes `dmg.size` automatically instead of relying on a hand-edited hardcoded value. The planned DMG size is the estimated payload size plus a configurable safety margin and filesystem overhead, rounded up to MiB with a sane minimum. The wrapper passes that value to Electron Builder for `npm run build:mac:arm64` and `npm run build:mac:arm64:onnx`, so large bundles containing Electron, the Python virtualenv, Torch/TorchVision, ONNX Runtime, MiDaS Torch cache, and all ONNX exports get a DMG volume sized for the actual payload.
+
+Useful maintainer commands and knobs:
+
+```bash
+cd electron-app
+npm run preflight:package -- --platform darwin --arch arm64 --onnx require-all --models all
+node scripts/package-size-preflight.js --json --platform linux --arch x64 --onnx optional
+```
+
+| Environment variable | Default | Purpose |
+|---|---:|---|
+| `DEPTHLENS_PACKAGE_SIZE_MARGIN` | `0.35` | Fractional safety margin added to the estimated payload before macOS DMG sizing. |
+| `DEPTHLENS_DMG_MIN_BYTES` | `2147483648` | Minimum computed macOS DMG size in bytes. |
+| `DEPTHLENS_PACKAGE_MIN_FREE_BYTES` | `2147483648` | Minimum host free-space floor for temp/build/output checks; platform payload requirements can raise this automatically. |
+
+Troubleshooting packaging size failures:
+
+- If macOS DMG creation logs `ditto` errors under `/Volumes/DepthLens Pro ...` with `No space left on device`, that often means the temporary mounted DMG image is too small, not that the Mac startup disk is full. Re-run the preflight, inspect the computed `dmg.size`, and either increase `DEPTHLENS_PACKAGE_SIZE_MARGIN`/`DEPTHLENS_DMG_MIN_BYTES` or reduce bundled resources.
+- If the preflight reports insufficient host temp/build/output disk space, free space in the listed directory or point the OS temp directory/build output at a larger volume before rerunning the same build command.
+- If the preflight reports missing `models/onnx` files for an ONNX build, run `npm run setup:<platform>:onnx` and `npm run verify:onnx:required`; standard non-ONNX builds still require `models/torch-cache` but do not require ONNX exports.
+- Large offline builds are expected to be several GiB because they include Electron, the Python runtime, PyTorch/TorchVision, ONNX Runtime, MiDaS Torch cache, and optional ONNX weights such as `dpt_large.onnx`. Avoid deleting required offline model assets; the package filters only exclude caches, logs, compiled Python bytecode, source maps, and temporary/setup diagnostics.
+
 #### No silent downloads during build
 
 The build scripts verify repo resources before packaging and packaged resources after packaging. They do not silently download model assets. If `models/torch-cache` is missing, standard builds fail early with a “run setup first” remediation. If an ONNX build is requested and any ONNX file is missing or empty, the build fails early with the matching `setup:<platform>:onnx` command. Electron packages `models` as extra resources, so packaged resources contain `Resources/models/torch-cache` and, for ONNX builds, `Resources/models/onnx`.
