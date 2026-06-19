@@ -1861,21 +1861,16 @@ when validating the required ONNX files (`midas_small.onnx`, `dpt_hybrid.onnx`,
 and `dpt_large.onnx`). Standard setup/build does not require ONNX generation.
 
 ```bash
-python -m black --check .
-python -m ruff check .
-python -m mypy backend/
-python -m pytest backend/tests/test_install_contract.py
-python -m pytest
-
-cd electron-app
-npm test
-cd ..
+scripts/ci.sh workflow-policy
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh docker-build
 ```
 
-Or as a single pipeline:
+Or as a single local CI pipeline:
 
 ```bash
-python -m black --check . && python -m ruff check . && python -m mypy backend/ && python -m pytest backend/tests/test_install_contract.py && python -m pytest && cd electron-app && npm test && cd ..
+scripts/ci.sh all
 ```
 
 ### Useful Test Commands
@@ -1893,13 +1888,15 @@ cd electron-app && npm test
 
 ### CI Pipeline
 
-GitHub Actions runs on pushes and pull requests to `main` or `master`:
+GitHub Actions runs PR CI for `pull_request` events targeting `main`. Push CI runs only after changes merge to `main`, which avoids duplicate push + PR runs on feature branches. Branch protection should require only the stable `ci-passed` merge gate.
 
 ```
-Checkout → Python 3.12 setup → Install backend deps
-  → Black check → Ruff check → mypy backend/
-    → pytest → Electron lightweight tests
+backend-quality → ci-passed
+electron-contract → ci-passed
+docker-build → ci-passed
 ```
+
+The `ci-passed` job is the single required merge gate and fails unless every required dependency job succeeds.
 
 The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, or real model weights.
 
