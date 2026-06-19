@@ -21,7 +21,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.live import SERVICE_VERSION, router as live_router
+from backend.api.live import SERVICE_VERSION
+from backend.api.live import router as live_router
 from backend.api.routes import router
 from backend.config import settings
 from backend.services import observability
