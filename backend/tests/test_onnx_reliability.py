@@ -299,7 +299,9 @@ def test_onnx_engine_load_is_singleton_and_forward_lock_is_created(
     inference.clear_models()
 
 
-def test_quick_onnx_status_does_not_create_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_quick_onnx_status_does_not_create_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     (tmp_path / "midas_small.onnx").write_bytes(b"onnx")
     monkeypatch.setenv("DEPTHLENS_ONNX_DIR", str(tmp_path))
     loaded_paths = install_fake_ort(monkeypatch)

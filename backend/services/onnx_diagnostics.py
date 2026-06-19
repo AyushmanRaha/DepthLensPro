@@ -12,9 +12,11 @@ from typing import Any
 
 from backend.model_registry import MODEL_REGISTRY, get_model_spec, resolve_onnx_path
 
+
 def _default_device_key() -> str:
     try:
         from backend.utils.hardware import _default_device_key as impl
+
         return impl()
     except Exception:
         return "cpu"
@@ -44,7 +46,9 @@ def _onnx_provider_candidates(device: str) -> list[str]:
 
 
 def _onnx_providers_for_device(device: str, available: list[str]) -> list[str]:
-    normalized_available = list(dict.fromkeys(str(p).strip() for p in available or [] if str(p).strip()))
+    normalized_available = list(
+        dict.fromkeys(str(p).strip() for p in available or [] if str(p).strip())
+    )
     available_set = set(normalized_available)
     selected = [p for p in _onnx_provider_candidates(device) if p in available_set]
     if "CPUExecutionProvider" in available_set and "CPUExecutionProvider" not in selected:
@@ -294,7 +298,11 @@ def _quick_model_status(model: str, device: str = "auto") -> dict[str, Any]:
     runtime = onnx_runtime_info(device)
     exists = bool(resolved.get("exists"))
     size = int(resolved.get("size_bytes") or 0)
-    state = "available_unverified" if exists and size > 0 and runtime.get("importable") else ("missing" if not exists else "runtime_unavailable")
+    state = (
+        "available_unverified"
+        if exists and size > 0 and runtime.get("importable")
+        else ("missing" if not exists else "runtime_unavailable")
+    )
     try:
         spec = get_model_spec(resolved.get("model_id") or model)
         optional_onnx = spec.model_id in {"dpt_hybrid", "dpt_large"}
@@ -318,10 +326,15 @@ def _quick_model_status(model: str, device: str = "auto") -> dict[str, Any]:
         "providers_used": runtime.get("selected_providers", []),
         "available_providers": runtime.get("available_providers", []),
         "runtime": runtime,
-        "recommended_export_command": None if exists else export_command(str(resolved.get("model_id") or model)),
+        "recommended_export_command": (
+            None if exists else export_command(str(resolved.get("model_id") or model))
+        ),
     }
 
-def onnx_model_status(model: str, device: str = "auto", *, depth: str = "deep", force: bool = False) -> dict[str, Any]:
+
+def onnx_model_status(
+    model: str, device: str = "auto", *, depth: str = "deep", force: bool = False
+) -> dict[str, Any]:
     if depth != "deep":
         key = ("model", device, model)
         if not force and (cached := _cache_get(key)) is not None:
@@ -385,13 +398,20 @@ def onnx_model_status(model: str, device: str = "auto", *, depth: str = "deep", 
     }
 
 
-def onnx_status_payload(device: str = "auto", *, depth: str = "quick", force: bool = False) -> dict[str, Any]:
+def onnx_status_payload(
+    device: str = "auto", *, depth: str = "quick", force: bool = False
+) -> dict[str, Any]:
     key = ("status", device, depth)
     if not force and (cached := _cache_get(key)) is not None:
         return cached
     runtime = onnx_runtime_info(device)
-    models = {model: onnx_model_status(model, device, depth=depth, force=force) for model in MODEL_REGISTRY}
-    onnx_ready = any(m.get("state") in {"available", "available_unverified"} for m in models.values())
+    models = {
+        model: onnx_model_status(model, device, depth=depth, force=force)
+        for model in MODEL_REGISTRY
+    }
+    onnx_ready = any(
+        m.get("state") in {"available", "available_unverified"} for m in models.values()
+    )
     payload = {
         "supported_model_ids": list(MODEL_REGISTRY),
         "requested_device": device,
@@ -404,7 +424,9 @@ def onnx_status_payload(device: str = "auto", *, depth: str = "quick", force: bo
     return _cache_set(key, payload)
 
 
-def readiness_payload(device: str = "auto", *, depth: str = "quick", force: bool = False) -> dict[str, Any]:
+def readiness_payload(
+    device: str = "auto", *, depth: str = "quick", force: bool = False
+) -> dict[str, Any]:
     """Detailed backend/model/device readiness for health endpoints."""
 
     try:
