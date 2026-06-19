@@ -1860,6 +1860,19 @@ Install backend dependencies before full pytest collection. Use the normal four-
 when validating the required ONNX files (`midas_small.onnx`, `dpt_hybrid.onnx`,
 and `dpt_large.onnx`). Standard setup/build does not require ONNX generation.
 
+The reproducible local CI entrypoint is:
+
+```bash
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh docker-build
+scripts/ci.sh all
+```
+
+Docker is required only for `scripts/ci.sh docker-build` and `scripts/ci.sh all`. The shared entrypoint exports CI-safe defaults that disable model downloads and warmups (`DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1`, `DEPTHLENS_SKIP_WARMUP=1`, `TESTING=1`) so validation remains lightweight and deterministic.
+
+The backend-quality gate expands to the same direct commands contributors may run while iterating:
+
 ```bash
 python -m black --check .
 python -m ruff check .
@@ -1893,12 +1906,13 @@ cd electron-app && npm test
 
 ### CI Pipeline
 
-GitHub Actions runs on pushes and pull requests to `main` or `master`:
+GitHub Actions runs on pushes to all branches, pull requests targeting `main`, and manual `workflow_dispatch` runs. Required jobs keep stable check names: `backend-quality`, `electron-contract`, `docker-build`, and the final aggregate merge gate `ci-passed`. Branch protection should require only `ci-passed`; it fails unless every required dependency reports exactly `success`, including cancelled, skipped, timed-out, missing, or failed jobs.
 
 ```
-Checkout → Python 3.12 setup → Install backend deps
-  → Black check → Ruff check → mypy backend/
-    → pytest → Electron lightweight tests
+backend-quality: checkout → Python 3.12 setup with pip cache → install pinned deps → scripts/ci.sh backend-quality
+electron-contract: checkout → Node.js setup with npm cache → npm ci → scripts/ci.sh electron-contract
+docker-build: checkout → Docker Buildx → docker/build-push-action with GitHub Actions cache
+ci-passed: print dependency results → fail with annotations unless all required jobs succeeded
 ```
 
 The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, or real model weights.

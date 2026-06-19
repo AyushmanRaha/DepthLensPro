@@ -35,14 +35,18 @@ uvicorn app:app --host 127.0.0.1 --port 8765
 
 ## Validation before opening a pull request
 
-Run the same checks used by CI:
+Run the same shared entrypoints used by GitHub Actions so local failures match CI logs:
 
 ```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh docker-build
+scripts/ci.sh all
 ```
+
+`scripts/ci.sh backend-quality` runs Black, Ruff, mypy, pytest, and the workflow policy validator. `scripts/ci.sh electron-contract` runs the Electron contract tests plus a lightweight resource verification dry run against a temporary fake repo root. Docker is required only for `scripts/ci.sh docker-build` or `scripts/ci.sh all`.
+
+CI and the local entrypoint export safe deterministic defaults (`CI=1`, `TESTING=1`, `DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1`, and `DEPTHLENS_SKIP_WARMUP=1`) so tests do not download ML models, warm model caches, require Redis, or depend on external acceleration services.
 
 ## Pull request guidelines
 
