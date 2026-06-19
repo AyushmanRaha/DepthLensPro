@@ -17,9 +17,11 @@ REQUIRED_JOBS = ["backend-quality", "electron-contract", "docker-build", "ci-pas
 AGGREGATE_NEEDS = ["backend-quality", "electron-contract", "docker-build"]
 CONCURRENCY_GROUP = (
     "ci-${{ github.workflow }}-"
+    "${{ github.event_name }}-"
     "${{ github.event.pull_request.head.repo.full_name || github.repository }}-"
     "${{ github.head_ref || github.ref_name }}"
 )
+EXPECTED_TRIGGER_BRANCHES = ["main"]
 
 
 def fail(message: str) -> None:
@@ -136,6 +138,11 @@ def validate_triggers(data: dict[str, Any]) -> None:
             fail(f"workflow trigger '{trigger}' is required")
         if not isinstance(config, dict):
             fail(f"workflow trigger '{trigger}' must be explicit mapping")
+        branches = as_list(config.get("branches"))
+        if branches != EXPECTED_TRIGGER_BRANCHES:
+            fail(
+                f"workflow trigger '{trigger}' branches must be exactly {EXPECTED_TRIGGER_BRANCHES}"
+            )
         for key in ("paths", "paths-ignore"):
             if key in config:
                 fail(f"required trigger '{trigger}' must not use {key}")
@@ -153,7 +160,7 @@ def validate_concurrency(data: dict[str, Any]) -> None:
     if not isinstance(concurrency, dict):
         fail("workflow concurrency mapping is required")
     if concurrency.get("group") != CONCURRENCY_GROUP:
-        fail("workflow must use the PR-aware concurrency group")
+        fail("workflow must use the event-aware concurrency group")
     if concurrency.get("cancel-in-progress") != "true":
         fail("workflow concurrency cancel-in-progress must be true")
 

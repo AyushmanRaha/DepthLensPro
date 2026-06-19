@@ -1906,7 +1906,7 @@ cd electron-app && npm test
 
 ### CI Pipeline
 
-GitHub Actions runs on pushes to all branches, pull requests targeting `main`, and manual `workflow_dispatch` runs. Required jobs keep stable check names: `backend-quality`, `electron-contract`, `docker-build`, and the final aggregate merge gate `ci-passed`. Branch protection should require only `ci-passed`; it fails unless every required dependency reports exactly `success`, including cancelled, skipped, timed-out, missing, or failed jobs.
+GitHub Actions uses `pull_request` CI as the required PR validation path for pull requests targeting `main`, runs `push` CI only on `main` after merge, and also supports manual `workflow_dispatch` runs. Required jobs keep stable check names: `backend-quality`, `electron-contract`, `docker-build`, and the final aggregate merge gate `ci-passed`. Branch protection should require only `ci-passed`; it fails unless every required dependency reports exactly `success`, including cancelled, skipped, timed-out, missing, or failed jobs.
 
 ```
 backend-quality: checkout → Python 3.12 setup with pip cache → install pinned deps → scripts/ci.sh backend-quality
