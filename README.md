@@ -1861,22 +1861,15 @@ when validating the required ONNX files (`midas_small.onnx`, `dpt_hybrid.onnx`,
 and `dpt_large.onnx`). Standard setup/build does not require ONNX generation.
 
 ```bash
-python -m black --check .
-python -m ruff check .
-python -m mypy backend/
-python -m pytest backend/tests/test_install_contract.py
-python -m pytest
-
-cd electron-app
-npm test
-cd ..
+scripts/ci.sh workflow-policy
+scripts/ci.sh docs-contract
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh docker-build
+scripts/ci.sh all
 ```
 
-Or as a single pipeline:
-
-```bash
-python -m black --check . && python -m ruff check . && python -m mypy backend/ && python -m pytest backend/tests/test_install_contract.py && python -m pytest && cd electron-app && npm test && cd ..
-```
+The `scripts/ci.sh` entrypoint exports CI-safe defaults that disable model downloads and warmup, use the in-memory cache backend, and keep checks non-interactive. `docker-build` is the only subcommand that requires Docker; it fails fast with an actionable message when Docker is unavailable in a local or Codex sandbox.
 
 ### Useful Test Commands
 
@@ -1893,13 +1886,15 @@ cd electron-app && npm test
 
 ### CI Pipeline
 
-GitHub Actions runs on pushes and pull requests to `main` or `master`:
+GitHub Actions uses a dynamic workflow named `CI`. It runs for pull requests targeting `main`, pushes to `main`, and manual `workflow_dispatch` runs. It does not run push CI for every feature or Codex branch. A fast `detect-changes` job classifies changed files first, then only relevant jobs run:
 
-```
-Checkout → Python 3.12 setup → Install backend deps
-  → Black check → Ruff check → mypy backend/
-    → pytest → Electron lightweight tests
-```
+- docs-only changes run `docs-contract` and the final gate, without expensive backend, Electron, or Docker work.
+- backend or Python tooling changes run `backend-quality`.
+- Electron/frontend or Node tooling changes run `electron-contract`.
+- Dockerfile, backend runtime, requirements, compose, or Docker ignore changes run the cached Buildx `docker-build`.
+- workflow/tooling changes, pushes to `main`, and manual `workflow_dispatch` runs are conservative and require full CI.
+
+Branch protection should require only the stable final check named `ci-passed`. Internal jobs are intentionally dynamic and may be skipped when `detect-changes` proves they are irrelevant. The `ci-passed` job validates that required jobs succeeded and emits clear errors if a required job failed, was cancelled, timed out, or was skipped. Docker might not be available in Codex or a local sandbox, but GitHub Actions runs Docker with `docker/setup-buildx-action` and `docker/build-push-action` when Docker-related changes require it.
 
 The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, or real model weights.
 

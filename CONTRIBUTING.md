@@ -35,14 +35,18 @@ uvicorn app:app --host 127.0.0.1 --port 8765
 
 ## Validation before opening a pull request
 
-Run the same checks used by CI:
+Run the same entrypoints used by CI:
 
 ```bash
-black --check .
-ruff check .
-mypy backend/
-pytest
+scripts/ci.sh workflow-policy
+scripts/ci.sh docs-contract
+scripts/ci.sh backend-quality
+scripts/ci.sh electron-contract
+scripts/ci.sh docker-build
+scripts/ci.sh all
 ```
+
+PR CI is dynamic. Docs-only changes run docs/workflow checks only, backend changes run backend checks, Electron/frontend changes run Electron checks, and Docker-related changes run the cached Docker build. Pushes to `main` and manual `workflow_dispatch` runs execute full CI. Branch protection should require only the stable `ci-passed` check; the internal jobs are allowed to skip when `detect-changes` marks them irrelevant. Docker may not be available in Codex or local sandboxes, so `scripts/ci.sh docker-build` fails fast locally while GitHub Actions runs Docker when required.
 
 ## Pull request guidelines
 

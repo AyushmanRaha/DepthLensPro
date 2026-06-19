@@ -5,7 +5,6 @@ FROM python:3.12-slim AS builder
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1 \
     VIRTUAL_ENV=/opt/venv
 
 RUN apt-get update \
@@ -21,9 +20,10 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /build
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --upgrade pip wheel setuptools \
-    && pip wheel --wheel-dir /tmp/wheels -r requirements.txt \
-    && pip install --no-index --find-links=/tmp/wheels -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip wheel --wheel-dir /tmp/wheels -r requirements.txt \
+    && pip install --no-index --find-links=/tmp/wheels -r requirements.txt \
+    && pip check
 
 FROM python:3.12-slim AS runner
 

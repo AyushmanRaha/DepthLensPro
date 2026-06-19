@@ -63,10 +63,15 @@ def test_direct_electron_builds_verify_packaged_resources() -> None:
     assert "verify:packaged:linux" in scripts["build:linux:arm64"]
 
 
-def test_readme_mentions_setup_scripts() -> None:
-    readme = Path("README.md").read_text(encoding="utf-8")
-    assert "scripts/setup-macos.sh" in readme
-    assert "scripts/build-native-macos.sh" in readme
+def test_root_package_scripts_expose_public_setup_commands() -> None:
+    data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    scripts = data["scripts"]
+    assert scripts["setup:mac"] == "scripts/setup-macos.sh"
+    assert scripts["setup:linux"] == "scripts/setup-linux.sh"
+    assert "scripts/setup-windows.ps1" in scripts["setup:win"]
+    assert scripts["build:mac:arm64"] == "scripts/build-native-macos.sh"
+    assert "scripts/build-native-linux.sh" in scripts["build:linux:arm64"]
+    assert "scripts/build-native-windows.ps1" in scripts["build:win:arm64"]
 
 
 def test_setup_report_helper_shape(tmp_path: Path) -> None:
