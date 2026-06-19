@@ -62,10 +62,12 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 |---|---|
 | [Official v1.0 Tech Stack](#official-v10-tech-stack) | Locked dependency versions verified from manifests |
 | [Overview](#overview) | What the app does and who it is useful for |
+| [What I built vs what I used](#what-i-built-vs-what-i-used) | Ownership boundaries between this application and integrated open-source components |
 | [How Monocular Depth Estimation Works](#how-monocular-depth-estimation-works) | The ML pipeline explained step by step |
 | [Highlights](#highlights) | Core capabilities at a glance |
 | [Feature Tour](#feature-tour) | Workspace, webcam, comparison, experiments, performance, and 3D tools |
 | [System Architecture](#system-architecture) | Electron, FastAPI, PyTorch, ONNX, and cache data flow |
+| [System Design Decisions](#system-design-decisions) | Caching, concurrency, fallback, packaging, and local-first tradeoffs |
 | [Quick Start](#quick-start) | Fast setup for local use |
 | [Installation Guide](#installation-guide) | Native, development, backend-only, Docker, and ONNX setup |
 | [Terminal-Only Dev Verification](#terminal-only-dev-verification) | Multi-OS dev-mode checks without packaging |
@@ -104,6 +106,26 @@ Technically, the app combines:
 - **Docker Compose** for containerized backend + Redis deployment
 
 > DepthLens Pro predicts **relative depth**, not real-world metric distance. It is useful for visual depth understanding and approximate geometry, not survey-grade measurement.
+
+---
+
+## What I built vs what I used
+
+DepthLens Pro is an application and systems engineering project built around **pretrained MiDaS/DPT models**. The repository does not claim ownership of MiDaS model research, model architecture, or pretrained weights. Instead, it turns those models and supporting runtimes into a local-first desktop product with a maintained inference API, UI workflow, diagnostics, packaging, benchmarking, evaluation, and export pipeline.
+
+| Area | Built in this project | Used / integrated |
+|---|---|---|
+| ML model | Model selection, request validation, local orchestration, output normalization, colormap rendering, and response shaping | Pretrained MiDaS/DPT models from Intel ISL MiDaS through PyTorch Torch Hub |
+| Desktop app | Electron shell, renderer workflow, secure preload bridge, backend lifecycle management, settings persistence, and export UX | Electron runtime and browser platform APIs |
+| Backend inference API | FastAPI routes for `/estimate`, `/batch`, `/benchmark`, `/reconstruct`, health checks, diagnostics, and structured responses | FastAPI, Uvicorn, Pillow, OpenCV, NumPy, and runtime libraries |
+| Caching and fallback | Cache-key design, Redis-to-memory fallback behavior, cache eligibility rules, and local telemetry integration | Redis as an optional external cache server; in-process memory for fallback |
+| ONNX acceleration | ONNX path resolution, provider diagnostics, local validation, and optional runtime dispatch | ONNX Runtime and locally generated ONNX model files |
+| Benchmarking/metrics | Benchmark endpoints, latency capture, metric presentation, and reviewer-facing diagnostics | Standard depth-estimation metric formulas and scientific Python tooling |
+| Ground truth evaluation | GT upload handling, resizing/masking/alignment flow, benchmark integration, and result reporting | User-supplied GT files plus NumPy/OpenCV/Pillow processing |
+| Point-cloud export | Depth-to-point-cloud workflow, preview downsampling, and PLY/OBJ export path | Standard pinhole-camera projection concepts and 3D file formats |
+| Packaging/deployment | Desktop packaging configuration, platform/resource/ONNX resolvers, Docker backend workflow, and local-first startup checks | Electron Builder, Docker Compose, native OS packages, PyTorch, ONNX Runtime, and optional Redis |
+
+In short, the project contribution is the productized local inference system: integration, orchestration, desktop UX, diagnostics, caching, benchmarking, evaluation, packaging, and export workflows around pretrained depth models.
 
 ---
 
@@ -397,6 +419,12 @@ The Guide tab provides a fully offline accordion reference covering the complete
 
 DepthLens Pro is split into a desktop shell, a local inference HTTP server, a model runtime, and a cache/storage layer.
 
+The static diagram below gives a quick visual overview; the Mermaid diagram that follows shows the same system in more implementation detail.
+
+<p align="center">
+  <img src="docs/architecture/depthlens-system-architecture.svg" alt="DepthLens Pro local-first architecture diagram" width="900">
+</p>
+
 ```mermaid
 flowchart TB
     User["User"] --> Renderer["Electron Renderer\nHTML · CSS · JavaScript"]
@@ -472,6 +500,42 @@ The backend uses two concurrency controls in combination:
 2. **Per-model/device forward lock** — a `threading.Lock` stored in `_MODEL_FORWARD_LOCKS[f"{model_id}:{device_str}"]`. This prevents concurrent forward calls on the same model instance, which is unsafe on some torch backends. The lock covers only the `model(batch)` call; preprocessing and the bicubic resize run concurrently.
 
 For ONNX, a matching `_ONNX_FORWARD_LOCKS` dict serialises `session.run()` calls per model/device pair.
+
+---
+
+## System Design Decisions
+
+The system design favors transparent local execution over cloud dependency. These decisions keep the desktop app useful on typical developer and reviewer machines while still supporting optional acceleration and reproducible backend workflows.
+
+### Caching
+
+Cache entries are keyed by the model, colormap, device, metrics mode, requested outputs, maximum image dimension, and an image-content hash. Redis is used when configured because it provides TTL-based shared cache behavior across backend workers or repeated sessions. If Redis is not available, the in-memory LRU fallback keeps the app usable without any external service. Ground truth uploads bypass cache so benchmark and evaluation results are recomputed from the current GT input instead of reusing stale image-only outputs.
+
+The tradeoff is that caching improves repeated runs and interactive iteration, but image-specific outputs and benchmark correctness require careful invalidation and bypass rules.
+
+### Concurrency
+
+FastAPI routes can receive multiple requests, but `INFERENCE_MAX_CONCURRENCY` limits how many inference jobs are dispatched at once. Model/device forward locks protect PyTorch and ONNX Runtime session calls for the same model/device pair, while preprocessing and non-critical work can still overlap where safe. This separates request-level concurrency from runtime safety for model execution.
+
+The tradeoff is that maximum throughput is intentionally balanced against local machine stability, GPU/CPU memory pressure, and backend safety.
+
+### Fallback and resilience
+
+Redis is optional; Redis failures should not make local inference fail. Backend health endpoints separate lightweight liveness from deeper readiness and diagnostic checks, so the desktop shell can distinguish "process is reachable" from "all optional runtimes are ready." The Electron main process owns backend startup, port checks, and process lifecycle. Settings persistence uses safer local persistence behavior with recovery and fallback paths.
+
+The tradeoff is that local-first desktop apps need graceful degradation because users may not have Redis, ONNX files, GPU drivers, or identical platform environments.
+
+### Packaging and deployment
+
+Native Electron builds are optimized for the desktop user experience. Docker Compose supports backend + Redis workflows for reproducible backend use without making Docker required for normal desktop inference. ONNX files are locally generated and validated rather than blindly committed, and platform/resource/ONNX resolvers keep packaging logic centralized.
+
+The tradeoff is that packaged desktop convenience must be balanced with large ML assets, platform-specific native dependencies, and optional acceleration providers.
+
+### Local-first privacy
+
+Images are processed on localhost, and no cloud upload or API key is required for normal inference. Telemetry and observability should avoid raw images, image hashes, local paths, filenames, or high-cardinality user data so diagnostics stay useful without exposing private inputs.
+
+The tradeoff is that privacy is prioritized over cloud scalability.
 
 ---
 
