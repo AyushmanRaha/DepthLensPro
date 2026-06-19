@@ -24,6 +24,14 @@ Turn ordinary 2D images into depth maps, compare neural depth models, benchmark 
 **No cloud uploads. No API keys. No subscription.**
 Images are processed through a local Electron + FastAPI + PyTorch/ONNX pipeline.
 
+## Demo Video
+
+<video src="https://github.com/AyushmanRaha/DepthLensPro/releases/download/v1.0-demo/demo.mp4" controls width="100%">
+  Your browser does not support the video tag.
+</video>
+
+[Watch the demo video](https://github.com/AyushmanRaha/DepthLensPro/releases/download/v1.0-demo/demo.mp4)
+
 </div>
 
 ---
