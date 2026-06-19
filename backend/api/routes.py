@@ -68,7 +68,7 @@ def _acceleration_checks(devs: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def _resolve(device: str) -> Any:
     from backend.utils.hardware import _resolve as impl
 
-    return impl(device)
+    return impl(device, depth=depth, force=force)
 
 
 def _inference() -> Any:
@@ -89,16 +89,16 @@ def run_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
     return impl(model=model, device=device, iterations=iterations)
 
 
-def onnx_status_payload(device: str = "auto") -> dict[str, Any]:
+def onnx_status_payload(device: str = "auto", *, depth: str = "quick", force: bool = False) -> dict[str, Any]:
     from backend.services.onnx_diagnostics import onnx_status_payload as impl
 
-    return impl(device=device)
+    return impl(device=device, depth=depth, force=force)
 
 
-def readiness_payload(device: str = "auto") -> dict[str, Any]:
+def readiness_payload(device: str = "auto", *, depth: str = "quick", force: bool = False) -> dict[str, Any]:
     from backend.services.onnx_diagnostics import readiness_payload as impl
 
-    return impl(device)
+    return impl(device, depth=depth, force=force)
 
 
 def process_image(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -320,7 +320,7 @@ async def observability_snapshot() -> dict[str, Any]:
 
 
 @router.get("/health")
-async def health() -> dict[str, Any]:
+async def health(depth: str = "quick", force: bool = False) -> dict[str, Any]:
     started = time.perf_counter()
     devs, best, device_meta = _cached_devices()
     accel = {k: v for k, v in devs.items() if k != "cpu"}
@@ -343,7 +343,7 @@ async def health() -> dict[str, Any]:
         cache_error = str(exc)
     cache_ms = _elapsed_ms(cache_started)
     try:
-        onnx = onnx_status_payload(best)
+        onnx = onnx_status_payload(best, depth=depth, force=force)
     except Exception as exc:
         log.warning("ONNX diagnostics degraded: %s", exc)
         onnx = {"status": "degraded", "error": str(exc)}
@@ -399,12 +399,12 @@ async def health() -> dict[str, Any]:
 
 
 @router.get("/ready")
-async def ready() -> dict[str, Any]:
+async def ready(depth: str = "quick", force: bool = False) -> dict[str, Any]:
     """Report whether required inference dependencies are importable without loading models."""
 
     from backend.services.diagnostics import readiness_payload
 
-    return cast(dict[str, Any], await run_in_threadpool(readiness_payload))
+    return cast(dict[str, Any], await run_in_threadpool(readiness_payload, depth=depth, force=force))
 
 
 @router.get("/devices")
@@ -414,10 +414,10 @@ async def list_devices() -> dict[str, Any]:
 
 
 @router.get("/onnx/status")
-async def onnx_status(device: str = "auto") -> dict[str, Any]:
+async def onnx_status(device: str = "auto", depth: str = "quick", force: bool = False) -> dict[str, Any]:
     """Expose static ONNX weight and runtime provider diagnostics."""
 
-    return cast(dict[str, Any], await run_in_threadpool(onnx_status_payload, device=device))
+    return cast(dict[str, Any], await run_in_threadpool(onnx_status_payload, device=device, depth=depth, force=force))
 
 
 @router.get("/models")

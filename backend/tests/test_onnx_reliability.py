@@ -297,3 +297,29 @@ def test_onnx_engine_load_is_singleton_and_forward_lock_is_created(
     assert len({id(engine) for engine in engines}) == 1
     assert "midas_small:cpu" in inference._ONNX_FORWARD_LOCKS
     inference.clear_models()
+
+
+def test_quick_onnx_status_does_not_create_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "midas_small.onnx").write_bytes(b"onnx")
+    monkeypatch.setenv("DEPTHLENS_ONNX_DIR", str(tmp_path))
+    loaded_paths = install_fake_ort(monkeypatch)
+
+    payload = onnx_diagnostics.onnx_status_payload("cpu", depth="quick", force=True)
+
+    assert payload["diagnostic_depth"] == "quick"
+    assert loaded_paths == []
+    assert payload["models"]["midas_small"]["session_checked"] is False
+
+
+def test_deep_onnx_status_is_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    for model in ["midas_small", "dpt_hybrid", "dpt_large"]:
+        (tmp_path / f"{model}.onnx").write_bytes(b"onnx")
+    monkeypatch.setenv("DEPTHLENS_ONNX_DIR", str(tmp_path))
+    loaded_paths = install_fake_ort(monkeypatch)
+
+    first = onnx_diagnostics.onnx_status_payload("cpu", depth="deep", force=True)
+    second = onnx_diagnostics.onnx_status_payload("cpu", depth="deep")
+
+    assert first["diagnostic_depth"] == "deep"
+    assert second["cached"] is True
+    assert len(loaded_paths) == 3

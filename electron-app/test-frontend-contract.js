@@ -139,6 +139,10 @@ function assertStartupCriticalPathIsFailureIsolated() {
   assert(initBody.includes('await checkLive()') || initBody.includes('await checkLive({ quiet: true })'), 'startup must perform /live checks');
   assert(initBody.includes('await checkReadiness'), 'startup must perform /ready checks when live succeeds');
   assert(initBody.includes('await checkDiagnostics'), 'startup must perform diagnostics/device discovery when live succeeds');
+  const apiClient = readFrontendScript('js/api-client.js');
+  assert(apiClient.includes('statusMap = { offline: "offline", starting: "connecting", live: "online", diagnostics_pending: "online", ready: "online", degraded: "online"'), 'frontend must use explicit engine status states');
+  assert(apiClient.includes('/ready?depth=quick'), 'startup readiness must use quick diagnostics');
+  assert(apiClient.includes('/health?depth=quick'), 'startup health must use quick diagnostics');
   assert(initBody.indexOf('runOptionalInitializer("latency chart", initLatencyChart)') < initBody.indexOf('await resolveApiBaseUrl()'), 'optional chart setup must not wrap backend startup');
 }
 

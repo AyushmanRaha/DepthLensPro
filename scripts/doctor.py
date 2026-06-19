@@ -454,7 +454,7 @@ def upgrade_python_tooling(py: Path, args: argparse.Namespace) -> dict[str, str]
                 "install",
                 "--upgrade",
                 "pip",
-                "setuptools",
+                "setuptools<82",
                 "wheel",
                 "certifi",
             ],
@@ -677,7 +677,7 @@ def setup(args: argparse.Namespace) -> dict[str, Any]:
     selected_cmd, selected = select_python(args)
     step(2, "Creating or validating venv")
     py = ensure_venv(selected_cmd)
-    step(3, "Upgrading pip/setuptools/wheel/certifi")
+    step(3, "Upgrading pip/setuptools<82/wheel/certifi")
     env = upgrade_python_tooling(py, args)
     step(4, "Installing backend dependencies")
     install_python_dependencies(py, env, args)

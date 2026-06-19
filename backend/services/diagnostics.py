@@ -97,14 +97,14 @@ def _torch_runtime_details(torch_check: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def readiness_payload() -> dict[str, Any]:
+def readiness_payload(depth: str = "quick", force: bool = False) -> dict[str, Any]:
     """Return a fast, non-mutating readiness payload without loading MiDaS weights."""
     started = time.perf_counter()
     required = {name: _module_check(name, required=True) for name in REQUIRED_RUNTIME_MODULES}
     optional = {name: _module_check(name, required=False) for name in OPTIONAL_RUNTIME_MODULES}
     required_ok = all(item.get("available") for item in required.values())
     torch_details = _torch_runtime_details(required.get("torch", {}))
-    onnx_status = onnx_status_payload(settings.DEPTHLENS_WARMUP_DEVICE)
+    onnx_status = onnx_status_payload(settings.DEPTHLENS_WARMUP_DEVICE, depth=depth, force=force)
     asset_status = inspect_model_assets()
     asset_status["runtime_imports_ready"] = required_ok
     inference_ready = bool(required_ok and asset_status.get("model_assets_ready"))
@@ -147,6 +147,7 @@ def readiness_payload() -> dict[str, Any]:
             for model, item in onnx_status["models"].items()
         },
         "onnx": onnx_status,
+        "diagnostic_depth": depth,
         "models": [{"id": model_id, **meta} for model_id, meta in SUPPORTED_MODELS.items()],
         "colormaps": list(COLORMAP_NAMES),
         "settings": {

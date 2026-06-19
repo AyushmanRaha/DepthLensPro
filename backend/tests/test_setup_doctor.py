@@ -154,3 +154,17 @@ def test_onnx_validate_only_command_never_forces_export() -> None:
     cmd = doctor.onnx_export_command(Path("python"), args)
     assert "--validate-only" in cmd
     assert "--force" not in cmd
+
+
+def test_python_tooling_upgrade_pins_setuptools_below_82(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run(cmd, stream=False):
+        captured["cmd"] = cmd
+        return None
+
+    monkeypatch.setattr(doctor, "_run", fake_run)
+    monkeypatch.setattr(doctor, "cert_env", lambda py: {})
+    doctor.upgrade_python_tooling(Path("python"), doctor.parse_args([]))
+    assert "setuptools<82" in captured["cmd"]
+    assert "setuptools" not in captured["cmd"]

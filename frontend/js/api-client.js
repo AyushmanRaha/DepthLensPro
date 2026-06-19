@@ -4,8 +4,10 @@
 // SERVER HEALTH & DEVICE LIST
 // ══════════════════════════════════════════════════════════════
 function setStatus(cls, label, sub, deviceText) {
-  const safeCls = ["online", "offline", "connecting"].includes(cls) ? cls : "offline";
+  const statusMap = { offline: "offline", starting: "connecting", live: "online", diagnostics_pending: "online", ready: "online", degraded: "online", online: "online", connecting: "connecting" };
+  const safeCls = statusMap[cls] || "offline";
 
+  state.engineStatus.status = cls;
   state.engineStatus.cls = safeCls;
   state.engineStatus.label = label || "Depth Engine";
   state.engineStatus.sub = sub || "";
@@ -67,14 +69,14 @@ function formatEngineBytes(bytes) {
 }
 
 function engineStatusStateText() {
-  const { cls, live } = state.engineStatus;
-  if (cls === "online") {
-    if (live?.busy) return "Depth engine busy";
-    if (inferenceReady) return "Depth engine ready";
-    return "Engine detected · checking runtime";
-  }
-  if (cls === "connecting") return "Connecting to depth engine";
-  return "Depth engine unavailable";
+  const { cls, live, status } = state.engineStatus;
+  if (status === "offline" || cls === "offline") return "Depth engine unavailable";
+  if (status === "starting" || cls === "connecting") return "Connecting to depth engine";
+  if (live?.busy) return "Depth engine busy";
+  if (status === "ready" || inferenceReady) return "Depth engine ready";
+  if (status === "degraded") return "Depth engine degraded";
+  if (status === "diagnostics_pending") return "Engine live · checking diagnostics";
+  return backendOnline ? "Depth engine live" : "Depth engine unavailable";
 }
 
 function engineReadinessText() {
@@ -82,8 +84,8 @@ function engineReadinessText() {
 
   if (inferenceReady) return "Inference runtime ready";
   if (readiness?.required) return readinessSummary(readiness);
-  if (state.engineStatus.cls === "offline") return "Inference runtime unavailable";
-  return "Checking inference runtime";
+  if (state.engineStatus.status === "offline" || state.engineStatus.cls === "offline") return "Inference runtime unavailable";
+  return backendOnline ? "Checking inference runtime" : "Inference runtime unavailable";
 }
 
 function engineDiagnosticsText() {
@@ -394,16 +396,17 @@ async function checkReadiness({ quiet = true } = {}) {
   if (!backendOnline) { inferenceReady = false; return false; }
   const started = performance.now();
   try {
-    const res = await apiFetch("/ready", { signal: timeoutSignal(5000) });
+    setStatus("diagnostics_pending", "Depth engine live", "Checking inference readiness", deviceBadge(state.devices, state.primaryDevice));
+    const res = await apiFetch("/ready?depth=quick", { signal: timeoutSignal(12000) });
     const data = await res.json();
     state.engineStatus.readiness = data;
     readinessDetails = data;
     inferenceReady = Boolean(data.inference_ready);
     if (inferenceReady) {
-      setStatus("online", "Depth engine online", `Inference runtime ready · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
+      setStatus("ready", "Depth engine ready", `Inference runtime ready · ${API || DEFAULT_API_BASE_URL}`, deviceBadge(state.devices, state.primaryDevice));
     } else {
       const summary = readinessSummary(data);
-      setStatus("offline", "Depth engine degraded", summary);
+      setStatus("degraded", "Depth engine degraded", summary);
       const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
       if (bannerText) bannerText.textContent = `Inference runtime degraded · ${summary}`;
       if (!quiet) toastOnce(`Inference runtime is not ready · ${summary}`, "error", 8000);
@@ -417,7 +420,8 @@ async function checkReadiness({ quiet = true } = {}) {
     readinessDetails = null;
     inferenceReady = false;
     state.engineStatus.readiness = null;
-    setStatus("offline", "Depth engine degraded", `Runtime check failed · ${err.message}`);
+    if (backendOnline) setStatus("diagnostics_pending", "Depth engine live", `Readiness still checking · ${err.message}`);
+    else setStatus("offline", "Depth engine offline", `No /live response from ${API || DEFAULT_API_BASE_URL}`);
     if (!quiet) toastOnce(`Runtime check failed · ${err.message}`, "error", 6000);
     syncQueueControls();
     return false;
@@ -460,7 +464,7 @@ async function checkLive({ quiet = false, signal } = {}) {
     if (data.busy) {
       setStatus("online", "Depth engine busy", "Benchmark or model load running · /live ok", deviceBadge(state.devices, state.primaryDevice));
     } else {
-      setStatus("online","Depth engine detected",`Engine detected · checking runtime`, deviceBadge(state.devices, state.primaryDevice));
+      setStatus("live","Depth engine detected",`Engine detected · checking runtime`, deviceBadge(state.devices, state.primaryDevice));
     }
     logEndpointTiming("/live", started, true);
     syncQueueControls();
@@ -489,7 +493,8 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
   if (!signal) state.healthAbort = controller;
   const requestSignal = signal || controller.signal;
   try {
-    const res = await apiFetch("/health", { signal: anySignal([requestSignal, timeoutSignal(6000)]) });
+    setStatus("diagnostics_pending", "Depth engine live", "Checking diagnostics", deviceBadge(state.devices, state.primaryDevice));
+    const res = await apiFetch("/health?depth=quick", { signal: anySignal([requestSignal, timeoutSignal(12000)]) });
     const data = await res.json();
     state.engineStatus.health = data;
     applyCacheMetrics(data.cache_metrics);
@@ -498,7 +503,7 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
     state.devices = devs; state.primaryDevice = primary;
     const badge = deviceBadge(devs, primary);
     const accelText = accelerationSummary(data);
-    setStatus("online","Depth engine online",`PyTorch ${data.torch_version} · ${primary} · diagnostics ${data.status || "ok"} · ${accelText}`,badge);
+    setStatus(data.status === "degraded" ? "degraded" : (inferenceReady ? "ready" : "live"), data.status === "degraded" ? "Depth engine degraded" : "Depth engine online",`PyTorch ${data.torch_version} · ${primary} · diagnostics ${data.status || "ok"} · ${accelText}`,badge);
     await loadDevices(devs, primary);
     updateDeviceInfoBanner(`${badge} · ${accelText}`);
     logEndpointTiming("/health", started, true, data.status || "ok");
