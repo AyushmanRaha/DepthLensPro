@@ -1,99 +1,55 @@
-# DepthLens Pro Debugging Guide
+# Debugging and Troubleshooting
 
-Use this guide to diagnose common runtime and packaged-app failures without changing public install, API, or UI behavior.
+## Basic checks
 
-## Backend startup failures
+```bash
+curl http://127.0.0.1:8765/live
+curl http://127.0.0.1:8765/ready
+curl http://127.0.0.1:8765/health
+```
 
-1. Check whether the lightweight endpoint starts.
-   ```bash
-   cd electron-app && npm run backend:live
-   ```
-2. Run the backend diagnostic helper for port, process, and endpoint details.
-   ```bash
-   python scripts/diagnose_backend.py
-   ```
-3. Inspect Electron backend startup output.
-   - Main-process lifecycle code keeps a bounded backend-output tail for remediation messages.
-   - Startup orchestration lives in `electron-app/src/main/backend-lifecycle.js`.
-4. For import failures, verify dependencies in the active venv.
-   ```bash
-   python -m pytest backend/tests/test_lightweight_live.py
-   ```
+`/live` confirms the process is reachable. `/ready` separates backend liveness from runtime imports, model assets, PyTorch cache, ONNX availability, and inference readiness. `/health` provides deeper diagnostics.
+
+## Backend offline
+
+Start the backend with:
+
+```bash
+npm run backend:dev
+```
+
+If port `8765` is already in use, stop the old backend with:
+
+```bash
+npm run stop:backend
+```
 
 ## Missing model assets
 
-Standard native builds require the PyTorch MiDaS Torch Hub cache under `models/torch-cache`; ONNX files are optional for standard builds.
+Standard builds need the PyTorch MiDaS cache under `models/torch-cache`. ONNX is optional for standard builds. ONNX builds need `.onnx` files under `models/onnx`.
 
-1. Verify repo resources.
-   ```bash
-   npm run verify:resources
-   ```
-2. If the Torch cache is missing, rerun the platform setup step.
-   ```bash
-   npm run setup:mac      # or setup:linux / setup:win
-   ```
-3. Rebuild after setup so packaged resources include the refreshed cache.
-   ```bash
-   npm run build:mac:arm64
-   ```
+```bash
+npm run setup
+npm run verify:resources
+npm run verify:onnx
+```
 
-## ONNX missing or invalid files
+## Packaged startup readiness model
 
-ONNX builds and ONNX-only verification require all three files in `models/onnx`:
+Packaged startup separates:
 
-- `midas_small.onnx`
-- `dpt_hybrid.onnx`
-- `dpt_large.onnx`
+1. Electron main process starts and resolves packaged paths.
+2. Backend process is spawned without shell execution.
+3. Electron polls `/live` until the local service is reachable.
+4. `/ready` reports runtime import readiness, model-asset readiness, PyTorch cache readiness, ONNX readiness, and inference readiness.
+5. Renderer controls should remain disabled until the app has a usable backend state.
 
-1. For a standard build, missing ONNX files are not fatal.
-2. For an ONNX build, rerun ONNX setup for the target platform.
-   ```bash
-   npm run setup:mac:onnx      # or setup:linux:onnx / setup:win:onnx
-   ```
-3. Validate existing ONNX files only when they exist locally.
-   ```bash
-   npm run verify:onnx
-   ```
-4. Use `npm run verify:onnx:required` to confirm all three ONNX files are present and non-empty without exporting new files.
+This model helps distinguish process launch failures, missing resources, optional ONNX gaps, and true inference failures.
 
-## Port conflicts
+## Setup appears stuck
 
-DepthLens Pro probes backend ports before launching and records backend ownership metadata to avoid killing unrelated processes.
+Setup streams pip, npm, MiDaS, detector, ONNX export, and verification output. The last printed command usually identifies the active operation. Re-run the platform setup command if network or cache operations fail.
 
-1. Run the diagnostic helper.
-   ```bash
-   python scripts/diagnose_backend.py
-   ```
-2. Stop a DepthLens-owned backend process.
-   ```bash
-   cd electron-app && npm run kill:backend
-   ```
-3. If another process owns the port, stop that process manually or launch DepthLens on a free fallback port.
+## ONNX benchmark unavailable
 
-## Packaged resource failures
-
-Packaged apps must contain the backend, frontend, Python runtime expectations, Torch cache, and optional/required ONNX files according to the build mode.
-
-1. Verify a packaged app after build.
-   ```bash
-   cd electron-app && npm run verify:packaged
-   ```
-2. For platform-specific checks, use the matching script.
-   ```bash
-   cd electron-app && npm run verify:packaged:mac
-   cd electron-app && npm run verify:packaged:win
-   cd electron-app && npm run verify:packaged:linux
-   ```
-3. If verification fails, rerun setup and rebuild rather than copying files into an installed app by hand.
-
-## Electron settings corruption
-
-Settings persistence is sanitized and backed up when corruption is detected.
-
-1. Settings schema and backup behavior live in `electron-app/src/main/settings-store.js`.
-2. Run the persistence schema test.
-   ```bash
-   cd electron-app && node test-persistence-schema.js
-   ```
-3. If a local settings file is corrupt, keep the generated backup for diagnosis and let the app recreate sanitized defaults.
-4. Do not relax Electron security defaults to work around settings issues; keep preload/contextBridge boundaries intact.
+ONNX Runtime is optional. Use standard PyTorch inference unless you intentionally need ONNX acceleration experiments. For ONNX builds, run the ONNX setup script for your platform and validate files in `models/onnx`.
