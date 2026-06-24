@@ -34,7 +34,7 @@ def test_depth_to_point_cloud_shape_metadata_and_rgb_conversion() -> None:
         _synthetic_depth(),
         depth_near_percentile=0.0,
         depth_far_percentile=100.0,
-        coordinate_system="camera",
+        coordinate_system="z_up",
     )
 
     points = cloud["points"]
@@ -57,10 +57,10 @@ def test_depth_to_point_cloud_shape_metadata_and_rgb_conversion() -> None:
 def test_y_up_coordinate_system_flips_y_sign() -> None:
     img = _synthetic_image()
     depth = _synthetic_depth()
-    camera = depth_to_point_cloud(
+    z_up = depth_to_point_cloud(
         img,
         depth,
-        coordinate_system="camera",
+        coordinate_system="z_up",
         depth_near_percentile=0.0,
         depth_far_percentile=100.0,
     )["points"]
@@ -72,9 +72,9 @@ def test_y_up_coordinate_system_flips_y_sign() -> None:
         depth_far_percentile=100.0,
     )["points"]
 
-    np.testing.assert_allclose(y_up[:, 0], camera[:, 0])
-    np.testing.assert_allclose(y_up[:, 1], -camera[:, 1])
-    np.testing.assert_allclose(y_up[:, 2], camera[:, 2])
+    np.testing.assert_allclose(y_up[:, 0], z_up[:, 0])
+    np.testing.assert_allclose(y_up[:, 1], -z_up[:, 1])
+    np.testing.assert_allclose(y_up[:, 2], z_up[:, 2])
 
 
 def test_max_points_limits_output_count() -> None:

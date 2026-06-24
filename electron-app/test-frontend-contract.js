@@ -182,8 +182,15 @@ function assertRequestConstructionAndErrorParsing() {
   assert(req.endpoint.startsWith('/benchmark?')); assert(req.endpoint.includes('model=MiDaS_small')); assert(req.endpoint.includes('device=cpu')); assert(req.endpoint.includes('iterations=3'));
   req = contracts.buildDetectRequest({ file, threshold:0.4, maxDetections:7, device:'cpu' });
   f = fields(req.body); assert.strictEqual(req.endpoint, '/detect'); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.threshold, '0.4'); assert.strictEqual(f.max_detections, '7');
-  req = contracts.buildReconstructRequest({ file, model:'MiDaS_small', device:'cpu', colormap:'inferno', exportFormat:'ply', maxPoints:100, previewPoints:10, focalScale:1.2, depthScale:1, depthNearPercentile:2, depthFarPercentile:98, coordinateSystem:'y_up' });
-  f = fields(req.body); assert.strictEqual(req.endpoint, '/reconstruct'); for (const key of ['file','model','device','colormap','export_format','max_points','preview_points','focal_scale','depth_scale','depth_near_percentile','depth_far_percentile','coordinate_system']) assert(key in f, `missing reconstruct field ${key}`);
+  req = contracts.buildReconstructRequest({ file, model:'MiDaS_small', device:'cpu', colormap:'inferno', exportFormat:'ply', maxPoints:100, previewPoints:10, focalScale:1.2, depthScale:1, depthNearPercentile:2, depthFarPercentile:98, coordinateSystem:'y_up', sampling:'grid', includeRgb:true });
+  f = fields(req.body); assert.strictEqual(req.endpoint, '/reconstruct'); for (const key of ['file','model','device','colormap','export_format','max_points','preview_points','focal_scale','depth_scale','depth_near_percentile','depth_far_percentile','coordinate_system','sampling','include_rgb']) assert(key in f, `missing reconstruct field ${key}`);
+  assert.strictEqual(f.sampling, 'grid'); assert.strictEqual(f.include_rgb, 'true');
+  for (const sampling of ['grid', 'stride', 'random']) {
+    req = contracts.buildReconstructRequest({ file, sampling });
+    f = fields(req.body); assert.strictEqual(f.sampling, sampling);
+  }
+  req = contracts.buildReconstructRequest({ file, includeRgb:false });
+  f = fields(req.body); assert.strictEqual(f.include_rgb, 'false');
   assert.deepStrictEqual(contracts.buildCacheClearRequest(), { endpoint:'/cache/clear', method:'POST' });
   assert.deepStrictEqual(contracts.buildObservabilityRequest(), { endpoint:'/observability', method:'GET' });
   assert.strictEqual(contracts.normalizeApiError({ detail:{ error_code:'INVALID_MODEL', message:'Bad model', retryable:false } }).errorCode, 'INVALID_MODEL');
