@@ -10,9 +10,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import HTTPException
-
-from backend.api.errors import benchmark_timeout
+from backend.api.errors import benchmark_timeout, http_error
 
 PROBE_TTL_SECONDS = 10.0
 DEVICE_CACHE: dict[str, Any] = {"expires_at": 0.0, "devices": None, "primary": "cpu", "error": None}
@@ -181,7 +179,13 @@ def validated_device_or_422(
 
     avail = available_options()
     if device not in avail:
-        raise HTTPException(422, f"Device '{device}' is unavailable. Options: {avail}")
+        raise http_error(
+            422,
+            "DEVICE_UNAVAILABLE",
+            f"Device '{device}' is unavailable. Options: {avail}",
+            field="device",
+            retryable=False,
+        )
     try:
         return str(resolve(device))
     except asyncio.TimeoutError as exc:
@@ -190,10 +194,20 @@ def validated_device_or_422(
     except ValueError as exc:
         refreshed = available_options(force=True)
         if device not in refreshed:
-            raise HTTPException(
-                422, f"Device '{device}' is unavailable. Options: {refreshed}"
+            raise http_error(
+                422,
+                "DEVICE_UNAVAILABLE",
+                f"Device '{device}' is unavailable. Options: {refreshed}",
+                field="device",
+                retryable=False,
             ) from exc
         try:
             return str(resolve(device))
         except ValueError as refreshed_exc:
-            raise HTTPException(422, str(refreshed_exc)) from refreshed_exc
+            raise http_error(
+                422,
+                "DEVICE_VALIDATION_ERROR",
+                "Requested device could not be resolved after refreshing available devices.",
+                field="device",
+                retryable=False,
+            ) from refreshed_exc

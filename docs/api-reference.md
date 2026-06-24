@@ -223,9 +223,9 @@ Generates an approximate point cloud from a source image.
 | `depth_scale` | float | `1.0` | Z-axis multiplier |
 | `depth_near_percentile` | float | `2.0` | Near clipping percentile (clips foreground outliers) |
 | `depth_far_percentile` | float | `98.0` | Far clipping percentile (clips background outliers) |
-| `sampling` | string | `grid` | `grid` (deterministic) or `random` (seed 0) |
+| `sampling` | string | `grid` | `grid`, `stride`, or `random` (seed 0) |
 | `include_rgb` | boolean | `true` | Embed source-image pixel colours per point |
-| `coordinate_system` | string | `y_up` | `y_up` (Y negated) or `camera` (raw projection) |
+| `coordinate_system` | string | `y_up` | `y_up` (Y negated) or `z_up` (raw projection). Invalid values return a structured validation error. |
 
 ---
 

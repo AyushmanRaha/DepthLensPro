@@ -15,4 +15,8 @@ assert.throws(() => validateSettingsPayload(Object.create(null)), /object/);
 assert.throws(() => validateSettingsPayload({ __proto__: { polluted: true } }), /object/);
 assert.throws(() => validateSettingsPayload({ privacy: { nested: { bad: true } } }), /nested objects|plain object|unsupported/);
 assert.throws(() => validateSettingsPayload({ selectedModel: "bad\0model" }), /safe string/);
+assert.throws(() => validateSettingsPayload({ selectedModel: () => "MiDaS_small" }), /unsupported value/);
+assert.throws(() => validateSettingsPayload({ selectedDevice: Symbol("cpu") }), /unsupported value/);
+assert.throws(() => validateSettingsPayload({ ui: { compact: () => true } }), /unsupported value/);
+assert.throws(() => validateSettingsPayload({ privacy: { localOnly: Symbol("yes") } }), /unsupported value/);
 console.log("IPC validation contract passed.");
