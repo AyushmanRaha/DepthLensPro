@@ -698,3 +698,173 @@ def test_detect_generic_failure_is_sanitized(monkeypatch: Any) -> None:
     payload = response.json()["detail"]
     assert payload == {"error_code": "DETECTION_FAILED", "message": "Object detection failed"}
     assert "private" not in str(payload)
+
+
+def _stable_compare_device(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "backend.api.routes._cached_devices",
+        lambda force=False: (
+            {"cpu": {"name": "CPU", "type": "cpu", "compute_classes": ["cpu"], "available": True}},
+            "cpu",
+            {},
+        ),
+    )
+    monkeypatch.setattr("backend.api.routes._resolve", lambda requested: "cpu")
+
+
+def test_compare_uses_mocked_processing_and_returns_summary(monkeypatch: Any) -> None:
+    cache_service.clear()
+    _stable_compare_device(monkeypatch)
+    calls: list[str] = []
+
+    def fake_process(
+        raw: bytes,
+        model: str,
+        colormap: str,
+        device: str,
+        filename: str | None,
+        metrics: str | None = None,
+        outputs: str | None = None,
+        max_dim: int | None = None,
+        *args: Any,
+    ) -> dict[str, Any]:
+        calls.append(model)
+        latency = {"midas_small": 3.0, "dpt_hybrid": 7.0, "dpt_large": 11.0}[model]
+        return {
+            "depth_map": f"depth-{model}",
+            "grayscale": f"gray-{model}",
+            "metrics": {"mode": metrics},
+            "latency_ms": latency,
+            "model_id": model,
+            "colormap": colormap,
+            "device_used": device,
+            "engine_used": "pytorch",
+            "fallback_used": False,
+            "cached": False,
+            "resolution": {"width": 8, "height": 8},
+            "filename": filename,
+        }
+
+    monkeypatch.setattr("backend.api.routes.process_image", fake_process)
+
+    response = client.post(
+        "/compare",
+        files={"file": ("sample.png", io.BytesIO(b"compare-success"), "image/png")},
+        data={"models": "MiDaS_small,DPT_Hybrid,DPT_Large", "device": "auto"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["models"] == ["midas_small", "dpt_hybrid", "dpt_large"]
+    assert payload["total"] == 3
+    assert payload["succeeded"] == 3
+    assert payload["failed"] == 0
+    assert payload["errors"] == []
+    assert len(payload["results"]) == 3
+    assert payload["comparison"] == {
+        "fastest_model_id": "midas_small",
+        "lowest_latency_ms": 3.0,
+        "slowest_model_id": "dpt_large",
+        "highest_latency_ms": 11.0,
+    }
+    assert calls == ["midas_small", "dpt_hybrid", "dpt_large"]
+
+
+def test_compare_normalizes_aliases_and_deduplicates(monkeypatch: Any) -> None:
+    cache_service.clear()
+    _stable_compare_device(monkeypatch)
+    seen: list[str] = []
+
+    def fake_process(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        model = args[1]
+        seen.append(model)
+        return {
+            "depth_map": "depth-png",
+            "metrics": {},
+            "latency_ms": 1.0,
+            "model_id": model,
+            "device_used": args[3],
+            "engine_used": "pytorch",
+            "fallback_used": False,
+            "cached": False,
+            "resolution": {"width": 1, "height": 1},
+        }
+
+    monkeypatch.setattr("backend.api.routes.process_image", fake_process)
+
+    response = client.post(
+        "/api/compare",
+        files={"file": ("sample.png", io.BytesIO(b"compare-aliases"), "image/png")},
+        data={"models": "MiDaS Small,midas_small,DPT-Hybrid", "device": "auto"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["models"] == ["midas_small", "dpt_hybrid"]
+    assert seen == ["midas_small", "dpt_hybrid"]
+
+
+def test_compare_rejects_unsupported_model_names() -> None:
+    response = client.post(
+        "/compare",
+        files={"file": ("sample.png", io.BytesIO(_png_bytes()), "image/png")},
+        data={"models": "not-a-model"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_code"] == "UNKNOWN_MODEL"
+
+
+def test_compare_rejects_non_image_upload(monkeypatch: Any) -> None:
+    _stable_compare_device(monkeypatch)
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("non-image compare upload should not reach inference")
+
+    monkeypatch.setattr("backend.api.routes.process_image", fail_if_called)
+
+    response = client.post(
+        "/compare",
+        files={"file": ("notes.txt", io.BytesIO(b"not image"), "text/plain")},
+    )
+
+    assert response.status_code == 415
+    assert response.json()["detail"] == "Expected an image file"
+
+
+def test_compare_respects_per_model_cache_hits(monkeypatch: Any) -> None:
+    cache_service.clear()
+    _stable_compare_device(monkeypatch)
+    calls: list[str] = []
+
+    def fake_process(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        model = args[1]
+        calls.append(model)
+        return {
+            "depth_map": f"depth-{model}",
+            "metrics": {},
+            "latency_ms": 2.0,
+            "model_id": model,
+            "device_used": args[3],
+            "engine_used": "pytorch",
+            "fallback_used": False,
+            "cached": False,
+            "resolution": {"width": 2, "height": 2},
+        }
+
+    monkeypatch.setattr("backend.api.routes.process_image", fake_process)
+    request = {
+        "files": {"file": ("sample.png", io.BytesIO(b"compare-cache"), "image/png")},
+        "data": {"models": "MiDaS_small,DPT_Hybrid", "device": "auto"},
+    }
+
+    first = client.post("/compare", **request)
+    second = client.post(
+        "/compare",
+        files={"file": ("sample.png", io.BytesIO(b"compare-cache"), "image/png")},
+        data={"models": "MiDaS_small,DPT_Hybrid", "device": "auto"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls == ["midas_small", "dpt_hybrid"]
+    assert [item["cached"] for item in second.json()["results"]] == [True, True]
