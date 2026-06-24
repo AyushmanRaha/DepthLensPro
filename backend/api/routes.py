@@ -577,7 +577,13 @@ async def benchmark(
         log.warning("Route timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise validation_error(str(exc)) from exc
+        message = str(exc)
+        field = "model" if "model" in message.lower() else "iterations"
+        raise validation_error(
+            message,
+            code="INVALID_BENCHMARK_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         observability.record_crash("benchmark", "BENCHMARK_FAILED", exc, route="/api/benchmark")
         log.exception("Benchmark runtime unavailable")
@@ -612,7 +618,13 @@ async def estimate(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise validation_error(str(exc)) from exc
+        message = str(exc)
+        field = "outputs" if "output" in message.lower() else "metrics"
+        raise validation_error(
+            message,
+            code="INVALID_ESTIMATE_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -772,7 +784,13 @@ async def compare(
             parse_outputs=parse_outputs,
         )
     except ValueError as exc:
-        raise validation_error(str(exc)) from exc
+        message = str(exc)
+        field = "outputs" if "output" in message.lower() else "metrics"
+        raise validation_error(
+            message,
+            code="INVALID_COMPARE_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -1073,7 +1091,13 @@ async def batch(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise validation_error(str(exc)) from exc
+        message = str(exc)
+        field = "outputs" if "output" in message.lower() else "metrics"
+        raise validation_error(
+            message,
+            code="INVALID_BATCH_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
     resolved = _validated_device_or_422(device)

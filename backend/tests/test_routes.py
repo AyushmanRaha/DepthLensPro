@@ -499,7 +499,13 @@ def test_estimate_gt_required_without_file_returns_clear_error(monkeypatch: Any)
         },
     )
     assert response.status_code == 422
-    assert "GT depth file" in response.json()["detail"]
+    detail = response.json()["detail"]
+    if isinstance(detail, dict):
+        assert detail["error_code"] == "MISSING_GT"
+        assert detail["field"] == "gt_file"
+        assert "GT depth file" in detail["message"]
+    else:
+        assert "GT depth file" in detail
 
 
 def test_onnx_status_route_reports_paths_and_providers() -> None:
