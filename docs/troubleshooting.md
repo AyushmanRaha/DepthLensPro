@@ -114,14 +114,20 @@ venv/bin/python scripts/prefetch-midas-assets.py --offline --models all
 
 ### Packaged app missing resources
 
-Build scripts verify packaged resources, but installed stale copies can still be launched accidentally. Verify the packaged output directly:
+Build scripts verify repo resources before packaging and packaged resources after building, but installed stale copies can still be launched accidentally. Verify resources before packaging, then verify the packaged output directly after building:
 
 ```bash
+npm run verify:resources
 cd electron-app
+npm run verify:packaged:mac     # darwin arm64
+npm run verify:packaged:win     # win32 arm64
+npm run verify:packaged:linux   # linux arm64
 node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --torch-cache required --onnx optional
 node scripts/verify-packaged-resources.js --platform win32 --arch x64 --mode native --torch-cache required --onnx optional
 node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --torch-cache required --onnx optional
 ```
+
+---
 
 ### RGB Camera Detection Reports Missing Detector Weights
 
@@ -199,25 +205,6 @@ venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8770
 ```
 
 Electron automatically finds the next available port if `DEPTHLENS_BACKEND_PORT` is not pinned and the default port is busy. The frontend reads the actual backend URL from Electron's IPC at runtime, so port mismatches between the shell and the app are avoided.
-
----
-
-### Packaged App Missing Resources
-
-Verify resources before packaging:
-
-```bash
-npm run verify:resources
-```
-
-Verify a packaged output after building:
-
-```bash
-cd electron-app
-npm run verify:packaged:mac     # darwin arm64
-npm run verify:packaged:win     # win32 arm64
-npm run verify:packaged:linux   # linux arm64
-```
 
 ---
 

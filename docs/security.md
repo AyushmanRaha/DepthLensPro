@@ -39,7 +39,7 @@ Include:
 - Possible impact
 - Suggested mitigation, if known
 
-See [`SECURITY.md`](SECURITY.md) for the full policy.
+See [`SECURITY.md`](../SECURITY.md) for the full policy.
 
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 

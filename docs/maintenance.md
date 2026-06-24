@@ -2,6 +2,17 @@
 
 This guide describes the safe path for future maintainers to extend the refactored codebase without changing public behavior accidentally. Keep changes small and verify each layer before combining them.
 
+## Public behavior compatibility
+
+- Do not rename or break public API endpoints, request fields, status-code expectations, or response shapes without an intentional compatibility phase. Additive response fields should be documented.
+- Keep `/live` lightweight and dependency-safe; it must not load ML models or perform deep readiness checks.
+- Keep canonical model IDs stable: `midas_small`, `dpt_hybrid`, and `dpt_large`.
+- Keep supported colormaps stable unless an intentional compatibility change is planned: `inferno`, `plasma`, `viridis`, `magma`, `jet`, `hot`, `bone`, and `turbo`.
+- Preserve the public native workflow: clone the repository, run setup, build the app, and launch it.
+- Standard setup/build must not require ONNX files. ONNX setup/build must require all supported ONNX files: `midas_small.onnx`, `dpt_hybrid.onnx`, and `dpt_large.onnx`.
+- Keep current native platform support explicit: macOS arm64 only; Windows x64/arm64; Linux x64/arm64. macOS x64 and universal builds remain unsupported.
+- Keep behavior changes small and covered by lightweight tests that use mocks/stubs instead of real model downloads, Redis, Docker, or GPU-only dependencies.
+
 ## Add a model
 
 1. Add the canonical model metadata in `backend/model_registry.py`.

@@ -323,7 +323,6 @@ For full platform prerequisites, setup reports, diagnostics, resource verificati
 | [Project Structure](docs/project-structure.md) | Full repository tree and module descriptions. |
 | [Debugging](docs/debugging.md) | Maintainer debugging notes. |
 | [Maintenance](docs/maintenance.md) | Maintenance workflows. |
-| [Engineering Audit](docs/engineering-audit.md) | Existing engineering audit notes. |
 
 ---
 
@@ -338,12 +337,23 @@ For full platform prerequisites, setup reports, diagnostics, resource verificati
 | `/estimate` | POST | Generate a depth map for one image with selected model/device/outputs. |
 | `/batch` | POST | Process multiple images in one request. |
 | `/compare` | POST | Run supported models on one image and compare outputs. |
-| `/benchmark` | POST | Benchmark PyTorch against optional ONNX Runtime. |
+| `/api/compare` | POST | Frontend-compatible compare alias. |
+| `/benchmark` | GET | Benchmark PyTorch against optional ONNX Runtime. |
+| `/api/benchmark` | GET | Frontend-compatible benchmark alias. |
 | `/reconstruct` | POST | Generate approximate point-cloud data/export artifacts. |
+| `/api/reconstruct` | POST | Frontend-compatible reconstruction alias. |
+| `/detect` | POST | Run local object detection for RGB Camera / 3D workflows. |
+| `/api/detect` | POST | Frontend-compatible object-detection alias. |
 | `/devices` | GET | Report detected compute devices. |
+| `/models` | GET | Return supported model registry metadata. |
+| `/colormaps` | GET | Return supported colormap names. |
 | `/onnx/status` | GET | Report ONNX file/provider readiness. |
+| `/cache/metrics` | GET | Return active cache telemetry. |
+| `/cache` | DELETE | Clear the active inference cache. |
+| `/cache/clear` | POST | Clear the cache for browser/client flows that prefer POST. |
 | `/metrics` | GET | Prometheus metrics exposition. |
-| `/api/observability`, `/observability` | GET | Local JSON telemetry snapshots for the UI. |
+| `/api/observability` | GET | Local JSON telemetry snapshot for the UI. |
+| `/observability` | GET | Observability snapshot alias. |
 
 Read the full endpoint documentation in [API Reference](docs/api-reference.md).
 

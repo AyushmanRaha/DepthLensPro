@@ -4,7 +4,7 @@
 
 | Path | Best for | What runs |
 |---|---|---|
-| A. Native desktop app | Normal desktop use on supported ARM64 systems | Packaged Electron app + embedded backend |
+| A. Native desktop app | Normal desktop use on supported native desktop systems | Packaged Electron app + embedded backend |
 | B. Local development | Editing UI or backend code with hot-reload | Manual uvicorn + Electron dev shell |
 | C. Backend only | API testing, scripting, CI, integrations | FastAPI server only (no Electron) |
 | D. Docker Compose | Containerised backend with Redis cache | Backend container + Redis container |
