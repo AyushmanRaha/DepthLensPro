@@ -129,18 +129,31 @@ function getCanvasContext(canvas, label = "chart") {
   return ctx;
 }
 
+function validDimension(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+function isChartMeasurable(canvas) {
+  const parent = canvas?.parentElement;
+  if (!canvas?.isConnected || !parent) return false;
+  const rect = parent.getBoundingClientRect?.();
+  return Boolean(rect && rect.width > 0 && rect.height > 0);
+}
+
 function resizeCanvasToDisplaySize(canvas) {
-  const rect = canvas?.getBoundingClientRect?.() || {};
   const parentRect = canvas?.parentElement?.getBoundingClientRect?.() || {};
-  const cssWidth = Math.max(1, Math.round(rect.width || parentRect.width || canvas?.clientWidth || 320));
-  const cssHeight = Math.max(1, Math.round(rect.height || parentRect.height || canvas?.clientHeight || 180));
+  const rect = canvas?.getBoundingClientRect?.() || {};
+  const sourceWidth = validDimension(parentRect.width) ? parentRect.width : (rect.width || canvas?.clientWidth || 320);
+  const sourceHeight = validDimension(parentRect.height) ? parentRect.height : (rect.height || canvas?.clientHeight || 180);
+  const cssWidth = Math.max(1, Math.round(sourceWidth));
+  const cssHeight = Math.max(1, Math.round(sourceHeight));
   const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
   const width = Math.max(1, Math.round(cssWidth * dpr));
   const height = Math.max(1, Math.round(cssHeight * dpr));
   const changed = canvas.width !== width || canvas.height !== height;
   if (changed) { canvas.width = width; canvas.height = height; }
-  canvas.style.width = `${cssWidth}px`;
-  canvas.style.height = `${cssHeight}px`;
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
   const ctx = canvas.getContext?.("2d");
   ctx?.setTransform?.(dpr, 0, 0, dpr, 0, 0);
   return { width: cssWidth, height: cssHeight, dpr, changed };
@@ -235,7 +248,9 @@ function rememberChart(name, canvas, draw) {
 }
 
 function redrawVisibleCharts() {
-  chartRegistry.forEach((entry) => entry.draw?.());
+  chartRegistry.forEach((entry) => {
+    if (isChartMeasurable(entry.canvas)) entry.draw?.();
+  });
 }
 
 let chartResizeTimer = null;
@@ -343,12 +358,14 @@ function initCompareControls() {
     el.compareChartBody.hidden = !state.compareView.open;
     el.compareChartToggle.textContent = state.compareView.open ? "Hide Graph" : "Show Graph";
     el.compareChartToggle.setAttribute("aria-expanded", String(state.compareView.open));
+    if (state.compareView.open) requestAnimationFrame(() => scheduleChartResize());
   });
 }
 
 const DepthLensCharts = {
   getCanvasContext,
   resizeCanvasToDisplaySize,
+  isChartMeasurable,
   clearCanvas,
   drawNoDataState,
   drawLineChart,

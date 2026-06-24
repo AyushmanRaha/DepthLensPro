@@ -90,6 +90,9 @@ function switchPerformanceView(view) {
   el.performanceSubnav?.forEach(btn => { const active = btn.dataset.performanceView === next; btn.classList.toggle("active", active); btn.setAttribute("aria-selected", active ? "true" : "false"); });
   if (el.performanceViewBenchmark) { el.performanceViewBenchmark.hidden = next !== "benchmark"; el.performanceViewBenchmark.classList.toggle("active", next === "benchmark"); }
   if (el.performanceViewObservability) { el.performanceViewObservability.hidden = next !== "observability"; el.performanceViewObservability.classList.toggle("active", next === "observability"); }
+  const resizeCharts = window.DepthLensCharts?.scheduleChartResize
+    || (typeof scheduleChartResize === "function" ? scheduleChartResize : null);
+  if (resizeCharts) requestAnimationFrame(() => resizeCharts());
   if (next === "observability") loadObservability({ quiet: true });
 }
 async function loadObservability({ quiet = false, signal = null } = {}) {
