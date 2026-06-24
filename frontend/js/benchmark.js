@@ -13,52 +13,15 @@ function fmtBenchLatency(result) {
 
 function renderBenchmarkChart(data) {
   const results = data?.results || [];
-  const values = results.map(r => Number(r?.latency_ms?.avg));
-  if (typeof Chart !== "function") return;
-  const c = chartColors();
-  const ctx = $("#benchmarkChart")?.getContext?.("2d");
-  if (!ctx) return;
-  const labels = results.map(r => r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch");
-  const dataValues = values.map(v => Number.isFinite(v) ? v : null);
-  if (state.observability.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update?.("none"); }
-  if (benchmarkChart) {
-    benchmarkChart.data.labels = labels;
-    benchmarkChart.data.datasets[0].data = dataValues;
-    benchmarkChart.data.datasets[0].backgroundColor = dataValues.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
-    benchmarkChart.data.datasets[0].borderColor = dataValues.map(v => v === null ? "#5e6f81" : c.barBrd);
-    applyChartPalette(benchmarkChart, c);
-    benchmarkChart.update?.("none");
-    return;
-  }
-  benchmarkChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "Average latency (ms)",
-        data: dataValues,
-        backgroundColor: dataValues.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar),
-        borderColor: dataValues.map(v => v === null ? "#5e6f81" : c.barBrd),
-        borderWidth: 1.5,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: c.ttTitle, font: { family:"JetBrains Mono", size:10 } } },
-        tooltip: {
-          backgroundColor: c.tooltip, borderColor: c.ttBrd, borderWidth: 1,
-          titleColor: c.ttTitle, bodyColor: c.ttBody,
-          callbacks: { label: ctx => ctx.raw === null ? "Unavailable" : `${Number(ctx.raw).toFixed(1)} ms` },
-        },
-      },
-      scales: {
-        x: { ticks: { color: c.ttTitle, font: { family:"Rajdhani", size:12, weight:"600" } }, grid: { color: c.grid } },
-        y: { ticks: { color: c.tick, font: { family:"JetBrains Mono", size:9 } }, grid: { color: c.grid } },
-      },
-    },
-  });
+  const rows = results.map(r => ({
+    label: r.engine === "onnxruntime" ? "ONNX Runtime" : "PyTorch",
+    value: Number(r?.latency_ms?.avg),
+  }));
+  const canvas = $("#benchmarkChart");
+  if (!canvas) { warnChartOnce("benchmark:missing", "DepthLens Pro: benchmark chart canvas is unavailable."); return; }
+  benchmarkChart = { canvas, rows, draw: () => drawBarChart(canvas, rows, { label: "Average latency (ms)", emptyMessage: "No benchmark latency data yet", formatValue: v => `${Number(v).toFixed(1)} ms` }) };
+  rememberChart("benchmark", canvas, benchmarkChart.draw);
+  benchmarkChart.draw();
 }
 
 function renderBenchmark(data) {
@@ -157,12 +120,19 @@ function renderObservability(snapshot) {
   renderObservabilityChart(snapshot); renderTraceRows(snapshot); renderBenchmarkHistoryRows(snapshot); renderCrashRows(snapshot);
 }
 function renderObservabilityChart(snapshot) {
-  if (!el.observabilityChart || !window.Chart) return;
-  const c = chartColors(); const recent = snapshot?.inference?.recent || [];
+  const canvas = el.observabilityChart || $("#observabilityChart");
+  if (!canvas) { warnChartOnce("observability:missing", "DepthLens Pro: observability chart canvas is unavailable."); return; }
+  const recent = snapshot?.inference?.recent || [];
   const data = recent.map(e => Number(e.latency_ms)).filter(Number.isFinite).slice(-30);
-  if (!state.observability.chart) { state.observability.chart = new Chart(el.observabilityChart.getContext("2d"), { type:"line", data:{ labels:data.map((_,i)=>i+1), datasets:[{ label:"Inference latency (ms)", data, borderColor:c.line, backgroundColor:c.fill, tension:.35, fill:true }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ display:false }, y:{ display:true, grid:{ color:c.grid }, ticks:{ color:c.tick, font:{ family:"JetBrains Mono", size:9 }, maxTicksLimit:4 } } } } }); }
-  else { state.observability.chart.data.labels = data.map((_,i)=>i+1); state.observability.chart.data.datasets[0].data = data; applyChartPalette(state.observability.chart, c); state.observability.chart.update("none"); }
+  state.observability.chart = {
+    canvas,
+    values: data,
+    draw: () => drawLineChart(canvas, data, { label: "Inference latency (ms)", emptyMessage: "No inference latency samples yet" }),
+  };
+  rememberChart("observability", canvas, state.observability.chart.draw);
+  state.observability.chart.draw();
 }
+
 function renderTraceRows(snapshot) {
   const rows = (snapshot?.traces?.recent || []).slice(-10).reverse();
   el.observabilityTraceBody.innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(new Date(r.timestamp).toLocaleTimeString())}</td><td>${esc(r.component)}</td><td>${esc(r.span)}</td><td>${esc(fmtObsMs(r.duration_ms))}</td><td>${esc(r.outcome)}</td></tr>`).join("") : obsRowsEmpty("No traces yet");

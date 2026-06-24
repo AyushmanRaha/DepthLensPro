@@ -105,3 +105,17 @@ Telemetry is local-only: DepthLens Pro does not send analytics to cloud services
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Security and timeout settings
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DEPTHLENS_ROUTE_TIMEOUT_SECONDS` | `300` | Generous timeout for estimate, compare, detect, and reconstruct route work. Timeouts return `REQUEST_TIMEOUT` except `/reconstruct`, which returns `RECONSTRUCTION_TIMEOUT`. |
+| `DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS` | `300` | Per-item timeout for batch processing so one slow image produces a structured per-item `REQUEST_TIMEOUT` without altering the batch response contract. |
+| `DEPTHLENS_CORS_ALLOWED_ORIGINS` | empty | Comma-separated additional browser origins allowed by CORS. Localhost/127.0.0.1/file-null flows are allowed by default. |
+| `DEPTHLENS_CORS_ALLOW_ALL` | `false` | Development-only wildcard CORS escape hatch; credentials remain disabled. |
+
+Runtime installs use `backend/requirements.txt`. Development and CI quality checks use `backend/requirements-dev.txt`, which includes runtime dependencies plus Black, Ruff, mypy, and pytest.
+
+See [resource path contract](resource-path-contract.md) for packaged/development resource names shared by backend, Electron, and verification scripts.

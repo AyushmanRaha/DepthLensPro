@@ -58,7 +58,7 @@ npm run backend:dev
 
 ### Renderer Startup Initialization
 
-Renderer startup is dependency-ordered and failure-isolated in both packaged Electron installs and development runs. Foundational state helpers now load before chart/decorative scripts, and optional renderer initialization such as background canvas animation, Chart.js setup, Compare controls, pointer glow, guide accordion, and scroll navigation is isolated from backend startup. If a decorative or chart dependency is unavailable, the app should log a console warning while backend URL resolution, `/live`, `/ready`, `/health` diagnostics, device discovery, polling, and the Depth Engine status panel continue to initialize normally.
+Renderer startup is dependency-ordered and failure-isolated in both packaged Electron installs and development runs. Foundational state helpers now load before chart/decorative scripts, and optional renderer initialization such as background canvas animation, first-party chart setup, Compare controls, pointer glow, guide accordion, and scroll navigation is isolated from backend startup. If a decorative or chart dependency is unavailable, the app should log a console warning while backend URL resolution, `/live`, `/ready`, `/health` diagnostics, device discovery, polling, and the Depth Engine status panel continue to initialize normally.
 
 ---
 
@@ -114,14 +114,20 @@ venv/bin/python scripts/prefetch-midas-assets.py --offline --models all
 
 ### Packaged app missing resources
 
-Build scripts verify packaged resources, but installed stale copies can still be launched accidentally. Verify the packaged output directly:
+Build scripts verify repo resources before packaging and packaged resources after building, but installed stale copies can still be launched accidentally. Verify resources before packaging, then verify the packaged output directly after building:
 
 ```bash
+npm run verify:resources
 cd electron-app
+npm run verify:packaged:mac     # darwin arm64
+npm run verify:packaged:win     # win32 arm64
+npm run verify:packaged:linux   # linux arm64
 node scripts/verify-packaged-resources.js --platform darwin --arch arm64 --mode native --torch-cache required --onnx optional
 node scripts/verify-packaged-resources.js --platform win32 --arch x64 --mode native --torch-cache required --onnx optional
 node scripts/verify-packaged-resources.js --platform linux --arch x64 --mode native --torch-cache required --onnx optional
 ```
+
+---
 
 ### RGB Camera Detection Reports Missing Detector Weights
 
@@ -202,25 +208,6 @@ Electron automatically finds the next available port if `DEPTHLENS_BACKEND_PORT`
 
 ---
 
-### Packaged App Missing Resources
-
-Verify resources before packaging:
-
-```bash
-npm run verify:resources
-```
-
-Verify a packaged output after building:
-
-```bash
-cd electron-app
-npm run verify:packaged:mac     # darwin arm64
-npm run verify:packaged:win     # win32 arm64
-npm run verify:packaged:linux   # linux arm64
-```
-
----
-
 ### macOS Duplicate App Instances / Spotlight Conflicts
 
 ```bash
@@ -251,3 +238,13 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Error envelopes and privacy-safe diagnostics
+
+API errors include `detail.error_code` and `detail.message`; batch and compare item errors also include `error_detail` while preserving legacy string fields. Timeout errors are retryable and use route-specific codes. Logs and observability snapshots redact local paths, image filenames, cache tokens, and long base64-like payloads before display.
+
+
+## Blank chart panels
+
+Charts are rendered locally by `frontend/js/charts.js`. If Workspace, Performance, Benchmark, or Compare chart panels are blank, check the browser/Electron console for `DepthLens Pro:` chart diagnostics, confirm `frontend/js/charts.js` is present, run Electron resource verification, and ensure no stale `vendor/chart.umd.min.js` placeholder script is being loaded.

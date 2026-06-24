@@ -21,11 +21,14 @@ from backend.api.errors import (
 )
 from backend.api.errors import (
     detector_unavailable,
+    embedded_error,
     generic_detector_failure,
     generic_inference_failure,
     generic_reconstruction_failure,
     inference_dependency_unavailable,
     model_assets_unavailable,
+    timeout_error,
+    validation_error,
 )
 from backend.api.errors import (
     reconstruction_timeout as reconstruction_timeout_error,
@@ -36,7 +39,11 @@ from backend.api.validation import (
     normalize_request_colormap,
     normalize_request_metrics_and_outputs,
     normalize_request_model,
+    validate_detection_params,
+    validate_gt_upload,
     validate_image_upload_content_type,
+    validate_max_dim,
+    validate_reconstruction_params,
     validate_upload_size,
 )
 from backend.config import settings
@@ -153,6 +160,38 @@ log = logging.getLogger("depthlens")
 router = APIRouter()
 
 
+async def _with_route_timeout(
+    awaitable: Any,
+    route: str,
+    model: str | None = None,
+    device: str | None = None,
+    timeout_factory: Any = None,
+    timeout_code: str = "REQUEST_TIMEOUT",
+) -> Any:
+    try:
+        return await asyncio.wait_for(awaitable, timeout=settings.DEPTHLENS_ROUTE_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        observability.record_crash("api", timeout_code, exc, route=route)
+        if model and device:
+            observability.record_inference(
+                model, "unknown", device, None, outcome="error", error_code=timeout_code
+            )
+        log.warning(
+            "Route timed out", extra={"route": route, "model": model or "", "device": device or ""}
+        )
+        raise (timeout_factory() if timeout_factory else timeout_error(route)) from exc
+
+
+async def _with_batch_item_timeout(awaitable: Any, route: str = "/batch") -> Any:
+    try:
+        return await asyncio.wait_for(
+            awaitable, timeout=settings.DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError as exc:
+        observability.record_crash("api", "REQUEST_TIMEOUT", exc, route=route)
+        raise timeout_error(route) from exc
+
+
 def _normalize_compare_models(models: str | None) -> list[str]:
     raw_models = (
         list(MODEL_REGISTRY)
@@ -169,7 +208,14 @@ def _normalize_compare_models(models: str | None) -> list[str]:
             normalized.append(model_id)
             seen.add(model_id)
     if not normalized:
-        raise HTTPException(422, "At least one model is required")
+        raise HTTPException(
+            422,
+            {
+                "error_code": "INVALID_MODEL",
+                "message": "At least one model is required",
+                "field": "models",
+            },
+        )
     return normalized
 
 
@@ -203,7 +249,7 @@ def _comparison_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _safe_compare_error(model: str, exc: Exception) -> dict[str, str]:
+def _safe_compare_error(model: str, exc: Exception) -> dict[str, Any]:
     code = getattr(exc, "error_code", exc.__class__.__name__)
     if isinstance(exc, ModelAssetsUnavailableError):
         message = "Model assets unavailable"
@@ -211,7 +257,14 @@ def _safe_compare_error(model: str, exc: Exception) -> dict[str, str]:
         message = str(exc)
     else:
         message = "Depth inference failed"
-    return {"model_id": model, "error_code": str(code), "message": message}
+    detail = embedded_error(str(code), message)
+    return {
+        "model_id": model,
+        "error_code": detail["error_code"],
+        "message": detail["message"],
+        "error": detail["message"],
+        "error_detail": detail,
+    }
 
 
 def _dependency_unavailable(exc: Exception) -> HTTPException:
@@ -521,10 +574,16 @@ async def benchmark(
         observability.record_benchmark(
             model, None, device, device, iterations, None, None, None, None, None, 1, "error"
         )
-        log.warning("Benchmark timed out", extra={"model": model, "device": device})
+        log.warning("Route timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        message = str(exc)
+        field = "model" if "model" in message.lower() else "iterations"
+        raise validation_error(
+            message,
+            code="INVALID_BENCHMARK_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         observability.record_crash("benchmark", "BENCHMARK_FAILED", exc, route="/api/benchmark")
         log.exception("Benchmark runtime unavailable")
@@ -547,6 +606,7 @@ async def estimate(
 ) -> JSONResponse:
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
+    validate_max_dim(max_dim)
     try:
         metrics, outputs = normalize_request_metrics_and_outputs(
             metrics,
@@ -558,7 +618,13 @@ async def estimate(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        message = str(exc)
+        field = "outputs" if "output" in message.lower() else "metrics"
+        raise validation_error(
+            message,
+            code="INVALID_ESTIMATE_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -574,9 +640,16 @@ async def estimate(
     if gt_file is not None:
         gt_raw = await gt_file.read()
         gt_filename = gt_file.filename
-        validate_upload_size(gt_raw, label="GT depth file", max_size_mb=MAX_UPLOAD_SIZE_MB)
+        validate_gt_upload(gt_file, gt_raw)
     elif gt_required:
-        raise HTTPException(422, "GT mode requires one image and one GT depth file")
+        raise HTTPException(
+            422,
+            {
+                "error_code": "MISSING_GT",
+                "message": "GT mode requires one image and one GT depth file",
+                "field": "gt_file",
+            },
+        )
 
     # GT metrics depend on uploaded labels and must not reuse image-only cached payloads.
     ck = (
@@ -594,7 +667,7 @@ async def estimate(
             "route",
         )
     if cached is not None:
-        log.info("Cache hit: %r", file.filename)
+        log.info("Cache hit for uploaded image")
         observability.safe_observe(
             "route_cache_hit_inference",
             observability.record_inference,
@@ -610,26 +683,31 @@ async def estimate(
         return JSONResponse({**cached, "cached": True})
 
     try:
-        result = await process_image_async(
-            raw,
+        result = await _with_route_timeout(
+            process_image_async(
+                raw,
+                model,
+                colormap,
+                resolved,
+                file.filename,
+                metrics,
+                outputs,
+                max_dim,
+                gt_raw,
+                gt_filename,
+                gt_required,
+                gt_scale,
+                gt_invalid_value,
+            ),
+            "/estimate",
             model,
-            colormap,
             resolved,
-            file.filename,
-            metrics,
-            outputs,
-            max_dim,
-            gt_raw,
-            gt_filename,
-            gt_required,
-            gt_scale,
-            gt_invalid_value,
         )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
         observability.record_crash("inference", exc.error_code, exc, route="/estimate")
         observability.record_inference(
@@ -676,8 +754,7 @@ async def estimate(
         outputs_count=len(output_set),
     )
     log.info(
-        "✅ %r | %s | %s | %s ms",
-        file.filename,
+        "estimate completed | %s | %s | %s ms",
         model,
         resolved,
         result["latency_ms"],
@@ -698,6 +775,7 @@ async def compare(
 ) -> JSONResponse:
     model_ids = _normalize_compare_models(models)
     colormap = normalize_request_colormap(colormap)
+    validate_max_dim(max_dim)
     try:
         metrics, outputs = normalize_request_metrics_and_outputs(
             metrics,
@@ -706,7 +784,13 @@ async def compare(
             parse_outputs=parse_outputs,
         )
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        message = str(exc)
+        field = "outputs" if "output" in message.lower() else "metrics"
+        raise validation_error(
+            message,
+            code="INVALID_COMPARE_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -753,8 +837,13 @@ async def compare(
                     )
                     continue
 
-                result = await process_image_async(
-                    raw, model_id, colormap, resolved, file.filename, metrics, outputs, max_dim
+                result = await _with_route_timeout(
+                    process_image_async(
+                        raw, model_id, colormap, resolved, file.filename, metrics, outputs, max_dim
+                    ),
+                    "/compare",
+                    model_id,
+                    resolved,
                 )
                 result.setdefault("model_id", model_id)
                 _cache_service().set(ck, result)
@@ -817,20 +906,22 @@ async def detect(
     max_detections: int = Form(5),
 ) -> JSONResponse:
     validate_image_upload_content_type(file)
-    if threshold < 0.05 or threshold > 0.95:
-        raise HTTPException(422, "threshold must be between 0.05 and 0.95")
-    if max_detections < 1 or max_detections > 20:
-        raise HTTPException(422, "max_detections must be between 1 and 20")
+    validate_detection_params(threshold, max_detections)
     resolved = _validated_device_or_422(device)
     raw = await file.read()
     validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
     try:
-        result = await detect_objects_async(
-            raw=raw,
-            filename=file.filename,
-            device=resolved,
-            threshold=threshold,
-            max_detections=max_detections,
+        result = await _with_route_timeout(
+            detect_objects_async(
+                raw=raw,
+                filename=file.filename,
+                device=resolved,
+                threshold=threshold,
+                max_detections=max_detections,
+            ),
+            "/detect",
+            "object_detection",
+            resolved,
         )
         observability.record_inference(
             "object_detection",
@@ -841,7 +932,7 @@ async def detect(
         )
         return JSONResponse(result)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except Exception as exc:
         if (
             getattr(exc, "error_code", None) == "DETECTOR_WEIGHTS_UNAVAILABLE"
@@ -885,6 +976,17 @@ async def reconstruct(
 ) -> JSONResponse:
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
+    validate_max_dim(max_dim)
+    validate_reconstruction_params(
+        max_points,
+        preview_points,
+        focal_scale,
+        depth_scale,
+        depth_near_percentile,
+        depth_far_percentile,
+        sampling,
+        coordinate_system,
+    )
 
     resolved = _validated_device_or_422(device)
 
@@ -894,29 +996,36 @@ async def reconstruct(
     validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
 
     try:
-        result = await reconstruct_point_cloud_async(
-            raw=raw,
-            filename=file.filename,
-            model=model,
-            device=resolved,
-            colormap=colormap,
-            max_dim=max_dim,
-            export_format=export_format,
-            max_points=max_points,
-            preview_points=preview_points,
-            focal_scale=focal_scale,
-            depth_scale=depth_scale,
-            depth_near_percentile=depth_near_percentile,
-            depth_far_percentile=depth_far_percentile,
-            sampling=sampling,
-            include_rgb=include_rgb,
-            coordinate_system=coordinate_system,
+        result = await _with_route_timeout(
+            reconstruct_point_cloud_async(
+                raw=raw,
+                filename=file.filename,
+                model=model,
+                device=resolved,
+                colormap=colormap,
+                max_dim=max_dim,
+                export_format=export_format,
+                max_points=max_points,
+                preview_points=preview_points,
+                focal_scale=focal_scale,
+                depth_scale=depth_scale,
+                depth_near_percentile=depth_near_percentile,
+                depth_far_percentile=depth_far_percentile,
+                sampling=sampling,
+                include_rgb=include_rgb,
+                coordinate_system=coordinate_system,
+            ),
+            "/reconstruct",
+            model,
+            resolved,
+            timeout_factory=reconstruction_timeout_error,
+            timeout_code="RECONSTRUCTION_TIMEOUT",
         )
     except asyncio.TimeoutError as exc:
         log.warning("Reconstruction timed out", extra={"model": model, "device": device})
         raise reconstruction_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
         observability.record_crash("reconstruction", exc.error_code, exc, route="/reconstruct")
         observability.record_inference(
@@ -946,8 +1055,7 @@ async def reconstruct(
         outcome="ok",
     )
     log.info(
-        "✅ reconstruct %r | %s | %s | %s pts | %s | %s ms",
-        file.filename,
+        "reconstruct completed | %s | %s | %s pts | %s | %s ms",
         model,
         resolved,
         result.get("reconstruction", {}).get("point_count"),
@@ -968,9 +1076,10 @@ async def batch(
     max_dim: int | None = Form(None),
 ) -> JSONResponse:
     if len(files) > 10:
-        raise HTTPException(422, "Batch limit is 10 images")
+        raise validation_error("Batch limit is 10 images", field="files")
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
+    validate_max_dim(max_dim)
     try:
         metrics, outputs = normalize_request_metrics_and_outputs(
             metrics,
@@ -982,12 +1091,18 @@ async def batch(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        message = str(exc)
+        field = "outputs" if "output" in message.lower() else "metrics"
+        raise validation_error(
+            message,
+            code="INVALID_BATCH_PARAMETER",
+            field=field,
+        ) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
     resolved = _validated_device_or_422(device)
     results: list[dict[str, Any]] = []
-    errors: list[dict[str, str | None]] = []
+    errors: list[dict[str, Any]] = []
     with observability.trace_span(
         "api",
         "batch",
@@ -995,11 +1110,9 @@ async def batch(
     ):
         for upload in files:
             try:
-                if not (upload.content_type or "").startswith("image/"):
-                    raise ValueError("Expected an image file")
+                validate_image_upload_content_type(upload)
                 raw = await upload.read()
-                if len(raw) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-                    raise ValueError(f"Image file exceeds {MAX_UPLOAD_SIZE_MB} MB limit")
+                validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
                 ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
                 cached = _cache_service().get(ck)
                 if cached is not None:
@@ -1017,8 +1130,10 @@ async def batch(
                     continue
                 observability.record_cache_event("miss", "route")
 
-                res = await process_image_async(
-                    raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
+                res = await _with_batch_item_timeout(
+                    process_image_async(
+                        raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
+                    )
                 )
                 _cache_service().set(ck, res)
                 observability.record_cache_event("set", "route")
@@ -1033,7 +1148,18 @@ async def batch(
                     outcome="error",
                     error_code="BATCH_ITEM_FAILED",
                 )
-                errors.append({"filename": upload.filename, "error": str(exc)})
+                detail = embedded_error(
+                    getattr(exc, "error_code", "BATCH_ITEM_FAILED"),
+                    str(getattr(exc, "detail", exc)),
+                )
+                errors.append(
+                    {
+                        "filename": upload.filename,
+                        "error": detail["message"],
+                        "error_code": detail["error_code"],
+                        "error_detail": detail,
+                    }
+                )
     return JSONResponse(
         {
             "results": results,

@@ -15,28 +15,9 @@ run() { echo "+ $*"; "$@"; }
 
 docs_contract() {
   section "docs-contract"
-  run python - <<'PY'
-from pathlib import Path
-readme = Path('README.md')
-contrib = Path('CONTRIBUTING.md')
-errors = []
-if not readme.is_file(): errors.append('README.md is missing')
-if not contrib.is_file(): errors.append('CONTRIBUTING.md is missing')
-text = '\n'.join(p.read_text(encoding='utf-8') for p in (readme, contrib) if p.is_file()).lower()
-for command in ['scripts/ci.sh workflow-policy','scripts/ci.sh docs-contract','scripts/ci.sh backend-quality','scripts/ci.sh electron-contract']:
-    if command not in text:
-        errors.append(f'document local CI command: {command}')
-if 'scripts/ci.sh all' not in text:
-    errors.append('document local CI command: scripts/ci.sh all')
-if not ('docker' in text and ('optional/manual' in text or ('optional' in text and 'manual' in text)) and 'required ci' in text):
-    errors.append('document that Docker builds are optional/manual and not part of required CI')
-if errors:
-    for error in errors:
-        print(f'::error::{error}')
-    raise SystemExit(1)
-print('Documentation CI contract passed.')
-PY
+  run python scripts/validate_docs.py
 }
+
 
 workflow_policy() { section "workflow-policy"; run python scripts/validate_workflows.py; }
 backend_quality() {
@@ -51,8 +32,11 @@ electron_contract() {
   run npm --prefix electron-app test
   local tmp_root
   tmp_root="$(mktemp -d)"
-  mkdir -p "$tmp_root/backend" "$tmp_root/frontend" "$tmp_root/venv/bin"
-  touch "$tmp_root/backend/app.py" "$tmp_root/frontend/index.html" "$tmp_root/venv/bin/python"
+  mkdir -p "$tmp_root/backend" "$tmp_root/frontend/js" "$tmp_root/venv/bin"
+  touch "$tmp_root/backend/app.py" "$tmp_root/frontend/js/charts.js" "$tmp_root/venv/bin/python"
+  cat > "$tmp_root/frontend/index.html" <<'HTML'
+<canvas id="latencyChart"></canvas><canvas id="benchmarkChart"></canvas><canvas id="observabilityChart"></canvas><canvas id="compareChart"></canvas>
+HTML
   run node electron-app/scripts/verify-resources.js --root-kind repo --mode basic --torch-cache off --detector-cache off --onnx off --json "$tmp_root"
 }
 

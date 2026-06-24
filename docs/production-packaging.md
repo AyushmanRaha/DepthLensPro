@@ -21,7 +21,9 @@ scripts/build-native-linux.sh --arch arm64 --without-onnx
 .\scripts\build-native-windows.ps1 -Arch arm64 -WithoutOnnx
 ```
 
-ONNX variants download or generate all required ONNX files under `models/onnx` before packaging:
+Run setup before packaging so the Python environment, Electron dependencies, Torch cache, detector assets, and any requested ONNX files already exist. Normal build commands verify resources before packaging and fail early with remediation if required files are missing; they do not silently download or generate resources.
+
+ONNX variants require previously generated and validated ONNX files under `models/onnx` before packaging:
 
 ```bash
 scripts/build-native-macos.sh --arch arm64 --with-onnx --onnx-models all
@@ -34,13 +36,12 @@ scripts/build-native-linux.sh --arch x64 --with-onnx --onnx-models all
 
 Each native build script:
 
-1. Runs `setup-{platform}.sh` / `setup-windows.ps1` (creates venv, installs deps, checks Node)
-2. Cleans previous `dist/` output
-3. Runs `verify-resources.js` to confirm all required files are present before packaging
-4. Invokes `electron-builder` for the target platform and architecture
-5. Runs `verify-packaged-resources.js` to confirm the packaged app contains backend, frontend, venv, and models directories
+1. Cleans previous `dist/` output
+2. Runs `verify-resources.js` to confirm all required files are present before packaging
+3. Invokes `electron-builder` for the target platform and architecture
+4. Runs `verify-packaged-resources.js` to confirm the packaged app contains backend, frontend, venv, and models directories
 
-Pass `--with-onnx` and `--onnx-models midas_small` to export and bundle ONNX weights in the package.
+Pass `--auto-setup` (or the PowerShell equivalent) only when you explicitly want the build wrapper to invoke setup first. Otherwise, use the platform setup commands shown below and expect missing resources to stop the build with a clear “run setup first” action. ONNX builds require all selected ONNX files to already validate; missing files fail early instead of being exported during packaging.
 
 ### Docker Backend
 
@@ -114,3 +115,11 @@ curl 'http://127.0.0.1:8765/onnx/status?depth=deep&force=true'
 ```
 
 If `/live` succeeds, the backend is not offline; diagnostics may still be pending or degraded. If `/live` fails, inspect the Electron logs for a port conflict on 8765, a fallback backend URL, stale PID metadata, missing packaged resources, or a stale installed app path. If another non-DepthLens process owns 8765, stop that process or set `DEPTHLENS_BACKEND_PORT` before launch.
+
+
+## Packaged dependency and resource contract
+
+Packaged backend environments use runtime dependencies from `backend/requirements.txt`; dev/test tools live in `backend/requirements-dev.txt` and are not required for packaged runtime execution. Resource names are kept aligned in [resource path contract](resource-path-contract.md). Docker packaging checks remain manual/optional and are not required CI gates.
+
+
+Packaged frontend resources must include `frontend/js/charts.js`, which provides the local Canvas 2D chart renderer verified by Electron resource checks.

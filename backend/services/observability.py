@@ -48,8 +48,11 @@ _LOCK = threading.RLock()
 _STARTED = time.perf_counter()
 _HOME = os.path.expanduser("~")
 _ALLOWED = re.compile(r"[^A-Z0-9_]+")
+_UNIX_HOME_PATH = re.compile(r"(?<![A-Za-z0-9_])/(?:home|Users)/[^/\s,;:'\")]+(?:/[^\s,;:'\")]+)*")
+_TMP_PATH = re.compile(r"(?<![A-Za-z0-9_])/tmp(?:/[^\s,;:'\")]+)+")
 _UNIX_PATH = re.compile(r"(?<![A-Za-z0-9_])(?:/[^\s,;:'\")]+){2,}")
-_WIN_PATH = re.compile(r"[A-Za-z]:\\\\[^\s,;:'\")]+")
+_WIN_USER_PATH = re.compile(r"[A-Za-z]:\\Users\\[^\s,;:'\")]+(?:\\[^\s,;:'\")]+)*")
+_WIN_PATH = re.compile(r"[A-Za-z]:\\[^\s,;:'\")]+")
 
 inference_events: deque[dict[str, Any]]
 request_events: deque[dict[str, Any]]
@@ -116,12 +119,24 @@ def sanitize_error_code(value: Any) -> str:
 def sanitize_message(value: Any) -> str:
     text = str(value or "")
     if _HOME and _HOME != "/":
-        text = text.replace(_HOME, "[home]")
+        text = text.replace(_HOME, "[path]")
+    text = _WIN_USER_PATH.sub("[path]", text)
     text = _WIN_PATH.sub("[path]", text)
+    text = _UNIX_HOME_PATH.sub("[path]", text)
+    text = _TMP_PATH.sub("[path]", text)
     text = _UNIX_PATH.sub("[path]", text)
     text = re.sub(
         r"\b[^\s/\\]+\.(?:png|jpe?g|webp|bmp|gif|tiff?|npy)\b", "[file]", text, flags=re.IGNORECASE
     )
+    text = re.sub(
+        r"\b(cache(?:[_:-]?key)?|sha256|token|api[_-]?key|authorization|bearer)"
+        r"[:= ]+[A-Za-z0-9_.:/+-]{12,}",
+        r"\1=[redacted]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\b[A-Fa-f0-9]{32,}\b", "[redacted]", text)
+    text = re.sub(r"\b[A-Za-z0-9+/]{48,}={0,2}\b", "[redacted]", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:240]
 

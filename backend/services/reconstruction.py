@@ -13,8 +13,8 @@ import numpy as np
 from backend.services import inference
 
 _ALLOWED_FORMATS = {"ply", "obj"}
-_ALLOWED_SAMPLING = {"grid", "random"}
-_ALLOWED_COORDINATES = {"camera", "y_up"}
+_ALLOWED_SAMPLING = {"grid", "stride", "random"}
+_ALLOWED_COORDINATES = {"z_up", "y_up"}
 
 
 def normalize_reconstruction_format(fmt: str | None) -> str:
@@ -66,10 +66,10 @@ def clamp_reconstruction_options(
 
     sampling_value = (sampling or "grid").strip().lower()
     if sampling_value not in _ALLOWED_SAMPLING:
-        raise ValueError("sampling must be one of: grid, random")
+        raise ValueError("sampling must be one of: grid, stride, random")
     coordinate_value = (coordinate_system or "y_up").strip().lower()
     if coordinate_value not in _ALLOWED_COORDINATES:
-        raise ValueError("coordinate_system must be one of: camera, y_up")
+        raise ValueError("coordinate_system must be one of: y_up, z_up")
 
     near = _clamp_float(depth_near_percentile, 2.0, 0.0, 40.0, "depth_near_percentile")
     far = _clamp_float(depth_far_percentile, 98.0, 60.0, 100.0, "depth_far_percentile")

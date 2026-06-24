@@ -157,3 +157,120 @@ assertBackgroundCanvasStartupIsGuarded();
 assertStartupCriticalPathIsFailureIsolated();
 
 console.log('frontend contract tests passed');
+
+function assertNoRemoteRuntimeScripts() {
+  const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "index.html"), "utf8");
+  assert(!/https?:\/\/(cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)/i.test(html), "frontend must not depend on remote chart/runtime scripts");
+  assert(!html.includes("vendor/chart.umd.min.js"), "frontend must not load stale Chart.js placeholder");
+}
+
+assertNoRemoteRuntimeScripts();
+
+function assertFirstPartyCharts() {
+  const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "index.html"), "utf8");
+  for (const id of ["latencyChart", "benchmarkChart", "observabilityChart", "compareChart"]) {
+    assert(html.includes(`id="${id}"`), `index.html must include #${id}`);
+  }
+  const sources = localScriptSources();
+  const chartsIndex = scriptIndex('js/charts.js');
+  for (const src of ['js/inference-ui.js', 'js/compare.js', 'js/benchmark.js']) {
+    assert(chartsIndex >= 0 && chartsIndex < sources.indexOf(src), `js/charts.js must load before ${src}`);
+  }
+  const charts = readFrontendScript('js/charts.js');
+  assert(!/\bnew\s+Chart\b|window\.Chart|typeof\s+Chart/.test(charts), 'charts.js must not depend on Chart.js globals');
+  assert(charts.includes('window.DepthLensCharts'), 'charts.js must expose testable first-party chart helpers');
+}
+
+function makeFakeCanvas(width = 320, height = 180) {
+  const ops = [];
+  const ctx = new Proxy({
+    canvas: null,
+    beginPath: () => ops.push('beginPath'), moveTo: () => ops.push('moveTo'), lineTo: () => ops.push('lineTo'),
+    stroke: () => ops.push('stroke'), fill: () => ops.push('fill'), fillRect: () => ops.push('fillRect'),
+    strokeRect: () => ops.push('strokeRect'), fillText: () => ops.push('fillText'), clearRect: () => ops.push('clearRect'),
+    setTransform: () => ops.push('setTransform'), arc: () => ops.push('arc'), closePath: () => ops.push('closePath'),
+    measureText: (text) => ({ width: String(text).length * 6 }),
+  }, { set(target, key, value) { target[key] = value; return true; } });
+  const canvas = {
+    width: 0, height: 0, clientWidth: width, clientHeight: height, style: {}, parentElement: null,
+    getBoundingClientRect: () => ({ width, height }), getContext: (kind) => kind === '2d' ? ctx : null,
+  };
+  ctx.canvas = canvas;
+  return { canvas, ops };
+}
+
+function loadChartSandbox(canvases) {
+  const sandbox = {
+    console: { warn() {}, debug() {} }, setTimeout, clearTimeout, Math,
+    document: { documentElement: { getAttribute: () => 'dark' } },
+    getComputedStyle: () => ({ getPropertyValue: () => '#00c8ff' }),
+    requestAnimationFrame() {},
+    state: { session: { latencies: [] }, compareView: { metricKey: 'latency_ms', results: [] }, observability: {} },
+    el: { bgCanvas: null, compareChartCard: { hidden: true }, observabilityChart: canvases.observabilityChart.canvas },
+  };
+  sandbox.window = { devicePixelRatio: 1, addEventListener() {} };
+  sandbox.$ = (selector) => canvases[selector.replace('#', '')]?.canvas || null;
+  sandbox.escText = (value) => String(value ?? '');
+  sandbox.esc = sandbox.escText;
+  require('vm').runInNewContext(readFrontendScript('js/charts.js'), sandbox, { filename: 'charts.js' });
+  require('vm').runInNewContext(readFrontendScript('js/benchmark.js'), sandbox, { filename: 'benchmark.js' });
+  return sandbox;
+}
+
+function assertFirstPartyChartDrawing() {
+  const canvases = Object.fromEntries(['latencyChart', 'benchmarkChart', 'observabilityChart', 'compareChart'].map((id) => [id, makeFakeCanvas()]));
+  const sandbox = loadChartSandbox(canvases);
+  sandbox.initLatencyChart(); sandbox.state.session.latencies = [12, 20, 16]; sandbox.pushLatency(16);
+  for (const op of ['beginPath', 'moveTo', 'lineTo', 'stroke']) assert(canvases.latencyChart.ops.includes(op), `latency chart should ${op}`);
+  sandbox.renderBenchmarkChart({ results: [{ engine: 'pytorch', latency_ms: { avg: 44 } }, { engine: 'onnxruntime', latency_ms: { avg: 21 } }] });
+  assert(canvases.benchmarkChart.ops.includes('fillRect'), 'benchmark chart should draw bars');
+  sandbox.renderObservabilityChart({ inference: { recent: [{ latency_ms: 31 }, { latency_ms: 29 }] } });
+  assert(canvases.observabilityChart.ops.includes('lineTo'), 'observability chart should draw a line');
+  sandbox.renderCompareChart([{ model: 'MiDaS_small', latency_ms: 50 }, { model: 'DPT_Hybrid', latency_ms: 70 }], 'latency_ms');
+  assert(canvases.compareChart.ops.includes('fillRect'), 'compare chart should draw bars');
+  const empty = makeFakeCanvas();
+  assert(sandbox.window.DepthLensCharts.drawNoDataState(empty.canvas, 'No data'), 'no-data state should render');
+  assert(empty.ops.includes('fillText'), 'no-data state should draw explanatory text');
+  assert(canvases.latencyChart.canvas.width > 0 && canvases.latencyChart.canvas.height > 0, 'chart resize must produce nonzero canvas dimensions');
+}
+
+assertFirstPartyCharts();
+assertFirstPartyChartDrawing();
+
+function assertRequestConstructionAndErrorParsing() {
+  const contracts = require(path.join(frontendRoot, 'js/contracts.js'));
+  const file = new Blob(['image']);
+  const gt = new Blob(['gt']);
+  function fields(form) { return Object.fromEntries([...form.entries()]); }
+  let req = contracts.buildEstimateRequest({ file, model:'MiDaS_small', colormap:'inferno', device:'cpu', metrics:'full', outputs:'color,gray', maxDim:512 });
+  assert.strictEqual(req.endpoint, '/estimate'); assert.strictEqual(req.method, 'POST');
+  let f = fields(req.body); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.model, 'MiDaS_small'); assert.strictEqual(f.colormap, 'inferno'); assert.strictEqual(f.device, 'cpu'); assert.strictEqual(f.metrics, 'full'); assert.strictEqual(f.outputs, 'color,gray'); assert.strictEqual(f.max_dim, '512');
+  req = contracts.buildEstimateRequest({ file, gtFile:gt, gtRequired:true, gtScale:2, gtInvalidValue:-1 });
+  f = fields(req.body); assert.strictEqual(f.gt_file.size, gt.size); assert.strictEqual(f.gt_required, 'true'); assert.strictEqual(f.gt_scale, '2'); assert.strictEqual(f.gt_invalid_value, '-1');
+  req = contracts.buildCompareRequest({ file, models:['a','b'], device:'auto', colormap:'magma', maxDim:384 });
+  f = fields(req.body); assert.strictEqual(req.endpoint, '/compare'); assert.strictEqual(f.models, 'a,b'); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.device, 'auto'); assert.strictEqual(f.colormap, 'magma'); assert.strictEqual(f.max_dim, '384');
+  req = contracts.buildBenchmarkRequest({ model:'MiDaS_small', device:'cpu', iterations:3 });
+  assert(req.endpoint.startsWith('/benchmark?')); assert(req.endpoint.includes('model=MiDaS_small')); assert(req.endpoint.includes('device=cpu')); assert(req.endpoint.includes('iterations=3'));
+  req = contracts.buildDetectRequest({ file, threshold:0.4, maxDetections:7, device:'cpu' });
+  f = fields(req.body); assert.strictEqual(req.endpoint, '/detect'); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.threshold, '0.4'); assert.strictEqual(f.max_detections, '7');
+  req = contracts.buildReconstructRequest({ file, model:'MiDaS_small', device:'cpu', colormap:'inferno', exportFormat:'ply', maxPoints:100, previewPoints:10, focalScale:1.2, depthScale:1, depthNearPercentile:2, depthFarPercentile:98, coordinateSystem:'y_up', sampling:'grid', includeRgb:true });
+  f = fields(req.body); assert.strictEqual(req.endpoint, '/reconstruct'); for (const key of ['file','model','device','colormap','export_format','max_points','preview_points','focal_scale','depth_scale','depth_near_percentile','depth_far_percentile','coordinate_system','sampling','include_rgb']) assert(key in f, `missing reconstruct field ${key}`);
+  assert.strictEqual(f.sampling, 'grid'); assert.strictEqual(f.include_rgb, 'true');
+  for (const sampling of ['grid', 'stride', 'random']) {
+    req = contracts.buildReconstructRequest({ file, sampling });
+    f = fields(req.body); assert.strictEqual(f.sampling, sampling);
+  }
+  req = contracts.buildReconstructRequest({ file, includeRgb:false });
+  f = fields(req.body); assert.strictEqual(f.include_rgb, 'false');
+  assert.deepStrictEqual(contracts.buildCacheClearRequest(), { endpoint:'/cache/clear', method:'POST' });
+  assert.deepStrictEqual(contracts.buildObservabilityRequest(), { endpoint:'/observability', method:'GET' });
+  assert.strictEqual(contracts.normalizeApiError({ detail:{ error_code:'INVALID_MODEL', message:'Bad model', retryable:false } }).errorCode, 'INVALID_MODEL');
+  assert.strictEqual(contracts.normalizeApiError({ detail:'legacy detail' }).message, 'legacy detail');
+  assert.strictEqual(contracts.normalizeEmbeddedError({ error_detail:{ error_code:'REQUEST_TIMEOUT', message:'Timed out' } }).errorCode, 'REQUEST_TIMEOUT');
+  assert.strictEqual(contracts.normalizeEmbeddedError({ error:'legacy item' }).message, 'legacy item');
+  assert.strictEqual(contracts.normalizeApiError(new Error('fetch failed')).errorCode, 'NETWORK_ERROR');
+  let revoked = ''; contracts.revokeObjectUrl('blob:x', { revokeObjectURL: (url) => { revoked = url; } }); assert.strictEqual(revoked, 'blob:x');
+  let destroyed = false; contracts.destroyChart({ destroy: () => { destroyed = true; } }); assert.strictEqual(destroyed, true);
+  let stopped = 0; contracts.stopWebcamStream({ getTracks: () => [{ stop: () => stopped++ }, { stop: () => stopped++ }] }); assert.strictEqual(stopped, 2);
+}
+assertRequestConstructionAndErrorParsing();

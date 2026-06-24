@@ -136,6 +136,31 @@ def test_validated_device_refreshes_once_for_stale_cache() -> None:
     assert calls == {"cache": 2, "resolve": 2}
 
 
+def test_validated_device_final_resolve_error_is_structured() -> None:
+    def cached_devices_func(force: bool = False) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        return {"cuda:0": {"available": True}}, "cuda:0", {}
+
+    def resolve(device: str) -> str:
+        raise ValueError("/tmp/local/path leaked detail")
+
+    with pytest.raises(HTTPException) as exc_info:
+        device_state.validated_device_or_422(
+            "cuda:0",
+            cached_devices_func=cached_devices_func,
+            resolve=resolve,
+            log=logging.getLogger("test"),
+        )
+
+    assert exc_info.value.status_code == 422
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error_code"] == "DEVICE_VALIDATION_ERROR"
+    assert detail["message"]
+    assert detail["field"] == "device"
+    assert "retryable" not in detail
+    assert "/tmp/local/path" not in detail["message"]
+
+
 def test_system_telemetry_status_and_disk_fields() -> None:
     assert percent(1, 4) == 25.0
     assert telemetry_status({"status": "ok"}, {"status": "degraded"}) == "degraded"

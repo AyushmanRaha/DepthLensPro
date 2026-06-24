@@ -27,10 +27,13 @@ http://127.0.0.1:8765
 | `GET` | `/api/observability` | JSON observability snapshot for the Performance panel |
 | `GET` | `/observability` | Observability snapshot alias |
 | `DELETE` | `/cache` | Clear all cache entries |
+| `POST` | `/cache/clear` | Browser/client-friendly cache clear alias |
 | `POST` | `/estimate` | Single-image depth estimation |
 | `POST` | `/compare` | Multi-model comparison on one image |
 | `POST` | `/api/compare` | Compare endpoint alias |
 | `POST` | `/batch` | Batch depth estimation (up to 10 images) |
+| `POST` | `/detect` | Local object detection for RGB Camera / 3D workflows |
+| `POST` | `/api/detect` | Detection endpoint alias |
 | `POST` | `/api/reconstruct` | 3D point-cloud reconstruction |
 | `POST` | `/reconstruct` | Reconstruction alias |
 
@@ -181,6 +184,27 @@ Response shape:
 
 ---
 
+### `POST /detect` and `POST /api/detect`
+
+Runs local object detection for the RGB Camera / 3D workflow. Detector weights and optional dependencies may be unavailable on a machine; in that case the endpoint returns a structured detector-unavailable error with remediation details instead of silently falling back.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | file | **required** | Input image; max upload limit follows the backend upload limit |
+| `device` | string | `auto` | Runtime device selection |
+| `threshold` | float | `0.35` | Detection confidence threshold; valid range `0.05` to `0.95` |
+| `max_detections` | integer | `5` | Maximum detections to return; valid range `1` to `20` |
+
+---
+
+### Cache endpoints
+
+- `GET /cache/metrics` returns active cache telemetry, including hit/miss counters, keyspace size, and backend type.
+- `DELETE /cache` clears the active inference cache.
+- `POST /cache/clear` also clears the active inference cache for browser/client flows that prefer POST requests.
+
+---
+
 ### `POST /api/reconstruct`
 
 Generates an approximate point cloud from a source image.
@@ -199,9 +223,9 @@ Generates an approximate point cloud from a source image.
 | `depth_scale` | float | `1.0` | Z-axis multiplier |
 | `depth_near_percentile` | float | `2.0` | Near clipping percentile (clips foreground outliers) |
 | `depth_far_percentile` | float | `98.0` | Far clipping percentile (clips background outliers) |
-| `sampling` | string | `grid` | `grid` (deterministic) or `random` (seed 0) |
+| `sampling` | string | `grid` | `grid`, `stride`, or `random` (seed 0) |
 | `include_rgb` | boolean | `true` | Embed source-image pixel colours per point |
-| `coordinate_system` | string | `y_up` | `y_up` (Y negated) or `camera` (raw projection) |
+| `coordinate_system` | string | `y_up` | `y_up` (Y negated) or `z_up` (raw projection). Invalid values return a structured validation error. |
 
 ---
 
@@ -226,3 +250,21 @@ The benchmark runs under a global mutex that prevents concurrent benchmark calls
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Error response schema
+
+Route-level failures return FastAPI-compatible envelopes under `detail`:
+
+```json
+{
+  "detail": {
+    "error_code": "INVALID_CONTENT_TYPE",
+    "message": "Expected an image file",
+    "field": "file",
+    "retryable": false
+  }
+}
+```
+
+Optional fields include `remediation`, `field`, and `retryable`. Batch and compare keep their existing per-item/per-model success flow and legacy `error` strings where present, while also adding `error_detail` with the same structured fields. Timeout codes are route-specific: `/benchmark` returns `BENCHMARK_TIMEOUT`, `/reconstruct` returns `RECONSTRUCTION_TIMEOUT`, and `/estimate`, `/compare`, `/batch`, and `/detect` return `REQUEST_TIMEOUT`.

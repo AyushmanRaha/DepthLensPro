@@ -82,7 +82,7 @@ DepthLensPro/
 │   │   ├── benchmark.js             # PyTorch/ONNX benchmark panel
 │   │   ├── experiments.js           # Experiment run/export workspace
 │   │   ├── reconstruction.js        # 3D reconstruction and point-cloud preview
-│   │   ├── charts.js                # Chart.js setup and theme handling
+│   │   ├── charts.js                # First-party Canvas 2D chart rendering and theme handling
 │   │   ├── notifications.js         # Settings panels, persistence hooks, toasts/navigation helpers
 │   │   ├── observability.js         # Gallery/lightbox and observability dashboard
 │   │   ├── performance.js           # Metrics dashboard refresh helpers
@@ -107,9 +107,25 @@ DepthLensPro/
 │   ├── build-native-linux.sh
 │   └── build-native-windows.ps1
 │
-├── docs/
-│   ├── debugging.md                 # Startup, asset, ONNX, port, packaged-resource, and settings troubleshooting
-│   └── maintenance.md               # Safe extension guide for models, routes, installer/build, frontend modules, tests
+├── docs/                           # Markdown guides and reference material
+│   ├── api-reference.md
+│   ├── configuration.md
+│   ├── debugging.md
+│   ├── depth-metrics.md
+│   ├── ground-truth-evaluation.md
+│   ├── how-depth-estimation-works.md
+│   ├── maintenance.md
+│   ├── models-colormaps-metrics.md
+│   ├── production-packaging.md
+│   ├── project-structure.md
+│   ├── refactor-test-matrix.md
+│   ├── security.md
+│   ├── setup-and-build.md
+│   ├── system-architecture.md
+│   ├── system-design-decisions.md
+│   ├── terminal-only-development.md
+│   ├── testing-and-ci.md
+│   └── troubleshooting.md
 │
 ├── .github/
 │   └── workflows/ci.yml             # GitHub Actions — lint, type-check, pytest, Electron tests, resource dry-run
@@ -141,3 +157,8 @@ Runtime hardening reduces avoidable work: Estimate cache hits now reuse normaliz
 ---
 
 Maintainer documentation lives in [`docs/maintenance.md`](maintenance.md) and [`docs/debugging.md`](debugging.md).
+
+
+- `backend/requirements-dev.txt` — development/test/quality tooling layered on runtime requirements.
+- `frontend/js/charts.js` — local first-party Canvas 2D renderer for workspace, performance, benchmark, and compare charts.
+- `docs/resource-path-contract.md` — shared resource path policy for backend, Electron, setup, and packaging checks.

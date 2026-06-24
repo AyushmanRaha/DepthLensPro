@@ -11,6 +11,7 @@ Turn ordinary 2D images into depth maps, compare neural depth models, benchmark 
 [![Desktop App](https://img.shields.io/badge/Desktop_App-v1.0.0-111827?style=for-the-badge)](electron-app/package.json)
 [![API](https://img.shields.io/badge/API-v1.0.0-2563eb?style=for-the-badge)](backend/api/live.py)
 [![Electron](https://img.shields.io/badge/Electron-42.3.0-47848f?style=for-the-badge&logo=electron&logoColor=white)](electron-app/package.json)
+[![Python 3.12 tested](https://img.shields.io/badge/Python_3.12-tested-3776ab?style=for-the-badge&logo=python&logoColor=white)](backend/requirements.txt)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.135.3-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/requirements.txt)
 [![Python](https://img.shields.io/badge/Python-3.10--3.12-3776ab?style=for-the-badge&logo=python&logoColor=white)](scripts/doctor.py)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.11.0-ee4c2c?style=for-the-badge&logo=pytorch&logoColor=white)](backend/requirements.txt)
@@ -117,7 +118,7 @@ DepthLens Pro is an application-engineering project built around established mon
 | Inference orchestration | Model selection, device routing, PyTorch/ONNX dispatch, preprocessing integration, output selection, metrics modes, fallback behavior, and request-level validation. | Intel ISL MiDaS/DPT pretrained models, PyTorch, and ONNX Runtime. |
 | Caching and telemetry | Redis/in-memory fallback strategy, cache metrics, Prometheus-style metrics, frontend telemetry snapshots, and sanitized error handling. | Redis and local process/runtime metrics. |
 | 3D export workflow | Approximate point-cloud generation controls, PLY/OBJ export flow, preview sampling, and coordinate-system options. | NumPy/OpenCV-style image and array processing. |
-| Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and Chart.js. |
+| Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and first-party Canvas 2D chart helpers. |
 
 
 ---
@@ -323,7 +324,6 @@ For full platform prerequisites, setup reports, diagnostics, resource verificati
 | [Project Structure](docs/project-structure.md) | Full repository tree and module descriptions. |
 | [Debugging](docs/debugging.md) | Maintainer debugging notes. |
 | [Maintenance](docs/maintenance.md) | Maintenance workflows. |
-| [Engineering Audit](docs/engineering-audit.md) | Existing engineering audit notes. |
 
 ---
 
@@ -338,12 +338,23 @@ For full platform prerequisites, setup reports, diagnostics, resource verificati
 | `/estimate` | POST | Generate a depth map for one image with selected model/device/outputs. |
 | `/batch` | POST | Process multiple images in one request. |
 | `/compare` | POST | Run supported models on one image and compare outputs. |
-| `/benchmark` | POST | Benchmark PyTorch against optional ONNX Runtime. |
+| `/api/compare` | POST | Frontend-compatible compare alias. |
+| `/benchmark` | GET | Benchmark PyTorch against optional ONNX Runtime. |
+| `/api/benchmark` | GET | Frontend-compatible benchmark alias. |
 | `/reconstruct` | POST | Generate approximate point-cloud data/export artifacts. |
+| `/api/reconstruct` | POST | Frontend-compatible reconstruction alias. |
+| `/detect` | POST | Run local object detection for RGB Camera / 3D workflows. |
+| `/api/detect` | POST | Frontend-compatible object-detection alias. |
 | `/devices` | GET | Report detected compute devices. |
+| `/models` | GET | Return supported model registry metadata. |
+| `/colormaps` | GET | Return supported colormap names. |
 | `/onnx/status` | GET | Report ONNX file/provider readiness. |
+| `/cache/metrics` | GET | Return active cache telemetry. |
+| `/cache` | DELETE | Clear the active inference cache. |
+| `/cache/clear` | POST | Clear the cache for browser/client flows that prefer POST. |
 | `/metrics` | GET | Prometheus metrics exposition. |
-| `/api/observability`, `/observability` | GET | Local JSON telemetry snapshots for the UI. |
+| `/api/observability` | GET | Local JSON telemetry snapshot for the UI. |
+| `/observability` | GET | Observability snapshot alias. |
 
 Read the full endpoint documentation in [API Reference](docs/api-reference.md).
 
@@ -426,7 +437,7 @@ DepthLens Pro builds on excellent open-source projects:
 | [NumPy](https://numpy.org) | Depth array arithmetic and GT metric computation |
 | [Pillow](https://python-pillow.org) | PNG/TIFF/NPY GT file decoding |
 | [Redis](https://redis.io) | Optional distributed cache backend |
-| [Chart.js](https://www.chartjs.org) | Latency and benchmark charts in the frontend |
+| Browser Canvas 2D API | First-party local chart rendering for latency and benchmark panels |
 
 <div align="center">
 

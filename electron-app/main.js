@@ -7,6 +7,7 @@ const { BACKEND_HOST } = require("./src/main/ports");
 const { getPythonPath: resolvePythonPath } = require("./src/main/python-resolver");
 const { createBackendLifecycle } = require("./src/main/backend-lifecycle");
 const { readPersistedSettings, writePersistedSettings } = require("./src/main/settings-store");
+const { validateDialogOptions, validateSettingsPayload } = require("./src/main/ipc-validation");
 const { createSplashWindow: buildSplashWindow, createMainWindow: buildMainWindow } = require("./src/main/windows");
 
 log.transports.file.level = "info";
@@ -82,9 +83,9 @@ ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("get-platform", () => process.platform);
 ipcMain.handle("get-backend-live-path", () => "/live");
 ipcMain.handle("settings:load", () => readPersistedSettings(app, log));
-ipcMain.handle("settings:save", (_event, payload) => writePersistedSettings(app, payload));
-ipcMain.handle("show-save-dialog", async (_event, options) => { const { dialog } = require("electron"); return dialog.showSaveDialog(mainWindow, options); });
-ipcMain.handle("show-open-dialog", async (_event, options) => { const { dialog } = require("electron"); return dialog.showOpenDialog(mainWindow, options); });
+ipcMain.handle("settings:save", (_event, payload) => writePersistedSettings(app, validateSettingsPayload(payload)));
+ipcMain.handle("show-save-dialog", async (_event, options) => { const { dialog } = require("electron"); return dialog.showSaveDialog(mainWindow, validateDialogOptions("save", options)); });
+ipcMain.handle("show-open-dialog", async (_event, options) => { const { dialog } = require("electron"); return dialog.showOpenDialog(mainWindow, validateDialogOptions("open", options)); });
 
 if (singleInstanceLock) app.whenReady().then(async () => {
   log.info(`App ready — isDev: ${isDev}, platform: ${process.platform}, arch: ${process.arch}`);

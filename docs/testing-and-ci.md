@@ -62,7 +62,7 @@ scripts/ci.sh electron-contract
 scripts/ci.sh all
 ```
 
-The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, Docker daemon, or real model weights.
+The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies, frontend/backend request contracts, and Electron settings IPC validation — without requiring a GPU, Redis instance, Docker daemon, or real model weights.
 
 #### What the Tests Stub
 
@@ -75,3 +75,21 @@ The test suite covers API behaviour, cache serialisation safety (no pickle deser
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Dynamic CI gate policy
+
+Changed-file detection treats release-affecting files as first-class CI inputs. Backend requirements, Python tooling, setup/build/launch/prefetch scripts, Docker descriptors, resource path policy docs, Electron package files, frontend assets, CI helper scripts, `.gitignore`, and `SECURITY.md` now trigger backend, Electron, docs, workflow, or full gates as appropriate. `ci-passed` remains the branch-protection aggregator and fails when a required dynamic job fails, is cancelled, or is unexpectedly skipped.
+
+`docs-contract` runs `scripts/validate_docs.py` without network access. It validates local Markdown links/images, referenced Electron npm scripts, documented API route declarations, stale engineering/refactor doc links, and root lockfile hygiene. Docker remains optional/manual; required CI does not run Docker builds, Docker Compose, GPU checks, model downloads, or long ONNX exports.
+
+Install development check dependencies with:
+
+```bash
+python -m pip install -r backend/requirements-dev.txt
+```
+
+Do not run `npm install` at the repository root. The tracked npm lockfile belongs under `electron-app/package-lock.json`.
+
+
+Electron frontend contract tests also verify chart canvas presence, script ordering, no runtime chart CDN/placeholder dependency, and first-party chart rendering with lightweight fake Canvas 2D contexts.
