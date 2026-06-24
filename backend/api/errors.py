@@ -14,6 +14,20 @@ BENCHMARK_TIMEOUT_MESSAGE = "Benchmark timed out · depth engine remains availab
 RECONSTRUCTION_TIMEOUT_MESSAGE = "Point cloud generation timed out · depth engine remains available"
 
 
+def _sanitize_public_payload_value(key: str, value: Any) -> Any:
+    if isinstance(value, str) and key in {"message", "action", "remediation"}:
+        return sanitize_message(value)
+    return value
+
+
+def _without_private_public_keys(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: _sanitize_public_payload_value(key, value)
+        for key, value in payload.items()
+        if key != "retryable"
+    }
+
+
 def error_envelope(
     error_code: str,
     message: str,
@@ -23,15 +37,14 @@ def error_envelope(
     retryable: bool | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
+    del retryable  # accepted for caller compatibility, never exposed publicly
     payload: dict[str, Any] = {"error_code": error_code, "message": sanitize_message(message)}
     if remediation:
         payload["remediation"] = sanitize_message(remediation)
     if field:
         payload["field"] = field
-    if retryable is not None:
-        payload["retryable"] = retryable
-    payload.update(extra)
-    return payload
+    payload.update(_without_private_public_keys(extra))
+    return _without_private_public_keys(payload)
 
 
 def http_error(status_code: int, error_code: str, message: str, **kwargs: Any) -> HTTPException:
@@ -43,9 +56,15 @@ def embedded_error(error_code: str, message: str, **kwargs: Any) -> dict[str, An
 
 
 def validation_error(
-    message: str, *, field: str | None = None, code: str = "VALIDATION_ERROR"
+    detail: str | dict[str, Any], *, field: str | None = None, code: str = "VALIDATION_ERROR"
 ) -> HTTPException:
-    return http_error(422, code, message, field=field, retryable=False)
+    if isinstance(detail, str):
+        return HTTPException(422, sanitize_message(detail))
+    payload = _without_private_public_keys(dict(detail))
+    payload.setdefault("error_code", code)
+    if field is not None:
+        payload["field"] = field
+    return HTTPException(422, payload)
 
 
 def inference_dependency_unavailable(exc: Exception, log: logging.Logger) -> HTTPException:
@@ -63,20 +82,10 @@ def inference_dependency_unavailable(exc: Exception, log: logging.Logger) -> HTT
 
 
 def model_assets_unavailable(exc: ModelAssetsUnavailableError) -> HTTPException:
-    payload = exc.to_payload()
-    return HTTPException(
-        503,
-        error_envelope(
-            str(payload.get("error_code", "MODEL_ASSET_UNAVAILABLE")),
-            str(payload.get("message", "Model assets unavailable")),
-            remediation=str(
-                payload.get("action")
-                or payload.get("remediation")
-                or "Run setup or prefetch model assets."
-            ),
-            retryable=True,
-        ),
-    )
+    payload = _without_private_public_keys(dict(exc.to_payload()))
+    payload.setdefault("error_code", "MODEL_ASSET_UNAVAILABLE")
+    payload.setdefault("message", "Model assets unavailable")
+    return HTTPException(503, payload)
 
 
 def generic_inference_failure(message: str = "Depth inference failed") -> HTTPException:
@@ -101,8 +110,8 @@ def detector_unavailable(exc: Exception) -> HTTPException:
     return http_error(
         503,
         str(getattr(exc, "error_code", "DETECTOR_UNAVAILABLE")),
-        "Local object detector is unavailable",
-        remediation=(
+        str(exc) or "Local object detector is unavailable",
+        action=(
             "Run setup to install detector dependencies or retry after detector weights "
             "are available."
         ),

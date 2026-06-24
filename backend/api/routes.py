@@ -257,7 +257,7 @@ def _safe_compare_error(model: str, exc: Exception) -> dict[str, Any]:
         message = str(exc)
     else:
         message = "Depth inference failed"
-    detail = embedded_error(str(code), message, retryable=not isinstance(exc, ValueError))
+    detail = embedded_error(str(code), message)
     return {
         "model_id": model,
         "error_code": detail["error_code"],
@@ -636,7 +636,6 @@ async def estimate(
                 "error_code": "MISSING_GT",
                 "message": "GT mode requires one image and one GT depth file",
                 "field": "gt_file",
-                "retryable": False,
             },
         )
 
@@ -1128,7 +1127,6 @@ async def batch(
                 detail = embedded_error(
                     getattr(exc, "error_code", "BATCH_ITEM_FAILED"),
                     str(getattr(exc, "detail", exc)),
-                    retryable=not isinstance(exc, ValueError),
                 )
                 errors.append(
                     {

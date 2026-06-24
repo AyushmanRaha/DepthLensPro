@@ -23,7 +23,7 @@ def test_error_envelope_shape():
     assert payload["error_code"] == "INVALID_CONTENT_TYPE"
     assert payload["message"] == "Expected an image file"
     assert payload["field"] == "file"
-    assert payload["retryable"] is False
+    assert "retryable" not in payload
 
 
 def test_default_cors_is_local_not_wildcard():

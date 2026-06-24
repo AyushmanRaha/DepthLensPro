@@ -184,7 +184,6 @@ def validated_device_or_422(
             "DEVICE_UNAVAILABLE",
             f"Device '{device}' is unavailable. Options: {avail}",
             field="device",
-            retryable=False,
         )
     try:
         return str(resolve(device))
@@ -199,7 +198,6 @@ def validated_device_or_422(
                 "DEVICE_UNAVAILABLE",
                 f"Device '{device}' is unavailable. Options: {refreshed}",
                 field="device",
-                retryable=False,
             ) from exc
         try:
             return str(resolve(device))
@@ -209,5 +207,4 @@ def validated_device_or_422(
                 "DEVICE_VALIDATION_ERROR",
                 "Requested device could not be resolved after refreshing available devices.",
                 field="device",
-                retryable=False,
             ) from refreshed_exc

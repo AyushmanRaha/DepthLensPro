@@ -18,16 +18,14 @@ GT_EXTENSIONS = {".png", ".tif", ".tiff", ".npy"}
 
 def validate_image_upload_content_type(file: UploadFile) -> None:
     if not (file.content_type or "").startswith("image/"):
-        raise http_error(415, "INVALID_CONTENT_TYPE", "Expected an image file", field="file")
+        raise HTTPException(415, "Expected an image file")
 
 
 def validate_upload_size(
     raw: bytes, *, label: str = "Image file", max_size_mb: int = MAX_UPLOAD_SIZE_MB
 ) -> None:
     if len(raw) > max_size_mb * 1024 * 1024:
-        raise http_error(
-            413, "UPLOAD_TOO_LARGE", f"{label} exceeds {max_size_mb} MB limit", field="file"
-        )
+        raise HTTPException(413, f"{label} exceeds {max_size_mb} MB limit")
 
 
 def validate_gt_upload(file: UploadFile, raw: bytes) -> None:
@@ -132,13 +130,7 @@ def normalize_request_model(model: str) -> str:
 
 def normalize_request_colormap(colormap: str) -> str:
     if colormap not in COLORMAP_NAMES:
-        raise http_error(
-            422,
-            "INVALID_COLORMAP",
-            f"Unknown colormap '{colormap}'",
-            field="colormap",
-            valid_colormaps=list(COLORMAP_NAMES),
-        )
+        raise HTTPException(422, f"Unknown colormap '{colormap}'")
     return colormap
 
 
