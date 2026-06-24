@@ -289,6 +289,8 @@ For terminal-only setup details, read [Terminal-Only Development](docs/terminal-
 | Backend-only/API | `npm run setup` → `npm run backend:dev` → `curl http://127.0.0.1:8765/live` | ONNX validation optional unless using ONNX endpoints. |
 | Docker | `docker compose up --build` → `docker compose down` | Container usage follows the documented backend workflow. |
 
+Platform support summary: macOS Apple Silicon only is supported through `npm run build:mac`, while Intel Mac / macOS x64 is not supported. Windows arm64 and x64 are supported, and Linux arm64 and x64 are supported. The macOS packaged app is expected at `dist/mac-arm64/DepthLens Pro.app`, and packaged-resource validation uses `verify-packaged-resources.js`.
+
 For full platform prerequisites, setup reports, diagnostics, resource verification, package-size preflight, and no-silent-download policy, read [Setup and Build](docs/setup-and-build.md).
 
 ---
