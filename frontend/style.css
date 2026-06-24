@@ -1423,7 +1423,8 @@ ul.guide-step-list { list-style:disc; }
 .metric-label { font-family:var(--ff-body); font-size:0.62rem; font-weight:500; color:var(--text-muted); letter-spacing:0.03em; margin-top:0.15rem; }
 .metric-desc { font-family:var(--ff-body); font-size:0.55rem; color:var(--text-dim); line-height:1.4; margin-top:0.2rem; }
 .chart-label { font-family:var(--ff-body); font-size:0.6rem; font-weight:500; color:var(--text-dim); margin-bottom:0.3rem; letter-spacing:0.08em; text-transform:uppercase; }
-.chart-wrap { position:relative; height:90px; }
+.chart-wrap { position:relative; height:90px; min-width:0; overflow:hidden; }
+.chart-wrap > canvas { display:block; width:100%; height:100%; }
 
 /* ══════════════════════════════════════════════════════════
    UPLOAD ZONE
@@ -1575,7 +1576,8 @@ ul.guide-step-list { list-style:disc; }
 .compare-metric-label { font-family:var(--ff-body); font-size:0.58rem; font-weight:500; color:var(--text-dim); letter-spacing:0.03em; }
 .compare-metric-values { display:flex; flex-direction:column; gap:0.18rem; font-family:var(--ff-mono); font-size:0.6rem; color:var(--text-muted); }
 .compare-metric-values strong { color:var(--text); font-size:0.67rem; }
-.compare-chart-wrap { height:190px; }
+.compare-chart-wrap { height:190px; min-width:0; overflow:hidden; }
+.compare-chart-wrap > canvas { display:block; width:100%; height:100%; }
 
 /* ══════════════════════════════════════════════════════════
    PERFORMANCE PANEL — scoped spacing only
@@ -1656,6 +1658,10 @@ ul.guide-step-list { list-style:disc; }
 .performance-chart-section .chart-wrap {
   width: 100%;
   min-width: 0;
+}
+
+.performance-card .performance-chart-section .chart-wrap {
+  height: clamp(150px, 18vw, 230px);
 }
 
 @media (max-width: 980px) {

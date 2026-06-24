@@ -234,6 +234,10 @@ function switchPanel(name) {
     stopPointCloudViewer();
   }
 
+  const resizeCharts = window.DepthLensCharts?.scheduleChartResize
+    || (typeof scheduleChartResize === "function" ? scheduleChartResize : null);
+  if (resizeCharts) requestAnimationFrame(() => resizeCharts());
+
   return true;
 }
 
