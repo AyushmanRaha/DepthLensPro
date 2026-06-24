@@ -267,4 +267,4 @@ Route-level failures return FastAPI-compatible envelopes under `detail`:
 }
 ```
 
-Optional fields include `remediation`, `field`, and `retryable`. Batch and compare keep their existing per-item/per-model success flow and legacy `error` strings where present, while also adding `error_detail` with the same structured fields. Expensive routes may return `REQUEST_TIMEOUT`, `BENCHMARK_TIMEOUT`, or `RECONSTRUCTION_TIMEOUT` when the configurable backend timeout is exceeded.
+Optional fields include `remediation`, `field`, and `retryable`. Batch and compare keep their existing per-item/per-model success flow and legacy `error` strings where present, while also adding `error_detail` with the same structured fields. Timeout codes are route-specific: `/benchmark` returns `BENCHMARK_TIMEOUT`, `/reconstruct` returns `RECONSTRUCTION_TIMEOUT`, and `/estimate`, `/compare`, `/batch`, and `/detect` return `REQUEST_TIMEOUT`.

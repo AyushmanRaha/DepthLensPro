@@ -123,11 +123,13 @@ def sanitize_message(value: Any) -> str:
         r"\b[^\s/\\]+\.(?:png|jpe?g|webp|bmp|gif|tiff?|npy)\b", "[file]", text, flags=re.IGNORECASE
     )
     text = re.sub(
-        r"\b(cache(?:[_:-]?key)?|sha256|token)[:=][A-Za-z0-9_.:/+-]{12,}",
+        r"\b(cache(?:[_:-]?key)?|sha256|token|api[_-]?key|authorization|bearer)"
+        r"[:= ]+[A-Za-z0-9_.:/+-]{12,}",
         r"\1=[redacted]",
         text,
         flags=re.IGNORECASE,
     )
+    text = re.sub(r"\b[A-Fa-f0-9]{32,}\b", "[redacted]", text)
     text = re.sub(r"\b[A-Za-z0-9+/]{48,}={0,2}\b", "[redacted]", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:240]

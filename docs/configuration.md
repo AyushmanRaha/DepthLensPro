@@ -111,8 +111,8 @@ Telemetry is local-only: DepthLens Pro does not send analytics to cloud services
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DEPTHLENS_ROUTE_TIMEOUT_SECONDS` | `300` | Generous timeout for estimate, compare, detect, and reconstruct route work. |
-| `DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS` | `300` | Per-item timeout for batch processing so one slow image does not alter the batch response contract. |
+| `DEPTHLENS_ROUTE_TIMEOUT_SECONDS` | `300` | Generous timeout for estimate, compare, detect, and reconstruct route work. Timeouts return `REQUEST_TIMEOUT` except `/reconstruct`, which returns `RECONSTRUCTION_TIMEOUT`. |
+| `DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS` | `300` | Per-item timeout for batch processing so one slow image produces a structured per-item `REQUEST_TIMEOUT` without altering the batch response contract. |
 | `DEPTHLENS_CORS_ALLOWED_ORIGINS` | empty | Comma-separated additional browser origins allowed by CORS. Localhost/127.0.0.1/file-null flows are allowed by default. |
 | `DEPTHLENS_CORS_ALLOW_ALL` | `false` | Development-only wildcard CORS escape hatch; credentials remain disabled. |
 

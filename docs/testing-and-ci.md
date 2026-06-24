@@ -62,7 +62,7 @@ scripts/ci.sh electron-contract
 scripts/ci.sh all
 ```
 
-The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies — without requiring a GPU, Redis instance, Docker daemon, or real model weights.
+The test suite covers API behaviour, cache serialisation safety (no pickle deserialization), ONNX fallback paths, reconstruction logic, packaging verification, and Electron security policies, frontend/backend request contracts, and Electron settings IPC validation — without requiring a GPU, Redis instance, Docker daemon, or real model weights.
 
 #### What the Tests Stub
 

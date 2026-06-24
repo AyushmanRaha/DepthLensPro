@@ -28,6 +28,7 @@ from backend.api.errors import (
     inference_dependency_unavailable,
     model_assets_unavailable,
     timeout_error,
+    validation_error,
 )
 from backend.api.errors import (
     reconstruction_timeout as reconstruction_timeout_error,
@@ -160,20 +161,25 @@ router = APIRouter()
 
 
 async def _with_route_timeout(
-    awaitable: Any, route: str, model: str | None = None, device: str | None = None
+    awaitable: Any,
+    route: str,
+    model: str | None = None,
+    device: str | None = None,
+    timeout_factory: Any = None,
+    timeout_code: str = "REQUEST_TIMEOUT",
 ) -> Any:
     try:
         return await asyncio.wait_for(awaitable, timeout=settings.DEPTHLENS_ROUTE_TIMEOUT_SECONDS)
     except asyncio.TimeoutError as exc:
-        observability.record_crash("api", "REQUEST_TIMEOUT", exc, route=route)
+        observability.record_crash("api", timeout_code, exc, route=route)
         if model and device:
             observability.record_inference(
-                model, "unknown", device, None, outcome="error", error_code="REQUEST_TIMEOUT"
+                model, "unknown", device, None, outcome="error", error_code=timeout_code
             )
         log.warning(
             "Route timed out", extra={"route": route, "model": model or "", "device": device or ""}
         )
-        raise timeout_error(route) from exc
+        raise (timeout_factory() if timeout_factory else timeout_error(route)) from exc
 
 
 async def _with_batch_item_timeout(awaitable: Any, route: str = "/batch") -> Any:
@@ -183,7 +189,7 @@ async def _with_batch_item_timeout(awaitable: Any, route: str = "/batch") -> Any
         )
     except asyncio.TimeoutError as exc:
         observability.record_crash("api", "REQUEST_TIMEOUT", exc, route=route)
-        raise exc
+        raise timeout_error(route) from exc
 
 
 def _normalize_compare_models(models: str | None) -> list[str]:
@@ -571,7 +577,7 @@ async def benchmark(
         log.warning("Route timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except Exception as exc:
         observability.record_crash("benchmark", "BENCHMARK_FAILED", exc, route="/api/benchmark")
         log.exception("Benchmark runtime unavailable")
@@ -606,7 +612,7 @@ async def estimate(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -650,7 +656,7 @@ async def estimate(
             "route",
         )
     if cached is not None:
-        log.info("Cache hit: %r", file.filename)
+        log.info("Cache hit for uploaded image")
         observability.safe_observe(
             "route_cache_hit_inference",
             observability.record_inference,
@@ -690,7 +696,7 @@ async def estimate(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
         observability.record_crash("inference", exc.error_code, exc, route="/estimate")
         observability.record_inference(
@@ -767,7 +773,7 @@ async def compare(
             parse_outputs=parse_outputs,
         )
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
 
@@ -909,7 +915,7 @@ async def detect(
         )
         return JSONResponse(result)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except Exception as exc:
         if (
             getattr(exc, "error_code", None) == "DETECTOR_WEIGHTS_UNAVAILABLE"
@@ -995,12 +1001,14 @@ async def reconstruct(
             "/reconstruct",
             model,
             resolved,
+            timeout_factory=reconstruction_timeout_error,
+            timeout_code="RECONSTRUCTION_TIMEOUT",
         )
     except asyncio.TimeoutError as exc:
         log.warning("Reconstruction timed out", extra={"model": model, "device": device})
         raise reconstruction_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except ModelAssetsUnavailableError as exc:
         observability.record_crash("reconstruction", exc.error_code, exc, route="/reconstruct")
         observability.record_inference(
@@ -1051,7 +1059,7 @@ async def batch(
     max_dim: int | None = Form(None),
 ) -> JSONResponse:
     if len(files) > 10:
-        raise HTTPException(422, "Batch limit is 10 images")
+        raise validation_error("Batch limit is 10 images", field="files")
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
     validate_max_dim(max_dim)
@@ -1066,7 +1074,7 @@ async def batch(
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise validation_error(str(exc)) from exc
     except Exception as exc:
         raise _dependency_unavailable(exc) from exc
     resolved = _validated_device_or_422(device)
