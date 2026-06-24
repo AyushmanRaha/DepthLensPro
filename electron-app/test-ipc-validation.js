@@ -4,6 +4,15 @@ const { validateDialogOptions, validateSettingsPayload } = require("./src/main/i
 assert.deepStrictEqual(validateDialogOptions("open", { properties:["openFile"], filters:[{name:"Images", extensions:["png","jpg"]}] }).properties, ["openFile"]);
 assert.throws(() => validateDialogOptions("open", { properties:["openFile"], extra:true }), /not allowed/);
 assert.throws(() => validateDialogOptions("save", { filters:[{name:"Any", extensions:["exe"]}] }), /not allowed/);
-assert.strictEqual(validateSettingsPayload({ theme:"dark" }).theme, "dark");
+const valid = validateSettingsPayload({ selectedModel:"MiDaS_small", targetFps:2, recentBenchmarkSettings:{ model:"MiDaS_small", device:"auto", iterations:3 }, privacy:{} });
+assert.strictEqual(valid.selectedModel, "MiDaS_small");
+assert.strictEqual(valid.targetFps, 2);
+assert.strictEqual(validateSettingsPayload({ selectedDevice:"cpu" }).selectedDevice, "cpu");
+assert.throws(() => validateSettingsPayload({ theme:"dark" }), /not allowed/);
+assert.throws(() => validateSettingsPayload({ targetFps:"2" }), /not allowed|number/);
 assert.throws(() => validateSettingsPayload(null), /object/);
+assert.throws(() => validateSettingsPayload(Object.create(null)), /object/);
+assert.throws(() => validateSettingsPayload({ __proto__: { polluted: true } }), /object/);
+assert.throws(() => validateSettingsPayload({ privacy: { nested: { bad: true } } }), /nested objects|plain object|unsupported/);
+assert.throws(() => validateSettingsPayload({ selectedModel: "bad\0model" }), /safe string/);
 console.log("IPC validation contract passed.");
