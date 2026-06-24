@@ -119,7 +119,6 @@ DepthLens Pro is an application-engineering project built around established mon
 | 3D export workflow | Approximate point-cloud generation controls, PLY/OBJ export flow, preview sampling, and coordinate-system options. | NumPy/OpenCV-style image and array processing. |
 | Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and Chart.js. |
 
-In interviews, the honest summary is: I built the local-first desktop ML system, API, UI workflows, packaging, tests, and reliability layer; the neural depth models themselves are pretrained third-party models.
 
 ---
 
