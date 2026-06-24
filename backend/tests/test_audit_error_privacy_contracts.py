@@ -40,6 +40,7 @@ def test_compare_per_model_error_is_structured_and_legacy_compatible():
     )
     assert err["error"] == err["message"]
     assert err["error_detail"]["error_code"]
+    assert "retryable" not in err["error_detail"]
     assert "cat.png" not in json.dumps(err)
 
 
@@ -52,6 +53,7 @@ async def test_batch_item_timeout_is_structured():
         await routes._with_batch_item_timeout(slow())
     detail = raised.value.detail
     assert detail["error_code"] == "REQUEST_TIMEOUT"
+    assert "retryable" not in detail
     assert "secret.png" not in json.dumps(detail)
 
 
@@ -63,6 +65,7 @@ async def test_route_timeout_codes_are_structured():
     with pytest.raises(HTTPException) as raised:
         await routes._with_route_timeout(slow(), "/estimate")
     assert raised.value.detail["error_code"] == "REQUEST_TIMEOUT"
+    assert "retryable" not in raised.value.detail
     with pytest.raises(HTTPException) as reconstruct_raised:
         await routes._with_route_timeout(
             slow(),
@@ -71,6 +74,7 @@ async def test_route_timeout_codes_are_structured():
             timeout_code="RECONSTRUCTION_TIMEOUT",
         )
     assert reconstruct_raised.value.detail["error_code"] == "RECONSTRUCTION_TIMEOUT"
+    assert "retryable" not in reconstruct_raised.value.detail
 
 
 def test_json_log_formatter_sanitizes_sensitive_fields():

@@ -157,7 +157,7 @@ def test_validated_device_final_resolve_error_is_structured() -> None:
     assert detail["error_code"] == "DEVICE_VALIDATION_ERROR"
     assert detail["message"]
     assert detail["field"] == "device"
-    assert detail["retryable"] is False
+    assert "retryable" not in detail
     assert "/tmp/local/path" not in detail["message"]
 
 

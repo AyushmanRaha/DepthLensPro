@@ -225,7 +225,6 @@ async def _err(req: Request, exc: Exception) -> JSONResponse:
             "detail": {
                 "error_code": "INTERNAL_SERVER_ERROR",
                 "message": "Internal server error",
-                "retryable": True,
             }
         },
     )
