@@ -59,7 +59,9 @@ def validation_error(
     detail: str | dict[str, Any], *, field: str | None = None, code: str = "VALIDATION_ERROR"
 ) -> HTTPException:
     if isinstance(detail, str):
-        return HTTPException(422, sanitize_message(detail))
+        if field is None and code == "VALIDATION_ERROR":
+            return HTTPException(422, sanitize_message(detail))
+        return HTTPException(422, error_envelope(code, detail, field=field))
     payload = _without_private_public_keys(dict(detail))
     payload.setdefault("error_code", code)
     if field is not None:

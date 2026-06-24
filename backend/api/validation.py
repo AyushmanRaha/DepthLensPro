@@ -81,11 +81,11 @@ def validate_reconstruction_params(
             "max_points must be between 1000 and 2000000",
             field="max_points",
         )
-    if preview_points < 100 or preview_points > max_points:
+    if preview_points < 0 or preview_points > max_points:
         raise http_error(
             422,
             "INVALID_RECONSTRUCTION_PARAMETER",
-            "preview_points must be between 100 and max_points",
+            "preview_points must be between 0 and max_points",
             field="preview_points",
         )
     if focal_scale <= 0 or depth_scale <= 0:
