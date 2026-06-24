@@ -26,6 +26,8 @@ def test_required_public_routes_still_exist() -> None:
         "/cache/metrics",
         "/estimate",
         "/batch",
+        "/compare",
+        "/api/compare",
         "/api/reconstruct",
         "/reconstruct",
         "/api/detect",

@@ -51,6 +51,7 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX Runtime p
 
 - [What DepthLens Pro does](#what-depthlens-pro-does)
 - [Why it is technically strong](#why-it-is-technically-strong)
+- [What I built vs third-party components](#what-i-built-vs-third-party-components)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Feature tour](#feature-tour)
 - [Quick Start](#quick-start)
@@ -102,6 +103,23 @@ To know more, read [How Monocular Depth Estimation Works](docs/how-depth-estimat
 | Secure Electron bridge and backend process lifecycle | Uses context isolation, a narrow preload API, localhost-only navigation policy, port checks, PID metadata, and packaged-resource verification. |
 
 Read the full design rationale in [System Design Decisions](docs/system-design-decisions.md).
+
+---
+
+## What I built vs third-party components
+
+DepthLens Pro is an application-engineering project built around established monocular depth-estimation models. It does not claim to train a new depth model from scratch; it focuses on making depth estimation usable as a local-first desktop workflow.
+
+| Area | Built in this project | Third-party / pretrained foundation |
+|---|---|---|
+| Desktop product | Electron shell, local backend lifecycle, workspace UI, compare workflow, experiments, reconstruction workflow, guide, and packaging checks. | Electron runtime and ecosystem. |
+| Backend API | FastAPI routes for estimation, comparison, batch processing, benchmarking, reconstruction, diagnostics, cache controls, health, readiness, and observability. | FastAPI and Starlette. |
+| Inference orchestration | Model selection, device routing, PyTorch/ONNX dispatch, preprocessing integration, output selection, metrics modes, fallback behavior, and request-level validation. | Intel ISL MiDaS/DPT pretrained models, PyTorch, and ONNX Runtime. |
+| Caching and telemetry | Redis/in-memory fallback strategy, cache metrics, Prometheus-style metrics, frontend telemetry snapshots, and sanitized error handling. | Redis and local process/runtime metrics. |
+| 3D export workflow | Approximate point-cloud generation controls, PLY/OBJ export flow, preview sampling, and coordinate-system options. | NumPy/OpenCV-style image and array processing. |
+| Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and Chart.js. |
+
+In interviews, the honest summary is: I built the local-first desktop ML system, API, UI workflows, packaging, tests, and reliability layer; the neural depth models themselves are pretrained third-party models.
 
 ---
 

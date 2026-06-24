@@ -42,7 +42,7 @@ from backend.api.validation import (
 from backend.config import settings
 from backend.constants import MAX_UPLOAD_SIZE_MB
 from backend.model_metadata import COLORMAP_NAMES
-from backend.model_registry import supported_models_payload
+from backend.model_registry import MODEL_REGISTRY, supported_models_payload
 from backend.services import observability
 from backend.services.model_assets import ModelAssetsUnavailableError
 
@@ -151,6 +151,67 @@ def parse_outputs(*args: Any, **kwargs: Any) -> list[str]:
 
 log = logging.getLogger("depthlens")
 router = APIRouter()
+
+
+def _normalize_compare_models(models: str | None) -> list[str]:
+    raw_models = (
+        list(MODEL_REGISTRY)
+        if models is None or not models.strip()
+        else [item.strip() for item in models.split(",")]
+    )
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_model in raw_models:
+        if not raw_model:
+            continue
+        model_id = normalize_request_model(raw_model)
+        if model_id not in seen:
+            normalized.append(model_id)
+            seen.add(model_id)
+    if not normalized:
+        raise HTTPException(422, "At least one model is required")
+    return normalized
+
+
+def _latency_value(result: dict[str, Any]) -> float | None:
+    value = result.get("latency_ms")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _comparison_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    timed = [
+        (result.get("model_id") or result.get("model"), latency)
+        for result in results
+        if (latency := _latency_value(result)) is not None
+    ]
+    if not timed:
+        return {
+            "fastest_model_id": None,
+            "lowest_latency_ms": None,
+            "slowest_model_id": None,
+            "highest_latency_ms": None,
+        }
+    fastest = min(timed, key=lambda item: item[1])
+    slowest = max(timed, key=lambda item: item[1])
+    return {
+        "fastest_model_id": fastest[0],
+        "lowest_latency_ms": fastest[1],
+        "slowest_model_id": slowest[0],
+        "highest_latency_ms": slowest[1],
+    }
+
+
+def _safe_compare_error(model: str, exc: Exception) -> dict[str, str]:
+    code = getattr(exc, "error_code", exc.__class__.__name__)
+    if isinstance(exc, ModelAssetsUnavailableError):
+        message = "Model assets unavailable"
+    elif isinstance(exc, ValueError):
+        message = str(exc)
+    else:
+        message = "Depth inference failed"
+    return {"model_id": model, "error_code": str(code), "message": message}
 
 
 def _dependency_unavailable(exc: Exception) -> HTTPException:
@@ -622,6 +683,129 @@ async def estimate(
         result["latency_ms"],
     )
     return JSONResponse(result)
+
+
+@router.post("/api/compare")
+@router.post("/compare")
+async def compare(
+    file: UploadFile = File(...),
+    models: str | None = Form(None),
+    colormap: str = Form("inferno"),
+    device: str = Form("auto"),
+    metrics: str = Form("full"),
+    outputs: str = Form("color,gray"),
+    max_dim: int | None = Form(None),
+) -> JSONResponse:
+    model_ids = _normalize_compare_models(models)
+    colormap = normalize_request_colormap(colormap)
+    try:
+        metrics, outputs = normalize_request_metrics_and_outputs(
+            metrics,
+            outputs,
+            normalize_metrics_mode=normalize_metrics_mode,
+            parse_outputs=parse_outputs,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise _dependency_unavailable(exc) from exc
+
+    resolved = _validated_device_or_422(device)
+    validate_image_upload_content_type(file)
+    raw = await file.read()
+    validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
+
+    output_set = parse_outputs(outputs)
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    with observability.trace_span(
+        "api",
+        "compare",
+        {
+            "device_type": observability.normalize_device_type(resolved),
+            "model_count": len(model_ids),
+        },
+    ):
+        for model_id in model_ids:
+            try:
+                ck = _fhash(raw, model_id, colormap, resolved, metrics, outputs, max_dim)
+                cached = _cache_service().get(ck)
+                observability.safe_observe(
+                    "cache_event",
+                    observability.record_cache_event,
+                    "hit" if cached is not None else "miss",
+                    "route",
+                )
+                if cached is not None:
+                    result = {**cached, "cached": True}
+                    results.append(result)
+                    observability.safe_observe(
+                        "compare_cache_hit_inference",
+                        observability.record_inference,
+                        model_id,
+                        cached.get("engine_used", "cache"),
+                        resolved,
+                        cached.get("latency_ms"),
+                        cached=True,
+                        outcome="ok",
+                        metrics_mode=metrics,
+                        outputs_count=len(output_set),
+                    )
+                    continue
+
+                result = await process_image_async(
+                    raw, model_id, colormap, resolved, file.filename, metrics, outputs, max_dim
+                )
+                result.setdefault("model_id", model_id)
+                _cache_service().set(ck, result)
+                observability.safe_observe(
+                    "cache_event", observability.record_cache_event, "set", "route"
+                )
+                results.append(result)
+                observability.safe_observe(
+                    "compare_inference",
+                    observability.record_inference,
+                    model_id,
+                    result.get("engine_used", "pytorch"),
+                    resolved,
+                    result.get("latency_ms"),
+                    pixels=(
+                        int(result.get("resolution", {}).get("width", 0))
+                        * int(result.get("resolution", {}).get("height", 0))
+                    ),
+                    cached=False,
+                    outcome="ok",
+                    metrics_mode=metrics,
+                    outputs_count=len(output_set),
+                )
+            except Exception as exc:
+                observability.record_crash(
+                    "inference", "COMPARE_ITEM_FAILED", exc, route="/compare"
+                )
+                observability.record_inference(
+                    model_id,
+                    "unknown",
+                    resolved,
+                    None,
+                    cached=False,
+                    outcome="error",
+                    error_code=getattr(exc, "error_code", "COMPARE_ITEM_FAILED"),
+                )
+                errors.append(_safe_compare_error(model_id, exc))
+
+    return JSONResponse(
+        {
+            "filename": file.filename,
+            "device_used": resolved,
+            "models": model_ids,
+            "results": results,
+            "errors": errors,
+            "total": len(model_ids),
+            "succeeded": len(results),
+            "failed": len(errors),
+            "comparison": _comparison_summary(results),
+        }
+    )
 
 
 @router.post("/api/detect")

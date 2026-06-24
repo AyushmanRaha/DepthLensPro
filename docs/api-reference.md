@@ -28,6 +28,8 @@ http://127.0.0.1:8765
 | `GET` | `/observability` | Observability snapshot alias |
 | `DELETE` | `/cache` | Clear all cache entries |
 | `POST` | `/estimate` | Single-image depth estimation |
+| `POST` | `/compare` | Multi-model comparison on one image |
+| `POST` | `/api/compare` | Compare endpoint alias |
 | `POST` | `/batch` | Batch depth estimation (up to 10 images) |
 | `POST` | `/api/reconstruct` | 3D point-cloud reconstruction |
 | `POST` | `/reconstruct` | Reconstruction alias |
@@ -81,6 +83,72 @@ curl -X POST http://127.0.0.1:8765/estimate \
 | `cached` | `true` when response came from cache |
 | `resolution` | `{"width": W, "height": H}` of the processed image |
 | `gt_metadata` | GT processing details, scale, alignment, valid pixel counts |
+
+---
+
+
+### `POST /compare`
+
+Runs multiple supported depth models on one image and returns per-model outputs plus a compact comparison summary. `/api/compare` is available as a frontend-compatible alias.
+
+#### Form Fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | file | **required** | Input image, max 20 MB |
+| `models` | string | all supported comparison models | Comma-separated model IDs or aliases, deduplicated after normalisation |
+| `colormap` | string | `inferno` | Any supported colormap name |
+| `device` | string | `auto` | `auto`, `cpu`, `mps`, `cuda:0`, `xpu:0`, etc. |
+| `metrics` | string | `full` | `none`, `fast`, or `full` |
+| `outputs` | string | `color,gray` | `color`, `gray`, or `color,gray` |
+| `max_dim` | integer | optional | Resize long edge before inference |
+
+#### Example
+
+```bash
+curl -X POST http://127.0.0.1:8765/compare \
+  -F "file=@photo.jpg" \
+  -F "models=MiDaS_small,DPT_Hybrid,DPT_Large" \
+  -F "colormap=inferno" \
+  -F "device=auto" \
+  -F "metrics=full" \
+  -F "outputs=color,gray"
+```
+
+#### Response Shape
+
+```json
+{
+  "filename": "photo.jpg",
+  "device_used": "cpu",
+  "models": ["midas_small", "dpt_hybrid", "dpt_large"],
+  "results": [
+    {
+      "model_id": "midas_small",
+      "depth_map": "...",
+      "grayscale": "...",
+      "metrics": {},
+      "latency_ms": 123.45,
+      "engine_used": "pytorch",
+      "fallback_used": false,
+      "cached": false,
+      "resolution": {"width": 640, "height": 480}
+    }
+  ],
+  "errors": [],
+  "total": 3,
+  "succeeded": 3,
+  "failed": 0,
+  "comparison": {
+    "fastest_model_id": "midas_small",
+    "lowest_latency_ms": 123.45,
+    "slowest_model_id": "dpt_large",
+    "highest_latency_ms": 456.78
+  }
+}
+```
+
+Each model is validated, cached, and processed independently. Runtime failures for one model are returned in `errors` while the endpoint continues with the remaining requested models where safe.
 
 ---
 
