@@ -58,7 +58,7 @@ npm run backend:dev
 
 ### Renderer Startup Initialization
 
-Renderer startup is dependency-ordered and failure-isolated in both packaged Electron installs and development runs. Foundational state helpers now load before chart/decorative scripts, and optional renderer initialization such as background canvas animation, Chart.js setup, Compare controls, pointer glow, guide accordion, and scroll navigation is isolated from backend startup. If a decorative or chart dependency is unavailable, the app should log a console warning while backend URL resolution, `/live`, `/ready`, `/health` diagnostics, device discovery, polling, and the Depth Engine status panel continue to initialize normally.
+Renderer startup is dependency-ordered and failure-isolated in both packaged Electron installs and development runs. Foundational state helpers now load before chart/decorative scripts, and optional renderer initialization such as background canvas animation, first-party chart setup, Compare controls, pointer glow, guide accordion, and scroll navigation is isolated from backend startup. If a decorative or chart dependency is unavailable, the app should log a console warning while backend URL resolution, `/live`, `/ready`, `/health` diagnostics, device discovery, polling, and the Depth Engine status panel continue to initialize normally.
 
 ---
 
@@ -243,3 +243,8 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
 ## Error envelopes and privacy-safe diagnostics
 
 API errors include `detail.error_code` and `detail.message`; batch and compare item errors also include `error_detail` while preserving legacy string fields. Timeout errors are retryable and use route-specific codes. Logs and observability snapshots redact local paths, image filenames, cache tokens, and long base64-like payloads before display.
+
+
+## Blank chart panels
+
+Charts are rendered locally by `frontend/js/charts.js`. If Workspace, Performance, Benchmark, or Compare chart panels are blank, check the browser/Electron console for `DepthLens Pro:` chart diagnostics, confirm `frontend/js/charts.js` is present, run Electron resource verification, and ensure no stale `vendor/chart.umd.min.js` placeholder script is being loaded.

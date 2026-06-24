@@ -159,6 +159,16 @@ function verifyResourceRoot(options = {}) {
   addCheck(path.join("backend", "app.py"), true, isFile);
   addCheck("frontend", true, isDirectory);
   addCheck(path.join("frontend", "index.html"), true, isFile);
+  addCheck(path.join("frontend", "js", "charts.js"), true, isFile, "frontend/js/charts.js first-party chart renderer");
+
+  const indexPath = path.join(root, "frontend", "index.html");
+  if (isFile(indexPath)) {
+    const html = fs.readFileSync(indexPath, "utf8");
+    checks.push({ rel: path.join("frontend", "index.html"), label: "frontend/index.html does not load stale Chart.js placeholder", full: indexPath, ok: !html.includes("vendor/chart.umd.min.js"), required: true });
+    for (const id of ["latencyChart", "benchmarkChart", "observabilityChart", "compareChart"]) {
+      checks.push({ rel: path.join("frontend", "index.html"), label: `frontend chart canvas #${id}`, full: indexPath, ok: html.includes(`id="${id}"`), required: true });
+    }
+  }
 
   const pythonChecks = pythonCandidateChecks(root, platform);
   const platformPython = pythonChecks.filter((item) => item.platformCandidate).map((item) => item.rel);

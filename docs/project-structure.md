@@ -82,7 +82,7 @@ DepthLensPro/
 │   │   ├── benchmark.js             # PyTorch/ONNX benchmark panel
 │   │   ├── experiments.js           # Experiment run/export workspace
 │   │   ├── reconstruction.js        # 3D reconstruction and point-cloud preview
-│   │   ├── charts.js                # Chart.js setup and theme handling
+│   │   ├── charts.js                # First-party Canvas 2D chart rendering and theme handling
 │   │   ├── notifications.js         # Settings panels, persistence hooks, toasts/navigation helpers
 │   │   ├── observability.js         # Gallery/lightbox and observability dashboard
 │   │   ├── performance.js           # Metrics dashboard refresh helpers
@@ -160,5 +160,5 @@ Maintainer documentation lives in [`docs/maintenance.md`](maintenance.md) and [`
 
 
 - `backend/requirements-dev.txt` — development/test/quality tooling layered on runtime requirements.
-- `frontend/vendor/chart.umd.min.js` — local Chart.js runtime asset used by packaged/browser UI without CDN scripts.
+- `frontend/js/charts.js` — local first-party Canvas 2D renderer for workspace, performance, benchmark, and compare charts.
 - `docs/resource-path-contract.md` — shared resource path policy for backend, Electron, setup, and packaging checks.

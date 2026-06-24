@@ -120,3 +120,6 @@ If `/live` succeeds, the backend is not offline; diagnostics may still be pendin
 ## Packaged dependency and resource contract
 
 Packaged backend environments use runtime dependencies from `backend/requirements.txt`; dev/test tools live in `backend/requirements-dev.txt` and are not required for packaged runtime execution. Resource names are kept aligned in [resource path contract](resource-path-contract.md). Docker packaging checks remain manual/optional and are not required CI gates.
+
+
+Packaged frontend resources must include `frontend/js/charts.js`, which provides the local Canvas 2D chart renderer verified by Electron resource checks.
