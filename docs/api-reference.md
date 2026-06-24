@@ -27,10 +27,13 @@ http://127.0.0.1:8765
 | `GET` | `/api/observability` | JSON observability snapshot for the Performance panel |
 | `GET` | `/observability` | Observability snapshot alias |
 | `DELETE` | `/cache` | Clear all cache entries |
+| `POST` | `/cache/clear` | Browser/client-friendly cache clear alias |
 | `POST` | `/estimate` | Single-image depth estimation |
 | `POST` | `/compare` | Multi-model comparison on one image |
 | `POST` | `/api/compare` | Compare endpoint alias |
 | `POST` | `/batch` | Batch depth estimation (up to 10 images) |
+| `POST` | `/detect` | Local object detection for RGB Camera / 3D workflows |
+| `POST` | `/api/detect` | Detection endpoint alias |
 | `POST` | `/api/reconstruct` | 3D point-cloud reconstruction |
 | `POST` | `/reconstruct` | Reconstruction alias |
 
@@ -178,6 +181,27 @@ Response shape:
   "failed": 1
 }
 ```
+
+---
+
+### `POST /detect` and `POST /api/detect`
+
+Runs local object detection for the RGB Camera / 3D workflow. Detector weights and optional dependencies may be unavailable on a machine; in that case the endpoint returns a structured detector-unavailable error with remediation details instead of silently falling back.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | file | **required** | Input image; max upload limit follows the backend upload limit |
+| `device` | string | `auto` | Runtime device selection |
+| `threshold` | float | `0.35` | Detection confidence threshold; valid range `0.05` to `0.95` |
+| `max_detections` | integer | `5` | Maximum detections to return; valid range `1` to `20` |
+
+---
+
+### Cache endpoints
+
+- `GET /cache/metrics` returns active cache telemetry, including hit/miss counters, keyspace size, and backend type.
+- `DELETE /cache` clears the active inference cache.
+- `POST /cache/clear` also clears the active inference cache for browser/client flows that prefer POST requests.
 
 ---
 

@@ -107,9 +107,25 @@ DepthLensPro/
 │   ├── build-native-linux.sh
 │   └── build-native-windows.ps1
 │
-├── docs/
-│   ├── debugging.md                 # Startup, asset, ONNX, port, packaged-resource, and settings troubleshooting
-│   └── maintenance.md               # Safe extension guide for models, routes, installer/build, frontend modules, tests
+├── docs/                           # Markdown guides and reference material
+│   ├── api-reference.md
+│   ├── configuration.md
+│   ├── debugging.md
+│   ├── depth-metrics.md
+│   ├── ground-truth-evaluation.md
+│   ├── how-depth-estimation-works.md
+│   ├── maintenance.md
+│   ├── models-colormaps-metrics.md
+│   ├── production-packaging.md
+│   ├── project-structure.md
+│   ├── refactor-test-matrix.md
+│   ├── security.md
+│   ├── setup-and-build.md
+│   ├── system-architecture.md
+│   ├── system-design-decisions.md
+│   ├── terminal-only-development.md
+│   ├── testing-and-ci.md
+│   └── troubleshooting.md
 │
 ├── .github/
 │   └── workflows/ci.yml             # GitHub Actions — lint, type-check, pytest, Electron tests, resource dry-run
