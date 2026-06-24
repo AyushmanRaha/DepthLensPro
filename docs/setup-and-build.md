@@ -593,3 +593,10 @@ curl http://127.0.0.1:8765/ready
 docker compose up --build
 docker compose down
 ```
+
+
+## Runtime vs development Python dependencies
+
+`backend/requirements.txt` contains runtime dependencies used by setup and packaged backend environments. Contributors running local quality checks should install `backend/requirements-dev.txt`, which includes runtime dependencies plus test/type/lint tools.
+
+Root npm installs are not part of the project setup. Use `npm --prefix electron-app ...`; the expected lockfile is `electron-app/package-lock.json`.

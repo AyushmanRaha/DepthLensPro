@@ -77,3 +77,6 @@ backend.pid
 !models/onnx/.gitkeep
 models/torch-cache/**
 !models/torch-cache/.gitkeep
+
+# Root npm install is not used; lockfile lives in electron-app/.
+/package-lock.json

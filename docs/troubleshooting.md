@@ -238,3 +238,8 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Error envelopes and privacy-safe diagnostics
+
+API errors include `detail.error_code` and `detail.message`; batch and compare item errors also include `error_detail` while preserving legacy string fields. Timeout errors are retryable and use route-specific codes. Logs and observability snapshots redact local paths, image filenames, cache tokens, and long base64-like payloads before display.

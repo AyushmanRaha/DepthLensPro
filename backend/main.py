@@ -143,11 +143,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="DepthLens Pro API", version=SERVICE_VERSION, debug=settings.DEBUG, lifespan=lifespan
 )
+
+
+def _cors_origins() -> list[str]:
+    if settings.DEPTHLENS_CORS_ALLOW_ALL:
+        return ["*"]
+    origins = {
+        "null",
+        "file://",
+        "http://localhost",
+        "http://127.0.0.1",
+        f"http://localhost:{settings.PORT}",
+        f"http://127.0.0.1:{settings.PORT}",
+    }
+    origins.update(
+        item.strip() for item in settings.DEPTHLENS_CORS_ALLOWED_ORIGINS.split(",") if item.strip()
+    )
+    return sorted(origins)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    # Do not combine wildcard origins with credentialed CORS. The renderer and
-    # browser/file development flow do not send cookies or auth credentials.
+    allow_origins=_cors_origins(),
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):[0-9]{1,5}$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -176,6 +194,15 @@ async def _observability_middleware(request: Request, call_next: Any) -> Any:
 
 @app.exception_handler(Exception)
 async def _err(req: Request, exc: Exception) -> JSONResponse:
-    log.exception("Unhandled: %s", req.url)
+    log.exception("Unhandled: %s", observability.sanitize_message(req.url))
     observability.record_crash("api", "UNHANDLED_EXCEPTION", exc, route=str(req.url.path))
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": {
+                "error_code": "INTERNAL_SERVER_ERROR",
+                "message": "Internal server error",
+                "retryable": True,
+            }
+        },
+    )

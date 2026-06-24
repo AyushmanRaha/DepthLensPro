@@ -44,3 +44,10 @@ See [`SECURITY.md`](../SECURITY.md) for the full policy.
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Runtime network and privacy posture
+
+The packaged frontend loads Chart.js from `frontend/vendor/chart.umd.min.js`; runtime chart rendering no longer requires a CDN script. Backend CORS defaults to local Electron/browser development origins (`localhost`, `127.0.0.1`, and file/null-origin flows) with credentials disabled. Set `DEPTHLENS_CORS_ALLOWED_ORIGINS` for additional comma-separated local origins or `DEPTHLENS_CORS_ALLOW_ALL=1` only for isolated development troubleshooting.
+
+JSON logs and observability crash messages are sanitized before storage/output. Home directories, Windows/Unix paths, image filenames, cache-like tokens, and long base64-like strings are redacted from default diagnostics.

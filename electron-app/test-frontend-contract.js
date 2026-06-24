@@ -157,3 +157,11 @@ assertBackgroundCanvasStartupIsGuarded();
 assertStartupCriticalPathIsFailureIsolated();
 
 console.log('frontend contract tests passed');
+
+function assertNoRemoteRuntimeScripts() {
+  const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "index.html"), "utf8");
+  assert(!html.includes("https://cdn.jsdelivr.net"), "frontend must not depend on jsdelivr runtime scripts");
+  assert(html.includes("vendor/chart.umd.min.js"), "Chart.js must load from local vendor path");
+}
+
+assertNoRemoteRuntimeScripts();

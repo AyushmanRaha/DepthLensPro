@@ -1,71 +1,118 @@
-"""HTTP exception helpers used by route orchestration."""
+"""HTTP exception helpers and public error envelopes."""
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import HTTPException
 
 from backend.services.model_assets import ModelAssetsUnavailableError
+from backend.services.observability import sanitize_message
 
 BENCHMARK_TIMEOUT_MESSAGE = "Benchmark timed out · depth engine remains available"
 RECONSTRUCTION_TIMEOUT_MESSAGE = "Point cloud generation timed out · depth engine remains available"
 
 
+def error_envelope(
+    error_code: str,
+    message: str,
+    *,
+    remediation: str | None = None,
+    field: str | None = None,
+    retryable: bool | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"error_code": error_code, "message": sanitize_message(message)}
+    if remediation:
+        payload["remediation"] = sanitize_message(remediation)
+    if field:
+        payload["field"] = field
+    if retryable is not None:
+        payload["retryable"] = retryable
+    payload.update(extra)
+    return payload
+
+
+def http_error(status_code: int, error_code: str, message: str, **kwargs: Any) -> HTTPException:
+    return HTTPException(status_code, error_envelope(error_code, message, **kwargs))
+
+
+def embedded_error(error_code: str, message: str, **kwargs: Any) -> dict[str, Any]:
+    return error_envelope(error_code, message, **kwargs)
+
+
+def validation_error(
+    message: str, *, field: str | None = None, code: str = "VALIDATION_ERROR"
+) -> HTTPException:
+    return http_error(422, code, message, field=field, retryable=False)
+
+
 def inference_dependency_unavailable(exc: Exception, log: logging.Logger) -> HTTPException:
-    log.warning("Inference runtime dependency unavailable: %s: %s", type(exc).__name__, exc)
-    return HTTPException(
+    log.warning(
+        "Inference runtime dependency unavailable: %s: %s",
+        type(exc).__name__,
+        sanitize_message(exc),
+    )
+    return http_error(
         503,
-        {
-            "error_code": "INFERENCE_RUNTIME_UNAVAILABLE",
-            "message": "Inference runtime is not ready. Check /ready for dependency diagnostics.",
-        },
+        "INFERENCE_RUNTIME_UNAVAILABLE",
+        "Inference runtime is not ready. Check /ready for dependency diagnostics.",
+        retryable=True,
     )
 
 
 def model_assets_unavailable(exc: ModelAssetsUnavailableError) -> HTTPException:
-    return HTTPException(503, exc.to_payload())
+    payload = exc.to_payload()
+    return HTTPException(
+        503,
+        error_envelope(
+            str(payload.get("error_code", "MODEL_ASSET_UNAVAILABLE")),
+            str(payload.get("message", "Model assets unavailable")),
+            remediation=str(
+                payload.get("action")
+                or payload.get("remediation")
+                or "Run setup or prefetch model assets."
+            ),
+            retryable=True,
+        ),
+    )
 
 
 def generic_inference_failure(message: str = "Depth inference failed") -> HTTPException:
-    return HTTPException(500, {"error_code": "INFERENCE_FAILED", "message": message})
+    return http_error(500, "INFERENCE_FAILED", message, retryable=True)
+
+
+def timeout_error(
+    route: str, message: str = "Request timed out · depth engine remains available"
+) -> HTTPException:
+    return http_error(504, "REQUEST_TIMEOUT", message, field=route, retryable=True)
 
 
 def benchmark_timeout() -> HTTPException:
-    return HTTPException(
-        504,
-        {"error_code": "BENCHMARK_TIMEOUT", "message": BENCHMARK_TIMEOUT_MESSAGE},
-    )
+    return http_error(504, "BENCHMARK_TIMEOUT", BENCHMARK_TIMEOUT_MESSAGE, retryable=True)
 
 
 def reconstruction_timeout() -> HTTPException:
-    return HTTPException(
-        504,
-        {"error_code": "RECONSTRUCTION_TIMEOUT", "message": RECONSTRUCTION_TIMEOUT_MESSAGE},
-    )
+    return http_error(504, "RECONSTRUCTION_TIMEOUT", RECONSTRUCTION_TIMEOUT_MESSAGE, retryable=True)
 
 
 def detector_unavailable(exc: Exception) -> HTTPException:
-    return HTTPException(
+    return http_error(
         503,
-        {
-            "error_code": getattr(exc, "error_code", "DETECTOR_UNAVAILABLE"),
-            "message": str(exc) or "Local object detector is unavailable",
-            "action": (
-                "Run setup to install detector dependencies, or retry when network "
-                "access is available for lazy weights download."
-            ),
-        },
+        str(getattr(exc, "error_code", "DETECTOR_UNAVAILABLE")),
+        "Local object detector is unavailable",
+        remediation=(
+            "Run setup to install detector dependencies or retry after detector weights "
+            "are available."
+        ),
+        retryable=True,
     )
 
 
 def generic_detector_failure() -> HTTPException:
-    return HTTPException(
-        500, {"error_code": "DETECTION_FAILED", "message": "Object detection failed"}
-    )
+    return http_error(500, "DETECTION_FAILED", "Object detection failed", retryable=True)
 
 
 def generic_reconstruction_failure() -> HTTPException:
-    return HTTPException(
-        500, {"error_code": "RECONSTRUCTION_FAILED", "message": "Point cloud generation failed"}
-    )
+    return http_error(500, "RECONSTRUCTION_FAILED", "Point cloud generation failed", retryable=True)

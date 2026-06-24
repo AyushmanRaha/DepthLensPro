@@ -102,3 +102,8 @@ Run ONNX validation only when all three local ONNX files exist or the phase expl
 ```bash
 npm run verify:onnx
 ```
+
+
+## Resource and dependency hygiene
+
+Keep backend, Electron, setup scripts, and packaged-resource verifiers aligned with [resource path contract](resource-path-contract.md). Do not add a tracked root `package-lock.json`; use `electron-app/package-lock.json` and `npm --prefix electron-app` commands.

@@ -11,6 +11,7 @@ Turn ordinary 2D images into depth maps, compare neural depth models, benchmark 
 [![Desktop App](https://img.shields.io/badge/Desktop_App-v1.0.0-111827?style=for-the-badge)](electron-app/package.json)
 [![API](https://img.shields.io/badge/API-v1.0.0-2563eb?style=for-the-badge)](backend/api/live.py)
 [![Electron](https://img.shields.io/badge/Electron-42.3.0-47848f?style=for-the-badge&logo=electron&logoColor=white)](electron-app/package.json)
+[![Python 3.12 tested](https://img.shields.io/badge/Python_3.12-tested-3776ab?style=for-the-badge&logo=python&logoColor=white)](backend/requirements.txt)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.135.3-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/requirements.txt)
 [![Python](https://img.shields.io/badge/Python-3.10--3.12-3776ab?style=for-the-badge&logo=python&logoColor=white)](scripts/doctor.py)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.11.0-ee4c2c?style=for-the-badge&logo=pytorch&logoColor=white)](backend/requirements.txt)
@@ -117,7 +118,7 @@ DepthLens Pro is an application-engineering project built around established mon
 | Inference orchestration | Model selection, device routing, PyTorch/ONNX dispatch, preprocessing integration, output selection, metrics modes, fallback behavior, and request-level validation. | Intel ISL MiDaS/DPT pretrained models, PyTorch, and ONNX Runtime. |
 | Caching and telemetry | Redis/in-memory fallback strategy, cache metrics, Prometheus-style metrics, frontend telemetry snapshots, and sanitized error handling. | Redis and local process/runtime metrics. |
 | 3D export workflow | Approximate point-cloud generation controls, PLY/OBJ export flow, preview sampling, and coordinate-system options. | NumPy/OpenCV-style image and array processing. |
-| Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and Chart.js. |
+| Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and locally vendored Chart.js. |
 
 
 ---
@@ -436,7 +437,7 @@ DepthLens Pro builds on excellent open-source projects:
 | [NumPy](https://numpy.org) | Depth array arithmetic and GT metric computation |
 | [Pillow](https://python-pillow.org) | PNG/TIFF/NPY GT file decoding |
 | [Redis](https://redis.io) | Optional distributed cache backend |
-| [Chart.js](https://www.chartjs.org) | Latency and benchmark charts in the frontend |
+| [Chart.js](https://www.chartjs.org) | Latency and benchmark charts loaded from a local vendored frontend asset |
 
 <div align="center">
 

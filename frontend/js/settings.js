@@ -223,10 +223,13 @@ async function apiFetch(path, options = {}) {
       let detail = `HTTP ${res.status}`;
       try {
         const err = await res.clone().json();
-        const rawDetail = err.detail || err.error || detail;
-        detail = typeof rawDetail === "object"
-          ? (rawDetail.message || rawDetail.error_code || JSON.stringify(rawDetail))
-          : rawDetail;
+        const rawDetail = err.detail || err.error_detail || err.error || detail;
+        if (typeof rawDetail === "object" && rawDetail) {
+          detail = rawDetail.message || rawDetail.error_code || JSON.stringify(rawDetail);
+          if (rawDetail.error_code && rawDetail.message) detail = `${rawDetail.message} [${rawDetail.error_code}]`;
+        } else {
+          detail = rawDetail;
+        }
       } catch {}
       throw new Error(`${detail} (${url})`);
     }
