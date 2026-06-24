@@ -103,107 +103,171 @@ function chartColors() {
     fill:    isDark ? "rgba(0,200,255,.07)"   : "rgba(0,112,204,.06)",
     bar:     isDark ? "rgba(0,200,255,.55)"   : "rgba(0,112,204,.55)",
     barBrd:  isDark ? "#00c8ff"               : "#0070cc",
-    tooltip: isDark ? "#101e2e"               : "#ffffff",
-    ttBrd:   isDark ? "#00c8ff"               : "#0070cc",
-    ttTitle: isDark ? "#7faac8"               : "#2d4a66",
-    ttBody:  isDark ? "#dff0ff"               : "#0d1f33",
+    text:    isDark ? "#7faac8"               : "#2d4a66",
+    body:    isDark ? "#dff0ff"               : "#0d1f33",
+    muted:   isDark ? "rgba(127,140,153,.45)" : "rgba(127,140,153,.55)",
+    mutedBrd:isDark ? "#5e6f81"               : "#6c7f91",
   };
 }
 
-function initLatencyChart() {
-  if (typeof Chart !== "function") return null;
-  const canvas = $("#latencyChart");
-  const ctx = canvas?.getContext?.("2d");
+const chartWarned = new Set();
+const chartRegistry = new Map();
+
+function warnChartOnce(key, message) {
+  if (chartWarned.has(key)) return;
+  chartWarned.add(key);
+  console.warn(message);
+}
+
+function getCanvasContext(canvas, label = "chart") {
+  if (!canvas?.getContext) {
+    warnChartOnce(`${label}:missing`, `DepthLens Pro: ${label} chart canvas is unavailable.`);
+    return null;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) warnChartOnce(`${label}:context`, `DepthLens Pro: ${label} chart canvas context is unavailable.`);
+  return ctx;
+}
+
+function resizeCanvasToDisplaySize(canvas) {
+  const rect = canvas?.getBoundingClientRect?.() || {};
+  const parentRect = canvas?.parentElement?.getBoundingClientRect?.() || {};
+  const cssWidth = Math.max(1, Math.round(rect.width || parentRect.width || canvas?.clientWidth || 320));
+  const cssHeight = Math.max(1, Math.round(rect.height || parentRect.height || canvas?.clientHeight || 180));
+  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  const width = Math.max(1, Math.round(cssWidth * dpr));
+  const height = Math.max(1, Math.round(cssHeight * dpr));
+  const changed = canvas.width !== width || canvas.height !== height;
+  if (changed) { canvas.width = width; canvas.height = height; }
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  const ctx = canvas.getContext?.("2d");
+  ctx?.setTransform?.(dpr, 0, 0, dpr, 0, 0);
+  return { width: cssWidth, height: cssHeight, dpr, changed };
+}
+
+function clearCanvas(canvas) {
+  const ctx = getCanvasContext(canvas, "canvas");
   if (!ctx) return null;
-  const c = chartColors();
-  latencyChart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: [],
-      datasets: [{
-        label: "Inference ms",
-        data: [],
-        borderColor: c.line,
-        backgroundColor: c.fill,
-        borderWidth: 1.5, pointRadius: 2, tension: 0.4, fill: true,
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      animation: { duration: 280 },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: c.tooltip, borderColor: c.ttBrd, borderWidth: 1,
-          titleColor: c.ttTitle, bodyColor: c.ttBody,
-          callbacks: { label: (ctx) => `${ctx.raw} ms` },
-        },
-      },
-      scales: {
-        x: { display: false },
-        y: {
-          display: true,
-          grid: { color: c.grid },
-          ticks: { color: c.tick, font: { family:"JetBrains Mono", size:9 }, maxTicksLimit:4 },
-        },
-      },
-    },
+  const size = resizeCanvasToDisplaySize(canvas);
+  ctx.clearRect(0, 0, size.width, size.height);
+  return { ctx, ...size };
+}
+
+function chartArea(width, height) {
+  return { left: 42, right: 14, top: 14, bottom: 30, width: Math.max(20, width - 56), height: Math.max(20, height - 44) };
+}
+
+function drawGrid(ctx, area, maxValue, colors) {
+  ctx.strokeStyle = colors.grid; ctx.lineWidth = 1; ctx.fillStyle = colors.tick;
+  ctx.font = "9px JetBrains Mono, monospace"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (let i = 0; i <= 4; i += 1) {
+    const y = area.top + (area.height * i / 4);
+    ctx.beginPath(); ctx.moveTo(area.left, y); ctx.lineTo(area.left + area.width, y); ctx.stroke();
+    const label = Math.round(maxValue - (maxValue * i / 4));
+    ctx.fillText(String(label), area.left - 6, y);
+  }
+}
+
+function numericValues(values) {
+  return (values || []).map(Number).filter(Number.isFinite);
+}
+
+function drawNoDataState(canvas, message = "No chart data yet") {
+  const drawing = clearCanvas(canvas); if (!drawing) return false;
+  const { ctx, width, height } = drawing; const c = chartColors(); const area = chartArea(width, height);
+  drawGrid(ctx, area, 100, c);
+  ctx.fillStyle = c.text; ctx.font = "12px Rajdhani, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(message, width / 2, height / 2);
+  return true;
+}
+
+function drawLineChart(canvas, values, options = {}) {
+  const data = numericValues(values);
+  if (!data.length) return drawNoDataState(canvas, options.emptyMessage || "No chart data yet");
+  const drawing = clearCanvas(canvas); if (!drawing) return false;
+  const { ctx, width, height } = drawing; const c = chartColors(); const area = chartArea(width, height);
+  const maxValue = Math.max(1, options.maxValue || Math.max(...data) * 1.15);
+  drawGrid(ctx, area, maxValue, c);
+  const xFor = (i) => area.left + (data.length === 1 ? area.width : (area.width * i / (data.length - 1)));
+  const yFor = (v) => area.top + area.height - (Math.max(0, v) / maxValue) * area.height;
+  ctx.beginPath(); ctx.moveTo(xFor(0), yFor(data[0]));
+  data.forEach((v, i) => { if (i) ctx.lineTo(xFor(i), yFor(v)); });
+  ctx.strokeStyle = options.lineColor || c.line; ctx.lineWidth = options.lineWidth || 1.8; ctx.stroke();
+  ctx.lineTo(xFor(data.length - 1), area.top + area.height); ctx.lineTo(xFor(0), area.top + area.height); ctx.closePath();
+  ctx.fillStyle = options.fillColor || c.fill; ctx.fill();
+  ctx.fillStyle = c.text; ctx.font = "10px JetBrains Mono, monospace"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  if (options.label) ctx.fillText(options.label, area.left, area.top - 2);
+  return true;
+}
+
+function drawSparkline(canvas, values, options = {}) { return drawLineChart(canvas, values, options); }
+
+function drawBarChart(canvas, rows, options = {}) {
+  const entries = (rows || []).map((row) => ({ label: String(row.label || ""), value: Number(row.value) }));
+  const drawable = entries.filter((row) => Number.isFinite(row.value));
+  if (!drawable.length) return drawNoDataState(canvas, options.emptyMessage || "No chart data yet");
+  const drawing = clearCanvas(canvas); if (!drawing) return false;
+  const { ctx, width, height } = drawing; const c = chartColors(); const area = chartArea(width, height);
+  const maxValue = Math.max(1, options.maxValue || Math.max(...drawable.map((row) => row.value)) * 1.15);
+  drawGrid(ctx, area, maxValue, c);
+  const slot = area.width / Math.max(1, entries.length); const barW = Math.max(10, slot * 0.52);
+  entries.forEach((row, i) => {
+    const x = area.left + slot * i + (slot - barW) / 2;
+    const ok = Number.isFinite(row.value); const h = ok ? Math.max(1, (row.value / maxValue) * area.height) : 2;
+    const y = area.top + area.height - h;
+    ctx.fillStyle = ok ? c.bar : c.muted; ctx.strokeStyle = ok ? c.barBrd : c.mutedBrd; ctx.lineWidth = 1;
+    ctx.fillRect(x, y, barW, h); ctx.strokeRect?.(x, y, barW, h);
+    ctx.fillStyle = c.text; ctx.font = "10px Rajdhani, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(row.label, x + barW / 2, area.top + area.height + 6, Math.max(40, slot - 4));
+    ctx.font = "9px JetBrains Mono, monospace"; ctx.textBaseline = "bottom";
+    ctx.fillText(ok ? (options.formatValue ? options.formatValue(row.value) : String(Math.round(row.value))) : "—", x + barW / 2, y - 3);
   });
+  if (options.label) { ctx.fillStyle = c.text; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(options.label, area.left, area.top - 2); }
+  return true;
+}
+
+function drawGroupedBarChart(canvas, rows, options = {}) { return drawBarChart(canvas, rows, options); }
+
+function rememberChart(name, canvas, draw) {
+  if (!canvas) return;
+  chartRegistry.set(name, { canvas, draw });
+}
+
+function redrawVisibleCharts() {
+  chartRegistry.forEach((entry) => entry.draw?.());
+}
+
+let chartResizeTimer = null;
+function scheduleChartResize() {
+  clearTimeout(chartResizeTimer);
+  chartResizeTimer = setTimeout(redrawVisibleCharts, 80);
+}
+window.addEventListener?.("resize", scheduleChartResize);
+
+function initLatencyChart() {
+  const canvas = $("#latencyChart");
+  if (!canvas) { warnChartOnce("latency:missing", "DepthLens Pro: latency chart canvas is unavailable."); return null; }
+  latencyChart = { canvas, values: [] };
+  rememberChart("latency", canvas, () => drawSparkline(canvas, latencyChart.values, { label: "Inference ms", emptyMessage: "No latency samples yet" }));
+  drawSparkline(canvas, [], { label: "Inference ms", emptyMessage: "No latency samples yet" });
   return latencyChart;
 }
 
-function applyChartPalette(chart, c) {
-  if (!chart) return;
-  const tooltip = chart.options?.plugins?.tooltip;
-  if (tooltip) {
-    tooltip.backgroundColor = c.tooltip;
-    tooltip.borderColor = c.ttBrd;
-    tooltip.titleColor = c.ttTitle;
-    tooltip.bodyColor = c.ttBody;
-  }
-  const legend = chart.options?.plugins?.legend;
-  if (legend?.labels) legend.labels.color = c.ttTitle;
-  if (chart.options?.scales?.x) {
-    if (chart.options.scales.x.grid) chart.options.scales.x.grid.color = c.grid;
-    if (chart.options.scales.x.ticks) chart.options.scales.x.ticks.color = c.ttTitle;
-  }
-  if (chart.options?.scales?.y) {
-    if (chart.options.scales.y.grid) chart.options.scales.y.grid.color = c.grid;
-    if (chart.options.scales.y.ticks) chart.options.scales.y.ticks.color = c.tick;
-  }
-}
-
 function updateChartTheme() {
-  const c = chartColors();
-  if (latencyChart) {
-    latencyChart.data.datasets[0].borderColor = c.line;
-    latencyChart.data.datasets[0].backgroundColor = c.fill;
-    applyChartPalette(latencyChart, c);
-    latencyChart.update("none");
-  }
-
-  if (compareChart && state?.compareView?.results?.length) {
-    renderCompareChart(state.compareView.results, state.compareView.metricKey, { preserveInstance: true });
-  }
-  if (state?.observability?.chart) { applyChartPalette(state.observability.chart, c); state.observability.chart.update?.("none"); }
-  if (benchmarkChart) {
-    applyChartPalette(benchmarkChart, c);
-    const ds = benchmarkChart.data?.datasets?.[0];
-    if (ds) {
-      ds.backgroundColor = ds.data.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
-      ds.borderColor = ds.data.map(v => v === null ? "#5e6f81" : c.barBrd);
-    }
-    benchmarkChart.update?.("none");
-  }
+  if (latencyChart) drawSparkline(latencyChart.canvas, latencyChart.values, { label: "Inference ms", emptyMessage: "No latency samples yet" });
+  if (compareChart) compareChart.draw?.();
+  if (benchmarkChart) benchmarkChart.draw?.();
+  if (state?.observability?.chart) state.observability.chart.draw?.();
 }
 
 function pushLatency(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value)) { warnChartOnce("latency:bad-data", "DepthLens Pro: latency chart skipped because no drawable latency data was provided."); return; }
   if (!latencyChart && !initLatencyChart()) return;
-  const d = state.session.latencies.slice(-20);
-  if (!latencyChart?.data?.datasets?.[0]) return;
-  latencyChart.data.labels = d.map((_,i) => i+1);
-  latencyChart.data.datasets[0].data = d;
-  latencyChart.update?.("none");
+  const d = (state?.session?.latencies || []).map(Number).filter(Number.isFinite).slice(-20);
+  latencyChart.values = d.length ? d : [value];
+  drawSparkline(latencyChart.canvas, latencyChart.values, { label: "Inference ms", emptyMessage: "No latency samples yet" });
 }
 
 function compareMetricValue(result, spec) {
@@ -240,68 +304,25 @@ function renderCompareSummary(results) {
 
 function renderCompareChart(results, metricKey = state.compareView.metricKey, { preserveInstance = false } = {}) {
   const metric = COMPARE_METRICS.find(m => m.key === metricKey) || COMPARE_METRICS[0];
-  const values = results.map(r => {
-    const v = Number(compareMetricValue(r, metric));
-    return Number.isFinite(v) ? v : null;
-  });
-  const labels = results.map(r => escText(r.model).replace("MiDaS_","").replace("DPT_","DPT "));
+  const rows = (results || []).map(r => ({
+    label: escText(r.model).replace("MiDaS_","").replace("DPT_","DPT "),
+    value: Number(compareMetricValue(r, metric)),
+  }));
   if (el.compareChartCard) el.compareChartCard.hidden = false;
-  if (typeof Chart !== "function") return;
-  const c = chartColors();
-  const ctx = $("#compareChart")?.getContext?.("2d");
-  if (!ctx) return;
-  if (compareChart && preserveInstance) {
-    compareChart.data.labels = labels;
-    compareChart.data.datasets[0].label = metric.label;
-    compareChart.data.datasets[0].data = values;
-    compareChart.data.datasets[0].backgroundColor = values.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar);
-    compareChart.data.datasets[0].borderColor = values.map(v => v === null ? "#5e6f81" : c.barBrd);
-    compareChart.options.scales.y.ticks.callback = v => metric.fmt(v);
-    compareChart.options.plugins.tooltip.callbacks.label = ctx => ctx.raw === null ? "Not available" : metric.fmt(ctx.raw);
-    applyChartPalette(compareChart, c);
-    compareChart.update?.("none");
-    return;
-  }
-  if (compareChart) {
-    const oldChart = compareChart;
-    compareChart = null;
-    oldChart.destroy?.();
-  }
-  compareChart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: metric.label,
-        data: values,
-        backgroundColor: values.map(v => v === null ? "rgba(127,140,153,.45)" : c.bar),
-        borderColor:     values.map(v => v === null ? "#5e6f81" : c.barBrd),
-        borderWidth: 1.5, borderRadius: 4,
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      animation: { duration: 380 },
-      plugins: {
-        legend: { labels: { color: c.ttTitle, font: { family:"JetBrains Mono", size:10 } } },
-        tooltip: {
-          backgroundColor: c.tooltip, borderColor: c.ttBrd, borderWidth:1,
-          titleColor: c.ttTitle, bodyColor: c.ttBody,
-          callbacks: { label: ctx => ctx.raw === null ? "Not available" : metric.fmt(ctx.raw) },
-        },
-      },
-      scales: {
-        x: {
-          ticks: { color: c.ttTitle, font: { family:"Rajdhani", size:12, weight:"600" } },
-          grid: { color: c.grid },
-        },
-        y: {
-          ticks: { color: c.tick, font: { family:"JetBrains Mono", size:9 }, callback: v => metric.fmt(v) },
-          grid: { color: c.grid },
-        },
-      },
-    },
-  });
+  const canvas = $("#compareChart");
+  if (!canvas) { warnChartOnce("compare:missing", "DepthLens Pro: compare chart canvas is unavailable."); return; }
+  compareChart = {
+    canvas,
+    rows,
+    metricKey: metric.key,
+    draw: () => drawBarChart(canvas, rows, {
+      label: metric.label,
+      emptyMessage: "No comparison chart data yet",
+      formatValue: (value) => metric.fmt(value),
+    }),
+  };
+  rememberChart("compare", canvas, compareChart.draw);
+  compareChart.draw();
 }
 
 function initCompareControls() {
@@ -324,6 +345,21 @@ function initCompareControls() {
     el.compareChartToggle.setAttribute("aria-expanded", String(state.compareView.open));
   });
 }
+
+const DepthLensCharts = {
+  getCanvasContext,
+  resizeCanvasToDisplaySize,
+  clearCanvas,
+  drawNoDataState,
+  drawLineChart,
+  drawBarChart,
+  drawGroupedBarChart,
+  drawSparkline,
+  scheduleChartResize,
+  redrawVisibleCharts,
+  renderCompareChart,
+};
+window.DepthLensCharts = DepthLensCharts;
 
 function logEndpointTiming(label, started, ok, extra = "") {
   if (!settings.endpointTimingLogs && !settings.verboseConsoleLogs) return;

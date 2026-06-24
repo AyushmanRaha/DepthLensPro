@@ -90,3 +90,6 @@ python -m pip install -r backend/requirements-dev.txt
 ```
 
 Do not run `npm install` at the repository root. The tracked npm lockfile belongs under `electron-app/package-lock.json`.
+
+
+Electron frontend contract tests also verify chart canvas presence, script ordering, no runtime chart CDN/placeholder dependency, and first-party chart rendering with lightweight fake Canvas 2D contexts.

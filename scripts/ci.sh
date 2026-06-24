@@ -32,8 +32,11 @@ electron_contract() {
   run npm --prefix electron-app test
   local tmp_root
   tmp_root="$(mktemp -d)"
-  mkdir -p "$tmp_root/backend" "$tmp_root/frontend" "$tmp_root/venv/bin"
-  touch "$tmp_root/backend/app.py" "$tmp_root/frontend/index.html" "$tmp_root/venv/bin/python"
+  mkdir -p "$tmp_root/backend" "$tmp_root/frontend/js" "$tmp_root/venv/bin"
+  touch "$tmp_root/backend/app.py" "$tmp_root/frontend/js/charts.js" "$tmp_root/venv/bin/python"
+  cat > "$tmp_root/frontend/index.html" <<'HTML'
+<canvas id="latencyChart"></canvas><canvas id="benchmarkChart"></canvas><canvas id="observabilityChart"></canvas><canvas id="compareChart"></canvas>
+HTML
   run node electron-app/scripts/verify-resources.js --root-kind repo --mode basic --torch-cache off --detector-cache off --onnx off --json "$tmp_root"
 }
 

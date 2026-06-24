@@ -31,8 +31,9 @@ function makeTorchCache(root) {
 function makeTree(root, { platform = process.platform, models = true, onnxDir = true, onnxFile = false, torchCache = true } = {}) {
   mkdir(path.join(root, "backend"));
   touch(path.join(root, "backend", "app.py"));
-  mkdir(path.join(root, "frontend"));
-  touch(path.join(root, "frontend", "index.html"));
+  mkdir(path.join(root, "frontend", "js"));
+  fs.writeFileSync(path.join(root, "frontend", "index.html"), '<canvas id="latencyChart"></canvas><canvas id="benchmarkChart"></canvas><canvas id="observabilityChart"></canvas><canvas id="compareChart"></canvas>');
+  touch(path.join(root, "frontend", "js", "charts.js"));
   if (platform === "win32") touch(path.join(root, "venv", "Scripts", "python.exe"));
   else touch(path.join(root, "venv", "bin", "python3"));
   if (models) mkdir(path.join(root, "models"));

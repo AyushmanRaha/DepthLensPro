@@ -160,11 +160,82 @@ console.log('frontend contract tests passed');
 
 function assertNoRemoteRuntimeScripts() {
   const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "index.html"), "utf8");
-  assert(!html.includes("https://cdn.jsdelivr.net"), "frontend must not depend on jsdelivr runtime scripts");
-  assert(html.includes("vendor/chart.umd.min.js"), "Chart.js must load from local vendor path");
+  assert(!/https?:\/\/(cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)/i.test(html), "frontend must not depend on remote chart/runtime scripts");
+  assert(!html.includes("vendor/chart.umd.min.js"), "frontend must not load stale Chart.js placeholder");
 }
 
 assertNoRemoteRuntimeScripts();
+
+function assertFirstPartyCharts() {
+  const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "index.html"), "utf8");
+  for (const id of ["latencyChart", "benchmarkChart", "observabilityChart", "compareChart"]) {
+    assert(html.includes(`id="${id}"`), `index.html must include #${id}`);
+  }
+  const sources = localScriptSources();
+  const chartsIndex = scriptIndex('js/charts.js');
+  for (const src of ['js/inference-ui.js', 'js/compare.js', 'js/benchmark.js']) {
+    assert(chartsIndex >= 0 && chartsIndex < sources.indexOf(src), `js/charts.js must load before ${src}`);
+  }
+  const charts = readFrontendScript('js/charts.js');
+  assert(!/\bnew\s+Chart\b|window\.Chart|typeof\s+Chart/.test(charts), 'charts.js must not depend on Chart.js globals');
+  assert(charts.includes('window.DepthLensCharts'), 'charts.js must expose testable first-party chart helpers');
+}
+
+function makeFakeCanvas(width = 320, height = 180) {
+  const ops = [];
+  const ctx = new Proxy({
+    canvas: null,
+    beginPath: () => ops.push('beginPath'), moveTo: () => ops.push('moveTo'), lineTo: () => ops.push('lineTo'),
+    stroke: () => ops.push('stroke'), fill: () => ops.push('fill'), fillRect: () => ops.push('fillRect'),
+    strokeRect: () => ops.push('strokeRect'), fillText: () => ops.push('fillText'), clearRect: () => ops.push('clearRect'),
+    setTransform: () => ops.push('setTransform'), arc: () => ops.push('arc'), closePath: () => ops.push('closePath'),
+    measureText: (text) => ({ width: String(text).length * 6 }),
+  }, { set(target, key, value) { target[key] = value; return true; } });
+  const canvas = {
+    width: 0, height: 0, clientWidth: width, clientHeight: height, style: {}, parentElement: null,
+    getBoundingClientRect: () => ({ width, height }), getContext: (kind) => kind === '2d' ? ctx : null,
+  };
+  ctx.canvas = canvas;
+  return { canvas, ops };
+}
+
+function loadChartSandbox(canvases) {
+  const sandbox = {
+    console: { warn() {}, debug() {} }, setTimeout, clearTimeout, Math,
+    document: { documentElement: { getAttribute: () => 'dark' } },
+    getComputedStyle: () => ({ getPropertyValue: () => '#00c8ff' }),
+    requestAnimationFrame() {},
+    state: { session: { latencies: [] }, compareView: { metricKey: 'latency_ms', results: [] }, observability: {} },
+    el: { bgCanvas: null, compareChartCard: { hidden: true }, observabilityChart: canvases.observabilityChart.canvas },
+  };
+  sandbox.window = { devicePixelRatio: 1, addEventListener() {} };
+  sandbox.$ = (selector) => canvases[selector.replace('#', '')]?.canvas || null;
+  sandbox.escText = (value) => String(value ?? '');
+  sandbox.esc = sandbox.escText;
+  require('vm').runInNewContext(readFrontendScript('js/charts.js'), sandbox, { filename: 'charts.js' });
+  require('vm').runInNewContext(readFrontendScript('js/benchmark.js'), sandbox, { filename: 'benchmark.js' });
+  return sandbox;
+}
+
+function assertFirstPartyChartDrawing() {
+  const canvases = Object.fromEntries(['latencyChart', 'benchmarkChart', 'observabilityChart', 'compareChart'].map((id) => [id, makeFakeCanvas()]));
+  const sandbox = loadChartSandbox(canvases);
+  sandbox.initLatencyChart(); sandbox.state.session.latencies = [12, 20, 16]; sandbox.pushLatency(16);
+  for (const op of ['beginPath', 'moveTo', 'lineTo', 'stroke']) assert(canvases.latencyChart.ops.includes(op), `latency chart should ${op}`);
+  sandbox.renderBenchmarkChart({ results: [{ engine: 'pytorch', latency_ms: { avg: 44 } }, { engine: 'onnxruntime', latency_ms: { avg: 21 } }] });
+  assert(canvases.benchmarkChart.ops.includes('fillRect'), 'benchmark chart should draw bars');
+  sandbox.renderObservabilityChart({ inference: { recent: [{ latency_ms: 31 }, { latency_ms: 29 }] } });
+  assert(canvases.observabilityChart.ops.includes('lineTo'), 'observability chart should draw a line');
+  sandbox.renderCompareChart([{ model: 'MiDaS_small', latency_ms: 50 }, { model: 'DPT_Hybrid', latency_ms: 70 }], 'latency_ms');
+  assert(canvases.compareChart.ops.includes('fillRect'), 'compare chart should draw bars');
+  const empty = makeFakeCanvas();
+  assert(sandbox.window.DepthLensCharts.drawNoDataState(empty.canvas, 'No data'), 'no-data state should render');
+  assert(empty.ops.includes('fillText'), 'no-data state should draw explanatory text');
+  assert(canvases.latencyChart.canvas.width > 0 && canvases.latencyChart.canvas.height > 0, 'chart resize must produce nonzero canvas dimensions');
+}
+
+assertFirstPartyCharts();
+assertFirstPartyChartDrawing();
 
 function assertRequestConstructionAndErrorParsing() {
   const contracts = require(path.join(frontendRoot, 'js/contracts.js'));
