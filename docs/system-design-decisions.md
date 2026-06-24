@@ -37,3 +37,8 @@ The tradeoff is that privacy is prioritized over cloud scalability.
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Local-only runtime dependencies
+
+The renderer uses a vendored Chart.js asset instead of a runtime CDN, and backend CORS is limited to localhost/file-null development origins by default with credentials disabled. Required CI stays lightweight and does not run Docker builds, Compose, GPU tests, real model downloads, or long ONNX exports.

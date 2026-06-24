@@ -250,3 +250,21 @@ The benchmark runs under a global mutex that prevents concurrent benchmark calls
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 
 ---
+
+
+## Error response schema
+
+Route-level failures return FastAPI-compatible envelopes under `detail`:
+
+```json
+{
+  "detail": {
+    "error_code": "INVALID_CONTENT_TYPE",
+    "message": "Expected an image file",
+    "field": "file",
+    "retryable": false
+  }
+}
+```
+
+Optional fields include `remediation`, `field`, and `retryable`. Batch and compare keep their existing per-item/per-model success flow and legacy `error` strings where present, while also adding `error_detail` with the same structured fields. Expensive routes may return `REQUEST_TIMEOUT`, `BENCHMARK_TIMEOUT`, or `RECONSTRUCTION_TIMEOUT` when the configurable backend timeout is exceeded.

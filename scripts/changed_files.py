@@ -43,36 +43,72 @@ def diff_files(base: str, head: str) -> list[str]:
     return git_lines(["diff", "--name-only", "--diff-filter=ACMRTUXB", f"{base}...{head}"])
 
 
+def _matches_any(path: str, prefixes: tuple[str, ...] = (), exact: set[str] | None = None) -> bool:
+    return path in (exact or set()) or any(path.startswith(prefix) for prefix in prefixes)
+
+
 def classify(files: list[str], event: str) -> dict[str, bool]:
     docs = backend = electron = workflow = pytool = nodetool = False
     for raw in files:
         s = raw.replace("\\", "/")
-        if (
-            s in {"README.md", "CONTRIBUTING.md", "LICENSE"}
-            or s.startswith("docs/")
-            or s.startswith("images/screenshots/")
+        is_doc = (
+            s in {"README.md", "CONTRIBUTING.md", "LICENSE", "SECURITY.md"}
+            or s.startswith(("docs/", "images/screenshots/", "assets/architecture/"))
             or s.endswith(".md")
+        )
+        docs = docs or is_doc
+
+        if _matches_any(
+            s,
+            prefixes=("backend/", "backend/scripts/"),
+            exact={"pyproject.toml", "mypy.ini", "Dockerfile", "docker-compose.yml"},
         ):
-            docs = True
-        if s.startswith("backend/") or s in {
-            "scripts/setup_state.py",
-            "scripts/doctor.py",
-            "pyproject.toml",
-            "mypy.ini",
-        }:
             backend = True
         if s.startswith("backend/requirements") or s in {"pyproject.toml", "mypy.ini"}:
             pytool = True
-        if s.startswith("electron-app/") or s.startswith("frontend/"):
+        if _matches_any(
+            s,
+            prefixes=("electron-app/", "frontend/"),
+            exact={"package.json", "package-lock.json"},
+        ):
             electron = True
-        if s in {"electron-app/package.json", "electron-app/package-lock.json"}:
-            nodetool = True
-        if s.startswith(".github/workflows/") or s in {
-            "scripts/ci.sh",
-            "scripts/changed_files.py",
-            "scripts/validate_workflows.py",
+        if s in {
+            "package.json",
+            "package-lock.json",
+            "electron-app/package.json",
+            "electron-app/package-lock.json",
         }:
+            nodetool = True
+        if _matches_any(
+            s,
+            prefixes=(".github/workflows/",),
+            exact={
+                "scripts/ci.sh",
+                "scripts/changed_files.py",
+                "scripts/validate_workflows.py",
+                "scripts/validate_docs.py",
+            },
+        ):
             workflow = True
+        if _matches_any(
+            s,
+            prefixes=("scripts/setup-", "scripts/build-", "scripts/launch-", "scripts/prefetch-"),
+            exact={
+                "scripts/doctor.py",
+                "scripts/setup_state.py",
+                "scripts/diagnose_backend.py",
+            },
+        ):
+            backend = True
+            electron = True
+        if s in {".gitignore", "SECURITY.md"}:
+            docs = True
+            workflow = True
+        if s.startswith(("docs/resource-path-contract", "resource-policy", "models/")):
+            backend = True
+            electron = True
+            docs = True
+
     full = event in {"push", "workflow_dispatch"}
     non_docs = [
         f
@@ -80,8 +116,7 @@ def classify(files: list[str], event: str) -> dict[str, bool]:
         if not (
             f.endswith(".md")
             or f in {"LICENSE"}
-            or f.startswith("docs/")
-            or f.startswith("images/screenshots/")
+            or f.startswith(("docs/", "images/screenshots/", "assets/architecture/"))
         )
     ]
     return {

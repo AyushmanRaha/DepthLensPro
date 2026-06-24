@@ -59,6 +59,10 @@ _ENV_KEYS = (
     "DEPTHLENS_CRASH_HISTORY_LIMIT",
     "DEPTHLENS_BENCHMARK_HISTORY_LIMIT",
     "DEPTHLENS_TRACE_SAMPLE_RATE",
+    "DEPTHLENS_ROUTE_TIMEOUT_SECONDS",
+    "DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS",
+    "DEPTHLENS_CORS_ALLOW_ALL",
+    "DEPTHLENS_CORS_ALLOWED_ORIGINS",
 )
 
 
@@ -138,6 +142,14 @@ class Settings(_SettingsBase):
     DEPTHLENS_CRASH_HISTORY_LIMIT: int = Field(default=100, ge=10, le=2000)
     DEPTHLENS_BENCHMARK_HISTORY_LIMIT: int = Field(default=50, ge=5, le=1000)
     DEPTHLENS_TRACE_SAMPLE_RATE: float = Field(default=1.0, ge=0.0, le=1.0)
+    DEPTHLENS_ROUTE_TIMEOUT_SECONDS: float = Field(default=300.0, ge=5.0, le=3600.0)
+    DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS: float = Field(default=300.0, ge=5.0, le=3600.0)
+    DEPTHLENS_CORS_ALLOW_ALL: bool = Field(
+        default=False, description="Development escape hatch for wildcard CORS without credentials."
+    )
+    DEPTHLENS_CORS_ALLOWED_ORIGINS: str = Field(
+        default="", description="Comma-separated extra browser origins allowed by CORS."
+    )
 
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod

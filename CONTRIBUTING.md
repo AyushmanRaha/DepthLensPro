@@ -55,3 +55,7 @@ scripts/ci.sh all
 - Avoid unrelated UI styling changes when working on backend refactors.
 - Keep changes focused and include tests for new or refactored behavior.
 - Document any setup or operational changes in the README or related docs.
+
+## Dependency hygiene
+
+Runtime backend installs use `backend/requirements.txt`; local development checks use `backend/requirements-dev.txt`. Use `npm --prefix electron-app ...` for Node commands and do not run `npm install` at the repository root. The expected lockfile is `electron-app/package-lock.json`; a root `package-lock.json` is local noise and ignored.

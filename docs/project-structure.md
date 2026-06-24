@@ -157,3 +157,8 @@ Runtime hardening reduces avoidable work: Estimate cache hits now reuse normaliz
 ---
 
 Maintainer documentation lives in [`docs/maintenance.md`](maintenance.md) and [`docs/debugging.md`](debugging.md).
+
+
+- `backend/requirements-dev.txt` — development/test/quality tooling layered on runtime requirements.
+- `frontend/vendor/chart.umd.min.js` — local Chart.js runtime asset used by packaged/browser UI without CDN scripts.
+- `docs/resource-path-contract.md` — shared resource path policy for backend, Electron, setup, and packaging checks.

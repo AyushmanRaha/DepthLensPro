@@ -115,3 +115,8 @@ curl 'http://127.0.0.1:8765/onnx/status?depth=deep&force=true'
 ```
 
 If `/live` succeeds, the backend is not offline; diagnostics may still be pending or degraded. If `/live` fails, inspect the Electron logs for a port conflict on 8765, a fallback backend URL, stale PID metadata, missing packaged resources, or a stale installed app path. If another non-DepthLens process owns 8765, stop that process or set `DEPTHLENS_BACKEND_PORT` before launch.
+
+
+## Packaged dependency and resource contract
+
+Packaged backend environments use runtime dependencies from `backend/requirements.txt`; dev/test tools live in `backend/requirements-dev.txt` and are not required for packaged runtime execution. Resource names are kept aligned in [resource path contract](resource-path-contract.md). Docker packaging checks remain manual/optional and are not required CI gates.
