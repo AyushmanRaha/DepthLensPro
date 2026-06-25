@@ -167,18 +167,67 @@ function clearCanvas(canvas) {
   return { ctx, ...size };
 }
 
-function chartArea(width, height) {
-  return { left: 42, right: 14, top: 14, bottom: 30, width: Math.max(20, width - 56), height: Math.max(20, height - 44) };
+function formatTickValue(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  const digits = abs === 0 || abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
+  return n.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-function drawGrid(ctx, area, maxValue, colors) {
+function measureTickWidth(ctx, maxValue, formatter = formatTickValue) {
+  const values = [0, maxValue / 2, maxValue].map((v) => formatter(v));
+  return Math.ceil(Math.max(...values.map((label) => ctx.measureText?.(label)?.width || String(label).length * 6), 24));
+}
+
+function chartArea(width, height, options = {}) {
+  const legendHeight = options.legendHeight || 0;
+  const xAxisHeight = options.showXAxis === false ? 8 : 24;
+  const tickWidth = Math.max(26, options.tickWidth || 34);
+  const left = Math.max(32, tickWidth + 10);
+  const right = options.right ?? 10;
+  const top = (options.top ?? 10) + legendHeight;
+  const bottom = options.bottom ?? xAxisHeight;
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width: Math.max(20, width - left - right),
+    height: Math.max(20, height - top - bottom),
+  };
+}
+
+function drawCenteredLegend(ctx, area, width, label, colors, options = {}) {
+  if (!label) return 0;
+  const swatch = options.swatchSize || 8;
+  const gap = 6;
+  ctx.font = options.font || "10px Rajdhani, sans-serif";
+  const textWidth = ctx.measureText?.(label)?.width || String(label).length * 6;
+  const total = swatch + gap + textWidth;
+  const x = Math.max(area.left, (width - total) / 2);
+  const y = options.y ?? 9;
+  ctx.fillStyle = options.fill || colors.bar;
+  ctx.strokeStyle = options.stroke || colors.barBrd;
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, swatch, swatch);
+  ctx.strokeRect?.(x, y, swatch, swatch);
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x + swatch + gap, y + swatch / 2);
+  return swatch + 8;
+}
+
+function drawGrid(ctx, area, maxValue, colors, options = {}) {
+  const formatter = options.tickFormatter || formatTickValue;
   ctx.strokeStyle = colors.grid; ctx.lineWidth = 1; ctx.fillStyle = colors.tick;
   ctx.font = "9px JetBrains Mono, monospace"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
   for (let i = 0; i <= 4; i += 1) {
     const y = area.top + (area.height * i / 4);
     ctx.beginPath(); ctx.moveTo(area.left, y); ctx.lineTo(area.left + area.width, y); ctx.stroke();
-    const label = Math.round(maxValue - (maxValue * i / 4));
-    ctx.fillText(String(label), area.left - 6, y);
+    const value = maxValue - (maxValue * i / 4);
+    ctx.fillText(formatter(value), area.left - 6, y);
   }
 }
 
@@ -188,29 +237,61 @@ function numericValues(values) {
 
 function drawNoDataState(canvas, message = "No chart data yet") {
   const drawing = clearCanvas(canvas); if (!drawing) return false;
-  const { ctx, width, height } = drawing; const c = chartColors(); const area = chartArea(width, height);
+  const { ctx, width, height } = drawing; const c = chartColors();
+  ctx.font = "9px JetBrains Mono, monospace";
+  const area = chartArea(width, height, { tickWidth: measureTickWidth(ctx, 100), showXAxis: false });
   drawGrid(ctx, area, 100, c);
   ctx.fillStyle = c.text; ctx.font = "12px Rajdhani, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(message, width / 2, height / 2);
   return true;
 }
 
+function linePoints(data, area, maxValue) {
+  const xFor = (i) => area.left + (data.length === 1 ? area.width / 2 : (area.width * i / (data.length - 1)));
+  const yFor = (v) => area.top + area.height - (Math.max(0, v) / maxValue) * area.height;
+  return data.map((v, i) => ({ x: xFor(i), y: yFor(v) }));
+}
+
+function drawSmoothLinePath(ctx, points, tension = 0.38) {
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  if (points.length < 3 || !ctx.bezierCurveTo) {
+    points.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
+    return;
+  }
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) * tension / 6;
+    const cp1y = p1.y + (p2.y - p0.y) * tension / 6;
+    const cp2x = p2.x - (p3.x - p1.x) * tension / 6;
+    const cp2y = p2.y - (p3.y - p1.y) * tension / 6;
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+  }
+}
+
 function drawLineChart(canvas, values, options = {}) {
   const data = numericValues(values);
   if (!data.length) return drawNoDataState(canvas, options.emptyMessage || "No chart data yet");
   const drawing = clearCanvas(canvas); if (!drawing) return false;
-  const { ctx, width, height } = drawing; const c = chartColors(); const area = chartArea(width, height);
+  const { ctx, width, height } = drawing; const c = chartColors();
   const maxValue = Math.max(1, options.maxValue || Math.max(...data) * 1.15);
-  drawGrid(ctx, area, maxValue, c);
-  const xFor = (i) => area.left + (data.length === 1 ? area.width : (area.width * i / (data.length - 1)));
-  const yFor = (v) => area.top + area.height - (Math.max(0, v) / maxValue) * area.height;
-  ctx.beginPath(); ctx.moveTo(xFor(0), yFor(data[0]));
-  data.forEach((v, i) => { if (i) ctx.lineTo(xFor(i), yFor(v)); });
-  ctx.strokeStyle = options.lineColor || c.line; ctx.lineWidth = options.lineWidth || 1.8; ctx.stroke();
-  ctx.lineTo(xFor(data.length - 1), area.top + area.height); ctx.lineTo(xFor(0), area.top + area.height); ctx.closePath();
+  ctx.font = "9px JetBrains Mono, monospace";
+  const area = chartArea(width, height, { tickWidth: measureTickWidth(ctx, maxValue, options.tickFormatter), showXAxis: false, top: 8, bottom: 10 });
+  drawGrid(ctx, area, maxValue, c, { tickFormatter: options.tickFormatter });
+  const points = linePoints(data, area, maxValue);
+  drawSmoothLinePath(ctx, points, options.tension ?? 0.38);
+  ctx.lineTo(points[points.length - 1].x, area.top + area.height);
+  ctx.lineTo(points[0].x, area.top + area.height);
+  ctx.closePath();
   ctx.fillStyle = options.fillColor || c.fill; ctx.fill();
-  ctx.fillStyle = c.text; ctx.font = "10px JetBrains Mono, monospace"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
-  if (options.label) ctx.fillText(options.label, area.left, area.top - 2);
+  drawSmoothLinePath(ctx, points, options.tension ?? 0.38);
+  ctx.strokeStyle = options.lineColor || c.line; ctx.lineWidth = options.lineWidth || 1.8; ctx.stroke();
+  ctx.fillStyle = options.lineColor || c.line;
+  points.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, options.pointRadius ?? 2, 0, Math.PI * 2); ctx.fill(); });
+  if (options.showLegend && options.label) drawCenteredLegend(ctx, area, width, options.label, c, { fill: c.fill, stroke: c.line });
   return true;
 }
 
@@ -221,22 +302,28 @@ function drawBarChart(canvas, rows, options = {}) {
   const drawable = entries.filter((row) => Number.isFinite(row.value));
   if (!drawable.length) return drawNoDataState(canvas, options.emptyMessage || "No chart data yet");
   const drawing = clearCanvas(canvas); if (!drawing) return false;
-  const { ctx, width, height } = drawing; const c = chartColors(); const area = chartArea(width, height);
+  const { ctx, width, height } = drawing; const c = chartColors();
   const maxValue = Math.max(1, options.maxValue || Math.max(...drawable.map((row) => row.value)) * 1.15);
-  drawGrid(ctx, area, maxValue, c);
-  const slot = area.width / Math.max(1, entries.length); const barW = Math.max(10, slot * 0.52);
+  const tickFormatter = options.tickFormatter || formatTickValue;
+  ctx.font = "9px JetBrains Mono, monospace";
+  const legendHeight = options.label ? 20 : 0;
+  const area = chartArea(width, height, { legendHeight, tickWidth: measureTickWidth(ctx, maxValue, tickFormatter), showXAxis: true, top: 8, bottom: 24 });
+  if (options.label) drawCenteredLegend(ctx, area, width, options.label, c, { y: 6 });
+  drawGrid(ctx, area, maxValue, c, { tickFormatter });
+  const slot = area.width / Math.max(1, entries.length); const barW = Math.max(10, Math.min(slot * 0.56, 46));
   entries.forEach((row, i) => {
     const x = area.left + slot * i + (slot - barW) / 2;
-    const ok = Number.isFinite(row.value); const h = ok ? Math.max(1, (row.value / maxValue) * area.height) : 2;
+    const ok = Number.isFinite(row.value); const h = ok ? Math.max(1, (Math.max(0, row.value) / maxValue) * area.height) : 2;
     const y = area.top + area.height - h;
     ctx.fillStyle = ok ? c.bar : c.muted; ctx.strokeStyle = ok ? c.barBrd : c.mutedBrd; ctx.lineWidth = 1;
     ctx.fillRect(x, y, barW, h); ctx.strokeRect?.(x, y, barW, h);
-    ctx.fillStyle = c.text; ctx.font = "10px Rajdhani, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
-    ctx.fillText(row.label, x + barW / 2, area.top + area.height + 6, Math.max(40, slot - 4));
-    ctx.font = "9px JetBrains Mono, monospace"; ctx.textBaseline = "bottom";
-    ctx.fillText(ok ? (options.formatValue ? options.formatValue(row.value) : String(Math.round(row.value))) : "—", x + barW / 2, y - 3);
+    ctx.fillStyle = ok ? c.text : c.mutedBrd; ctx.font = "10px Rajdhani, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(row.label, x + barW / 2, area.top + area.height + 6, Math.max(38, slot - 4));
+    if (options.showValueLabels) {
+      ctx.font = "9px JetBrains Mono, monospace"; ctx.textBaseline = "bottom";
+      ctx.fillText(ok ? (options.formatValue ? options.formatValue(row.value) : formatTickValue(row.value)) : "—", x + barW / 2, y - 3);
+    }
   });
-  if (options.label) { ctx.fillStyle = c.text; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(options.label, area.left, area.top - 2); }
   return true;
 }
 
@@ -334,6 +421,7 @@ function renderCompareChart(results, metricKey = state.compareView.metricKey, { 
       label: metric.label,
       emptyMessage: "No comparison chart data yet",
       formatValue: (value) => metric.fmt(value),
+      tickFormatter: (value) => metric.fmt(value),
     }),
   };
   rememberChart("compare", canvas, compareChart.draw);
