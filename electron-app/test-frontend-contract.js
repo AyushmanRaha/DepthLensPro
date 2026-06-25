@@ -183,17 +183,24 @@ function assertFirstPartyCharts() {
 
 function makeFakeCanvas(width = 320, height = 180) {
   const ops = [];
+  const listeners = new Map();
   const ctx = new Proxy({
     canvas: null,
     beginPath: () => ops.push('beginPath'), moveTo: () => ops.push('moveTo'), lineTo: () => ops.push('lineTo'),
     stroke: () => ops.push('stroke'), fill: () => ops.push('fill'), fillRect: () => ops.push('fillRect'),
     strokeRect: () => ops.push('strokeRect'), fillText: () => ops.push('fillText'), clearRect: () => ops.push('clearRect'),
     setTransform: () => ops.push('setTransform'), arc: () => ops.push('arc'), closePath: () => ops.push('closePath'),
+    save: () => ops.push('save'), restore: () => ops.push('restore'), roundRect: () => ops.push('roundRect'),
+    quadraticCurveTo: () => ops.push('quadraticCurveTo'), bezierCurveTo: () => ops.push('bezierCurveTo'),
     measureText: (text) => ({ width: String(text).length * 6 }),
   }, { set(target, key, value) { target[key] = value; return true; } });
   const canvas = {
     width: 0, height: 0, clientWidth: width, clientHeight: height, style: {}, parentElement: null,
-    getBoundingClientRect: () => ({ width, height }), getContext: (kind) => kind === '2d' ? ctx : null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width, height }), getContext: (kind) => kind === '2d' ? ctx : null,
+    addEventListener(type, handler) { listeners.set(type, [...(listeners.get(type) || []), handler]); },
+    removeEventListener(type, handler) { listeners.set(type, (listeners.get(type) || []).filter((entry) => entry !== handler)); },
+    dispatchEvent(event) { (listeners.get(event.type) || []).forEach((handler) => handler(event)); return true; },
+    listenerCount(type) { return (listeners.get(type) || []).length; },
   };
   ctx.canvas = canvas;
   return { canvas, ops };
@@ -232,6 +239,14 @@ function assertFirstPartyChartDrawing() {
   assert(sandbox.window.DepthLensCharts.drawNoDataState(empty.canvas, 'No data'), 'no-data state should render');
   assert(empty.ops.includes('fillText'), 'no-data state should draw explanatory text');
   assert(canvases.latencyChart.canvas.width > 0 && canvases.latencyChart.canvas.height > 0, 'chart resize must produce nonzero canvas dimensions');
+  assert.strictEqual(canvases.benchmarkChart.canvas.listenerCount('mousemove'), 1, 'hover handlers should be registered once per canvas');
+  sandbox.window.DepthLensCharts.drawBarChart(canvases.benchmarkChart.canvas, [{ label: 'PyTorch', value: 44 }], { formatValue: (v) => `${Number(v).toFixed(1)} ms` });
+  assert.strictEqual(canvases.benchmarkChart.canvas.listenerCount('mousemove'), 1, 'redrawing must not duplicate hover handlers');
+  const fillTextBefore = canvases.benchmarkChart.ops.filter((op) => op === 'fillText').length;
+  canvases.benchmarkChart.canvas.dispatchEvent({ type: 'mousemove', clientX: 160, clientY: 80 });
+  const fillTextAfter = canvases.benchmarkChart.ops.filter((op) => op === 'fillText').length;
+  assert(fillTextAfter > fillTextBefore, 'hovering a chart target should draw tooltip text');
+  canvases.benchmarkChart.canvas.dispatchEvent({ type: 'mouseleave' });
 }
 
 assertFirstPartyCharts();

@@ -130,7 +130,12 @@ function renderObservabilityChart(snapshot) {
   state.observability.chart = {
     canvas,
     values: data,
-    draw: () => drawLineChart(canvas, data, { label: "Inference latency (ms)", emptyMessage: "No inference latency samples yet" }),
+    draw: () => drawLineChart(canvas, data, {
+      label: "Inference latency (ms)",
+      emptyMessage: "No inference latency samples yet",
+      tooltipLabel: "Inference latency (ms)",
+      formatValue: (value) => Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 }),
+    }),
   };
   rememberChart("observability", canvas, state.observability.chart.draw);
   state.observability.chart.draw();
