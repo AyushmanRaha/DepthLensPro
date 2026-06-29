@@ -127,7 +127,9 @@ def test_mocked_estimate_failure_sanitizes_path_and_keeps_response(monkeypatch: 
 
 
 def test_mocked_benchmark_records_history(monkeypatch: Any) -> None:
-    def fake_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
+    def fake_benchmark(
+        model: str, device: str, iterations: int, engine: str = "both"
+    ) -> dict[str, Any]:
         observability.record_benchmark(
             model,
             "MiDaS Small",
@@ -149,6 +151,7 @@ def test_mocked_benchmark_records_history(monkeypatch: Any) -> None:
             "device_requested": device,
             "device_resolved": "cpu",
             "iterations": iterations,
+            "engine_requested": engine,
             "results": [],
             "comparison": {},
             "speedup": 2.0,

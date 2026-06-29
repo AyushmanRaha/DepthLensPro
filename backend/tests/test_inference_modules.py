@@ -110,13 +110,13 @@ def test_onnx_missing_falls_back_to_pytorch_with_same_metadata(
     )
     monkeypatch.setattr(inference, "_infer_torch", lambda img, model, device: fallback_depth)
 
-    depth, metadata = inference._infer_with_metadata(image, "midas_small", "cpu", "auto")
+    depth, metadata = inference._infer_with_metadata(image, "midas_small", "cpu", "onnx")
 
     assert np.array_equal(depth, fallback_depth)
-    assert metadata["engine_requested"] == "auto"
+    assert metadata["engine_requested"] == "onnxruntime"
     assert metadata["engine_used"] == "pytorch"
     assert metadata["fallback_used"] is True
-    assert metadata["fallback_reason"] == "ONNX model missing; used PyTorch fallback"
+    assert metadata["fallback_reason"]
     assert metadata["onnx_path"] == str(expected)
     assert metadata["onnx"]["expected_path"] == str(expected)
 

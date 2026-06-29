@@ -26,9 +26,10 @@ def test_missing_onnx_uses_pytorch_fallback(monkeypatch: Any, tmp_path: Path) ->
         lambda img, model, device: np.zeros(img.shape[:2], dtype=np.float32),
     )
     depth, meta = inference._infer_with_metadata(
-        np.zeros((4, 4, 3), dtype=np.uint8), "MiDaS Small", "cpu"
+        np.zeros((4, 4, 3), dtype=np.uint8), "MiDaS Small", "cpu", "onnx"
     )
     assert depth.shape == (4, 4)
+    assert meta["engine_requested"] == "onnxruntime"
     assert meta["engine_used"] == "pytorch"
     assert meta["fallback_used"] is True
     assert meta["model_id"] == "midas_small"

@@ -234,7 +234,7 @@ def test_onnx_failure_metadata_is_visible(monkeypatch: pytest.MonkeyPatch, tmp_p
         np.zeros((2, 3, 3), dtype=np.uint8), "midas_small", "cpu", "onnx"
     )
 
-    assert meta["engine_requested"] == "onnx"
+    assert meta["engine_requested"] == "onnxruntime"
     assert meta["engine_used"] == "pytorch"
     assert meta["fallback_used"] is True
     assert meta["fallback_reason"]
