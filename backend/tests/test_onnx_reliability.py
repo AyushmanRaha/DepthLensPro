@@ -216,6 +216,12 @@ def test_onnx_failure_metadata_is_visible(monkeypatch: pytest.MonkeyPatch, tmp_p
             "expected_path": str(tmp_path / "midas_small.onnx"),
             "exists": True,
             "size_bytes": 4,
+            "state": "available",
+            "session_available": True,
+            "runtime_importable": True,
+            "provider_available": True,
+            "providers_used": ["CPUExecutionProvider"],
+            "providers_attempted": [["CPUExecutionProvider"]],
             "error": None,
         },
     )

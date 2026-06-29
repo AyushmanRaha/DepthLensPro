@@ -95,24 +95,60 @@ def _onnx_healthy(onnx_detail: dict[str, Any] | None, model_id: str | None = Non
 def _onnx_state(model_id: str, device: str, onnx_detail: dict[str, Any] | None) -> dict[str, Any]:
     detail = onnx_detail or resolve_onnx_path(model_id)
     asset_available = bool(detail.get("exists") and int(detail.get("size_bytes") or 0) > 0)
-    runtime = onnx_runtime_info(device)
-    runtime_importable = bool(runtime.get("importable"))
-    providers = list(runtime.get("selected_providers") or runtime.get("available_providers") or [])
+    explicit_session = "session_available" in detail
+    explicit_state = "state" in detail
+
+    runtime: dict[str, Any] = {}
+    if not explicit_session and not explicit_state:
+        runtime = onnx_runtime_info(device)
+
+    runtime_importable = bool(detail.get("runtime_importable", runtime.get("importable", False)))
+    runtime_providers = list(
+        runtime.get("selected_providers") or runtime.get("available_providers") or []
+    )
+    providers_used = list(detail.get("providers_used") or [])
+    providers_attempted = detail.get("providers_attempted")
+    provider_available = bool(detail.get("provider_available", providers_used or runtime_providers))
+
     session_result: dict[str, Any] = {}
-    if asset_available and runtime_importable and providers:
-        session_result = create_onnx_session(model_id, device, model_path=detail.get("onnx_path"))
+    if explicit_session:
+        session_available = bool(detail.get("session_available"))
+    elif detail.get("state") == "available":
+        session_available = True
+    else:
+        session_available = False
+        if asset_available and runtime_importable and runtime_providers:
+            session_result = create_onnx_session(
+                model_id, device, model_path=detail.get("onnx_path")
+            )
+            session_available = bool(session_result.get("ok"))
+
+    if not providers_attempted:
+        providers_attempted = session_result.get("providers_attempted") or (
+            [runtime_providers] if runtime_providers else []
+        )
+    if not providers_used:
+        providers_used = list(session_result.get("providers_used") or [])
+
     return {
         "asset_available": asset_available,
         "runtime_importable": runtime_importable,
-        "provider_available": bool(providers),
-        "session_available": bool(session_result.get("ok")),
-        "providers_attempted": session_result.get("providers_attempted") or [providers],
-        "providers_used": session_result.get("providers_used") or [],
-        "provider_fallback_used": bool(session_result.get("provider_fallback_used")),
-        "onnx_failure_reason": session_result.get("technical_detail")
+        "provider_available": provider_available,
+        "session_available": session_available,
+        "providers_attempted": providers_attempted,
+        "providers_used": providers_used,
+        "provider_fallback_used": bool(
+            detail.get(
+                "provider_fallback_used", session_result.get("provider_fallback_used", False)
+            )
+        ),
+        "onnx_failure_reason": detail.get("onnx_failure_reason")
+        or session_result.get("technical_detail")
         or session_result.get("message")
         or detail.get("error"),
-        "provider_failure_chain": session_result.get("provider_failure_chain") or [],
+        "provider_failure_chain": detail.get("provider_failure_chain")
+        or session_result.get("provider_failure_chain")
+        or [],
     }
 
 

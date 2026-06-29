@@ -112,3 +112,25 @@ def test_reconstruct_happy_path_returns_artifact_contract(monkeypatch: Any) -> N
     assert payload["artifact_filename"].endswith(".ply")
     assert payload["artifact_base64"]
     assert payload["preview"]["point_count"] == 1
+
+
+def test_reconstruct_route_wrapper_calls_service_once(monkeypatch: Any) -> None:
+    calls = {"count": 0}
+
+    def fake_service_reconstruct(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls["count"] += 1
+        return {"status": "ok", "kwargs": kwargs}
+
+    monkeypatch.setattr(
+        "backend.services.reconstruction.reconstruct_point_cloud",
+        fake_service_reconstruct,
+    )
+
+    from backend.api import routes
+
+    result = routes.reconstruct_point_cloud(
+        raw=b"img", filename="sample.png", model="MiDaS_small", device="cpu"
+    )
+
+    assert result["status"] == "ok"
+    assert calls["count"] == 1

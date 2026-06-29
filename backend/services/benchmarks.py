@@ -11,9 +11,6 @@ import time
 from statistics import mean
 from typing import Any, Callable, cast
 
-import numpy as np
-
-from backend.depth_models import onnx_model_path
 from backend.model_registry import get_model_spec, normalize_model_id
 from backend.services import observability
 from backend.services.engine_selector import (
@@ -21,14 +18,10 @@ from backend.services.engine_selector import (
     record_benchmark_decision,
     select_engine_for_inference,
 )
-from backend.services.inference import _infer_onnx, _infer_torch
-from backend.services.onnx_diagnostics import onnx_model_status
 from backend.services.runtime_state import benchmark_busy as _runtime_benchmark_busy
 from backend.services.runtime_state import set_benchmark_busy
-from backend.utils.hardware import _resolve
 
 DEFAULT_BENCHMARK_ITERATIONS = 3
-BENCHMARK_TIMEOUT_SECONDS = int(os.getenv("DEPTHLENS_BENCHMARK_TIMEOUT_SECONDS", "180"))
 log = logging.getLogger("depthlens")
 
 
@@ -54,6 +47,36 @@ def _auto_export_lock(model: str) -> threading.Lock:
 
     with _AUTO_EXPORT_LOCKS_GUARD:
         return _AUTO_EXPORT_LOCKS.setdefault(model, threading.Lock())
+
+
+def onnx_model_path(model: str) -> Any:
+    from backend.depth_models import onnx_model_path as impl
+
+    return impl(model)
+
+
+def onnx_model_status(model: str, device: str) -> dict[str, Any]:
+    from backend.services.onnx_diagnostics import onnx_model_status as impl
+
+    return impl(model, device)
+
+
+def _resolve(device: str) -> Any:
+    from backend.utils.hardware import _resolve as impl
+
+    return impl(device)
+
+
+def _infer_torch(frame: Any, model: str, device: str) -> Any:
+    from backend.services.inference import _infer_torch as impl
+
+    return impl(frame, model, device)
+
+
+def _infer_onnx(frame: Any, model: str, device: str) -> Any:
+    from backend.services.inference import _infer_onnx as impl
+
+    return impl(frame, model, device)
 
 
 def _ensure_onnx_weights(model: str, onnx_diag: dict[str, Any]) -> dict[str, Any]:
@@ -143,12 +166,14 @@ def _memory_snapshot() -> dict[str, Any]:
     return snapshot
 
 
-def _synthetic_frame(size: int = 384) -> np.ndarray:
+def _synthetic_frame(size: int = 384) -> Any:
+    import numpy as np
+
     y, x = np.indices((size, size), dtype=np.uint8)
     return np.dstack((x, y, ((x.astype(np.uint16) + y.astype(np.uint16)) // 2).astype(np.uint8)))
 
 
-def _measure(label: str, runner: Callable[[], np.ndarray], iterations: int) -> dict[str, Any]:
+def _measure(label: str, runner: Callable[[], Any], iterations: int) -> dict[str, Any]:
     latencies: list[float] = []
     start_memory = _memory_snapshot()
     t0 = time.perf_counter()

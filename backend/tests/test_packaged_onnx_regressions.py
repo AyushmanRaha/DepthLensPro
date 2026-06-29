@@ -16,6 +16,7 @@ def test_live_import_is_lightweight():
         "numpy",
         "onnxruntime",
     }
+    saved_modules = {name: sys.modules.get(name) for name in blocked if name in sys.modules}
     for name in list(blocked):
         sys.modules.pop(name, None)
 
@@ -23,10 +24,17 @@ def test_live_import_is_lightweight():
         def get(self, _path):
             return lambda func: func
 
-    sys.modules.setdefault("fastapi", types.SimpleNamespace(APIRouter=lambda: FakeRouter()))
-    live = importlib.import_module("backend.api.live")
-    asyncio.run(live.live())
-    assert blocked.isdisjoint(sys.modules)
+    try:
+        sys.modules.setdefault("fastapi", types.SimpleNamespace(APIRouter=lambda: FakeRouter()))
+        live = importlib.import_module("backend.api.live")
+        asyncio.run(live.live())
+        assert blocked.isdisjoint(sys.modules)
+    finally:
+        for name in list(blocked):
+            sys.modules.pop(name, None)
+        sys.modules.update(
+            {name: module for name, module in saved_modules.items() if module is not None}
+        )
 
 
 def test_onnx_healthy_resolves_requested_model(monkeypatch):
