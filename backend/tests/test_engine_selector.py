@@ -1,5 +1,17 @@
 from backend.services import engine_selector as es
 
+VERIFIED_ONNX = {
+    "exists": True,
+    "size_bytes": 123,
+    "state": "available",
+    "session_available": True,
+    "runtime_importable": True,
+    "provider_available": True,
+    "providers_used": ["CPUExecutionProvider"],
+    "providers_attempted": [["CPUExecutionProvider"]],
+}
+ASSET_ONLY = {"exists": True, "size_bytes": 123}
+
 
 def setup_function():
     es.clear_engine_decisions()
@@ -14,23 +26,38 @@ def test_normalize_aliases():
 def test_forced_and_defaults(monkeypatch):
     monkeypatch.setattr(es, "provider_signature", lambda d, m: "CPUExecutionProvider")
     monkeypatch.setattr(es, "onnx_file_fingerprint", lambda m: "hash1")
-    healthy = {"exists": True, "size_bytes": 123}
+
     assert (
-        es.select_engine_for_inference("MiDaS_small", "cpu", "pytorch", healthy)["selected_engine"]
+        es.select_engine_for_inference("MiDaS_small", "cpu", "pytorch", VERIFIED_ONNX)[
+            "selected_engine"
+        ]
         == "pytorch"
     )
     assert (
-        es.select_engine_for_inference("MiDaS_small", "cpu", "onnx", healthy)["selected_engine"]
+        es.select_engine_for_inference("MiDaS_small", "cpu", "onnx", VERIFIED_ONNX)[
+            "selected_engine"
+        ]
         == "onnxruntime"
     )
     assert (
-        es.select_engine_for_inference("MiDaS_small", "cpu", "auto", healthy)["selected_engine"]
+        es.select_engine_for_inference("MiDaS_small", "cpu", "auto", VERIFIED_ONNX)[
+            "selected_engine"
+        ]
         == "onnxruntime"
     )
     assert (
-        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", healthy)["selected_engine"]
+        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", VERIFIED_ONNX)[
+            "selected_engine"
+        ]
         == "pytorch"
     )
+    asset_auto = es.select_engine_for_inference("MiDaS_small", "cpu", "auto", ASSET_ONLY)
+    assert asset_auto["selected_engine"] == "pytorch"
+    assert "session unverified" in asset_auto["reason"]
+    asset_forced = es.select_engine_for_inference("MiDaS_small", "cpu", "onnx", ASSET_ONLY)
+    assert asset_forced["selected_engine"] == "pytorch"
+    assert asset_forced["source"] == "forced_fallback"
+    assert asset_forced["fallback_target"] == "pytorch"
 
 
 def test_cached_benchmark_margin_and_fingerprint(monkeypatch):
@@ -44,13 +71,21 @@ def test_cached_benchmark_margin_and_fingerprint(monkeypatch):
         "onnx": {"latency_ms": 80.0},
     }
     es.record_benchmark_decision(result)
-    healthy = {"exists": True, "size_bytes": 123}
     assert (
-        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", healthy)["selected_engine"]
+        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", VERIFIED_ONNX)[
+            "selected_engine"
+        ]
         == "onnxruntime"
     )
     fp["value"] = "hash2"
     assert (
-        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", healthy)["selected_engine"]
+        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", VERIFIED_ONNX)[
+            "selected_engine"
+        ]
+        == "pytorch"
+    )
+    fp["value"] = "hash1"
+    assert (
+        es.select_engine_for_inference("DPT_Hybrid", "cpu", "auto", ASSET_ONLY)["selected_engine"]
         == "pytorch"
     )

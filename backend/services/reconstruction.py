@@ -119,7 +119,6 @@ def depth_to_point_cloud(
     sampling: str = "grid",
     include_rgb: bool = True,
     coordinate_system: str = "y_up",
-    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Project a normalized monocular depth map into an approximate colored point cloud."""
 

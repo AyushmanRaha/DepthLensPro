@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import sys
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -332,6 +333,7 @@ def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
         }
 
     monkeypatch.setattr("backend.api.routes.run_benchmark", fake_benchmark)
+    sys.modules.pop("backend.services.benchmarks", None)
 
     response = client.get("/api/benchmark?model=MiDaS_small&device=auto&iterations=2")
 
@@ -340,6 +342,7 @@ def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
     assert payload["model"] == "MiDaS_small"
     assert payload["iterations"] == 2
     assert payload["engine_requested"] == "both"
+    assert "backend.services.benchmarks" not in sys.modules
 
 
 def test_live_is_lightweight(monkeypatch: Any) -> None:

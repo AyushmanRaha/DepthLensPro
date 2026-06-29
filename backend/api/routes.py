@@ -52,6 +52,7 @@ from backend.constants import MAX_UPLOAD_SIZE_MB
 from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import MODEL_REGISTRY, supported_models_payload
 from backend.services import observability
+from backend.services.benchmark_config import BENCHMARK_TIMEOUT_SECONDS
 from backend.services.model_assets import ModelAssetsUnavailableError
 
 
@@ -117,10 +118,14 @@ def process_image(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return cast(dict[str, Any], _inference().process_image(*args, **kwargs))
 
 
-def reconstruct_point_cloud(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    from backend.services.reconstruction import reconstruct_point_cloud as impl
+def _reconstruction_service() -> Any:
+    from backend.services import reconstruction as service
 
-    return impl(*args, **kwargs)
+    return service
+
+
+def reconstruct_point_cloud(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], _reconstruction_service().reconstruct_point_cloud(*args, **kwargs))
 
 
 def detect_objects(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -568,8 +573,6 @@ async def benchmark(
     """Return PyTorch and ONNX Runtime performance matrices for the UI."""
 
     try:
-        from backend.services.benchmarks import BENCHMARK_TIMEOUT_SECONDS
-
         engine = normalize_request_engine(engine, allow_both=True)
         result: dict[str, Any] = await asyncio.wait_for(
             run_in_threadpool(
