@@ -316,11 +316,17 @@ def test_batch_rejects_non_image_upload_before_processing(monkeypatch: Any) -> N
 
 
 def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
-    def fake_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
+    def fake_benchmark(
+        model: str,
+        device: str,
+        iterations: int,
+        engine: str = "both",
+    ) -> dict[str, Any]:
         return {
             "model": model,
             "device_requested": device,
             "iterations": iterations,
+            "engine_requested": engine,
             "results": [],
             "comparison": {},
         }
@@ -333,6 +339,7 @@ def test_benchmark_route_uses_service(monkeypatch: Any) -> None:
     payload = response.json()
     assert payload["model"] == "MiDaS_small"
     assert payload["iterations"] == 2
+    assert payload["engine_requested"] == "both"
 
 
 def test_live_is_lightweight(monkeypatch: Any) -> None:

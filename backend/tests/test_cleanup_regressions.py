@@ -195,9 +195,10 @@ def test_onnx_missing_fallback_metadata_includes_expected_path(
     )
 
     _depth, meta = inference._infer_with_metadata(
-        np.zeros((2, 3, 3), dtype=np.uint8), "midas_small", "cpu"
+        np.zeros((2, 3, 3), dtype=np.uint8), "midas_small", "cpu", "onnx"
     )
 
+    assert meta["engine_requested"] == "onnxruntime"
     assert meta["engine_used"] == "pytorch"
     assert meta["fallback_used"] is True
     assert meta["onnx_path"] == str(expected)
