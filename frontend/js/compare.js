@@ -21,6 +21,7 @@ el.compareCancelBtn?.addEventListener("click",()=>{ state.compareAbort?.abort();
 async function runComparison() {
   if (!state.compareFile) return;
   const cmap=el.compareCmap.value, device=el.compareDevice.value;
+  const engine = el.compareEngine?.value || selEngine?.() || "auto";
   const models=["midas_small","dpt_hybrid","dpt_large"];
   state.compareAbort=new AbortController();
   el.compareRunBtn.disabled=true; el.compareCancelBtn.hidden=false;
@@ -50,11 +51,11 @@ async function runComparison() {
       const rem=Math.max(0,estCurrent-elapsedCurrent+estRemainingStatic);
       el.compareProgressFill.style.width=`${pct}%`;
       el.compareProgressPct.textContent=`${Math.round(pct)}%`;
-      el.compareProgressText.textContent=`Running ${model}`;
+      el.compareProgressText.textContent=`Running ${model} · ${prettyEngineName(engine)}`;
       el.compareProgressEta.textContent=`ETA ${fmtDuration(rem)}`;
     },120);
     try {
-      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray",null,false,getInteractiveMaxDim(),"auto");
+      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray",null,false,getInteractiveMaxDim(),engine);
       clearInterval(tick); updateEstimate("compare",model,device,r.latency_ms);
       results.push(r); renderCompareCard(r);
     } catch(err) {

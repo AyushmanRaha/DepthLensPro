@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from backend.model_registry import normalize_model_id, resolve_onnx_path
-from backend.services.onnx_diagnostics import onnx_runtime_info
+from backend.services.onnx_diagnostics import create_onnx_session, onnx_runtime_info
 
 ENGINE_SELECTION_MARGIN = 0.90
 ENGINE_CHOICES = {"auto", "pytorch", "onnxruntime"}
@@ -83,13 +83,37 @@ def decision_key(
     )
 
 
-def _onnx_healthy(onnx_detail: dict[str, Any] | None) -> bool:
+def _onnx_healthy(onnx_detail: dict[str, Any] | None, model_id: str | None = None) -> bool:
     if onnx_detail is not None:
-        if onnx_detail.get("state") in {"available", "ok"}:
-            return True
-        return bool(onnx_detail.get("exists") and int(onnx_detail.get("size_bytes") or 0) > 0)
-    detail = resolve_onnx_path("MiDaS_small")
+        return onnx_detail.get("state") == "available" or bool(onnx_detail.get("session_available"))
+    if not model_id:
+        return False
+    detail = resolve_onnx_path(normalize_model_id(model_id))
     return bool(detail.get("exists") and int(detail.get("size_bytes") or 0) > 0)
+
+
+def _onnx_state(model_id: str, device: str, onnx_detail: dict[str, Any] | None) -> dict[str, Any]:
+    detail = onnx_detail or resolve_onnx_path(model_id)
+    asset_available = bool(detail.get("exists") and int(detail.get("size_bytes") or 0) > 0)
+    runtime = onnx_runtime_info(device)
+    runtime_importable = bool(runtime.get("importable"))
+    providers = list(runtime.get("selected_providers") or runtime.get("available_providers") or [])
+    session_result: dict[str, Any] = {}
+    if asset_available and runtime_importable and providers:
+        session_result = create_onnx_session(model_id, device, model_path=detail.get("onnx_path"))
+    return {
+        "asset_available": asset_available,
+        "runtime_importable": runtime_importable,
+        "provider_available": bool(providers),
+        "session_available": bool(session_result.get("ok")),
+        "providers_attempted": session_result.get("providers_attempted") or [providers],
+        "providers_used": session_result.get("providers_used") or [],
+        "provider_fallback_used": bool(session_result.get("provider_fallback_used")),
+        "onnx_failure_reason": session_result.get("technical_detail")
+        or session_result.get("message")
+        or detail.get("error"),
+        "provider_failure_chain": session_result.get("provider_failure_chain") or [],
+    }
 
 
 def get_cached_decision(model_id: str, device: str) -> dict[str, Any] | None:
@@ -114,46 +138,49 @@ def select_engine_for_inference(
     mode = normalize_engine_mode(requested)
     sig = provider_signature(device, model_id)
     fp = onnx_file_fingerprint(model_id)
-    healthy = _onnx_healthy(onnx_detail or resolve_onnx_path(model_id))
-    if mode == "pytorch":
-        return EngineDecision(
-            "pytorch", "forced", "PyTorch forced by request", mode, sig, fp
-        ).to_dict()
-    if mode == "onnxruntime":
-        reason = (
-            "ONNX Runtime forced by request"
-            if healthy
-            else "ONNX Runtime forced but unavailable; PyTorch fallback may be used"
+    state = _onnx_state(model_id, device, onnx_detail)
+
+    def decision(
+        selected: str, source: str, reason: str, fallback_target: str | None = None
+    ) -> dict[str, Any]:
+        data = EngineDecision(selected, source, reason, mode, sig, fp).to_dict()
+        data.update(state)
+        data.update(
+            {
+                "fallback_target": fallback_target,
+                "onnx_file_hash": fp,
+                "provider_signature": sig,
+            }
         )
-        return EngineDecision(
-            "onnxruntime" if healthy else "pytorch", "forced", reason, mode, sig, fp
-        ).to_dict()
+        return data
+
+    if mode == "pytorch":
+        return decision("pytorch", "forced", "PyTorch forced by request")
+    if mode == "onnxruntime":
+        if state["session_available"]:
+            reason = "ONNX Runtime forced by request"
+            if state["provider_fallback_used"]:
+                reason += "; preferred provider failed, using ONNX CPU provider fallback"
+            return decision("onnxruntime", "forced", reason)
+        reason = state["onnx_failure_reason"] or "ONNX Runtime session unavailable"
+        return decision("pytorch", "forced_fallback", reason, "pytorch")
+
     key = decision_key(model_id, device, sig, fp)
     with _LOCK:
         cached = _DECISIONS.get(key)
-    if cached:
-        return {**cached, "requested_engine": mode, "source": "cached_benchmark"}
-    if not healthy:
-        return EngineDecision(
-            "pytorch", "conservative_default", "ONNX unavailable; PyTorch selected", mode, sig, fp
-        ).to_dict()
-    if model_id == "midas_small":
-        return EngineDecision(
-            "onnxruntime",
+    if cached and state["session_available"]:
+        return {**cached, **state, "requested_engine": mode, "source": "cached_benchmark"}
+    if state["session_available"] and model_id == "midas_small":
+        return decision(
+            "onnxruntime", "conservative_default", "Verified ONNX session selected for MiDaS Small"
+        )
+    if state["asset_available"] and not state["session_available"]:
+        return decision(
+            "pytorch",
             "conservative_default",
-            "MiDaS Small selected ONNX by default because ONNX assets are healthy",
-            mode,
-            sig,
-            fp,
-        ).to_dict()
-    return EngineDecision(
-        "pytorch",
-        "conservative_default",
-        "PyTorch selected by conservative default for DPT models until ONNX is benchmark-proven",
-        mode,
-        sig,
-        fp,
-    ).to_dict()
+            "ONNX asset present but session unverified; PyTorch selected",
+        )
+    return decision("pytorch", "conservative_default", "ONNX unavailable; PyTorch selected")
 
 
 def record_benchmark_decision(benchmark_result: dict[str, Any]) -> dict[str, Any]:

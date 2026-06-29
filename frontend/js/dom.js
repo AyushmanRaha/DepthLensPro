@@ -99,6 +99,7 @@ const el = {
   compareCancelBtn:      $("#compareCancelBtn"),
   compareCmap:           $("#compareCmap"),
   compareDevice:         $("#compareDevice"),
+  compareEngine:         $("#compareEngine"),
   compareResults:        $("#compareResults"),
   compareProgressBlock:  $("#compareProgressBlock"),
   compareProgressFill:   $("#compareProgressFill"),

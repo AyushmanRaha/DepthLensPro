@@ -17,7 +17,7 @@ function setStatus(cls, label, sub, deviceText) {
   if (el.statusDot) el.statusDot.className = `status-dot ${safeCls}`;
 
   if (el.engineStatusButton) {
-    el.engineStatusButton.classList.remove("online", "offline", "connecting");
+    el.engineStatusButton.classList.remove("online", "offline", "connecting", "degraded");
     el.engineStatusButton.classList.add(safeCls);
     el.engineStatusButton.setAttribute(
       "aria-label",
@@ -27,7 +27,7 @@ function setStatus(cls, label, sub, deviceText) {
   }
 
   if (el.engineStatusPanel) {
-    el.engineStatusPanel.classList.remove("online", "offline", "connecting");
+    el.engineStatusPanel.classList.remove("online", "offline", "connecting", "degraded");
     el.engineStatusPanel.classList.add(safeCls);
   }
 
@@ -71,6 +71,7 @@ function formatEngineBytes(bytes) {
 function engineStatusStateText() {
   const { cls, live, status } = state.engineStatus;
   if (status === "offline" || cls === "offline") return "Depth engine unavailable";
+  if (status === "degraded" || cls === "degraded") return "Depth engine delayed";
   if (status === "starting" || cls === "connecting") return "Connecting to depth engine";
   if (live?.busy) return "Depth engine busy";
   if (status === "ready" || inferenceReady) return "Depth engine ready";
@@ -84,6 +85,7 @@ function engineReadinessText() {
 
   if (inferenceReady) return "Inference runtime ready";
   if (readiness?.required) return readinessSummary(readiness);
+  if (state.engineStatus.status === "degraded" || state.engineStatus.cls === "degraded") return "Inference runtime ready · live probe delayed";
   if (state.engineStatus.status === "offline" || state.engineStatus.cls === "offline") return "Inference runtime unavailable";
   return backendOnline ? "Checking inference runtime" : "Inference runtime unavailable";
 }
@@ -456,9 +458,12 @@ async function checkLive({ quiet = false, signal } = {}) {
   if (!quiet) setStatus("connecting","Connecting to depth engine", API || DEFAULT_API_BASE_URL);
   const started = performance.now();
   try {
-    const res = await apiFetch("/live", { signal: requestSignal(signal, 2500) });
+    const res = await apiFetch("/live", { signal: requestSignal(signal, state.initializingBackend ? 2500 : 5000) });
     const data = await res.json();
     state.engineStatus.live = data;
+    state.engineStatus.lastLiveOkAt = Date.now();
+    state.engineStatus.consecutiveLiveFailures = 0;
+    state.engineStatus.lastLiveError = null;
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
     if (data.busy) {
@@ -472,6 +477,18 @@ async function checkLive({ quiet = false, signal } = {}) {
     return true;
   } catch (err) {
     logEndpointTiming("/live", started, false, err.message);
+    state.engineStatus.consecutiveLiveFailures = (state.engineStatus.consecutiveLiveFailures || 0) + 1;
+    state.engineStatus.lastLiveError = err?.message || String(err);
+    const lastOk = Number(state.engineStatus.lastLiveOkAt || 0);
+    const recentlyAlive = lastOk && Date.now() - lastOk < 60_000;
+    const hardDown = /ECONNREFUSED|Failed to fetch|NetworkError/i.test(state.engineStatus.lastLiveError || "");
+    if ((recentlyAlive || inferenceReady) && state.engineStatus.consecutiveLiveFailures < 2 && !hardDown) {
+      backendOnline = true;
+      const lastSeen = lastOk ? ` · last seen ${Math.max(1, Math.round((Date.now() - lastOk) / 1000))}s ago` : "";
+      setStatus("degraded", "Depth engine delayed", `Live probe delayed${lastSeen}`);
+      syncQueueControls();
+      return false;
+    }
     backendOnline = false;
     inferenceReady = false;
     state.engineStatus.live = null;

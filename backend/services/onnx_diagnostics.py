@@ -177,16 +177,12 @@ def create_onnx_session(
         }
 
     path = resolved.get("onnx_path")
-    if not path or not isinstance(path, str):
-        return {
-            "ok": False,
-            "error_code": "ONNX_MODEL_MISSING",
-            "message": f"ONNX file missing for {spec.display_name}; PyTorch fallback is available.",
-            "expected_path": resolved.get("expected_path"),
-            "fallback_allowed": True,
-            "path": resolved,
-        }
-    if not resolved.get("exists") or not os.path.isfile(path):
+    if (
+        not path
+        or not isinstance(path, str)
+        or not resolved.get("exists")
+        or not os.path.isfile(path)
+    ):
         return {
             "ok": False,
             "error_code": "ONNX_MODEL_MISSING",
@@ -238,39 +234,67 @@ def create_onnx_session(
             "path": resolved,
         }
 
-    try:
-        provider_entries = provider_entries_for_session(providers, spec.model_id, device)
+    attempts: list[tuple[str, Any, list[str]]] = []
+    entries = provider_entries_for_session(providers, spec.model_id, device)
+    attempts.append(("provider_entries", entries, _provider_names(entries)))
+    attempts.append(("provider_names", providers, list(providers)))
+    cpu_only = ["CPUExecutionProvider"]
+    if "CPUExecutionProvider" in available and providers != cpu_only:
+        attempts.append(("cpu_provider_fallback", cpu_only, cpu_only))
+
+    failure_chain: list[dict[str, Any]] = []
+    for mode, provider_arg, provider_names in attempts:
         try:
             session = ort.InferenceSession(
-                path, sess_options=session_options, providers=provider_entries
+                path, sess_options=session_options, providers=provider_arg
             )
-            providers_used = _provider_names(provider_entries)
-        except Exception:
-            session = ort.InferenceSession(path, sess_options=session_options, providers=providers)
-            providers_used = providers
-        return {
-            "ok": True,
-            "session": session,
-            "providers_used": providers_used,
-            "available_providers": available,
-            "path": resolved,
-            "model_id": spec.model_id,
-            "display_name": spec.display_name,
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error_code": "ONNX_SESSION_INIT_FAILED",
-            "message": (
-                f"ONNX Runtime could not load {spec.display_name} from {path}; "
-                "PyTorch fallback is available."
-            ),
-            "technical_detail": f"{type(exc).__name__}: {exc}",
-            "providers_used": providers,
-            "available_providers": available,
-            "fallback_allowed": True,
-            "path": resolved,
-        }
+            used = (
+                list(session.get_providers())
+                if hasattr(session, "get_providers")
+                else provider_names
+            )
+            provider_fallback_used = mode == "cpu_provider_fallback"
+            return {
+                "ok": True,
+                "session": session,
+                "providers_used": used,
+                "providers_attempted": [item[2] for item in attempts[: len(failure_chain) + 1]],
+                "provider_fallback_used": provider_fallback_used,
+                "provider_failure_chain": failure_chain,
+                "available_providers": available,
+                "path": resolved,
+                "model_id": spec.model_id,
+                "display_name": spec.display_name,
+            }
+        except Exception as exc:
+            failure_chain.append(
+                {
+                    "mode": mode,
+                    "providers": provider_names,
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+            )
+
+    detail = failure_chain[-1] if failure_chain else {}
+    return {
+        "ok": False,
+        "error_code": "ONNX_SESSION_INIT_FAILED",
+        "message": (
+            f"ONNX Runtime could not load {spec.display_name} from {path}; "
+            "PyTorch fallback is available."
+        ),
+        "technical_detail": (
+            f"{detail.get('exception_type', 'Error')}: "
+            f"{detail.get('message', 'session init failed')}"
+        ),
+        "providers_attempted": [item[2] for item in attempts],
+        "providers_used": providers,
+        "provider_failure_chain": failure_chain,
+        "available_providers": available,
+        "fallback_allowed": True,
+        "path": resolved,
+    }
 
 
 def _checker_status(path: str | None) -> tuple[str | None, str | None]:

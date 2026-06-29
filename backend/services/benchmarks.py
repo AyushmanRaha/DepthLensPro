@@ -23,18 +23,17 @@ from backend.services.engine_selector import (
 )
 from backend.services.inference import _infer_onnx, _infer_torch
 from backend.services.onnx_diagnostics import onnx_model_status
+from backend.services.runtime_state import benchmark_busy as _runtime_benchmark_busy
+from backend.services.runtime_state import set_benchmark_busy
 from backend.utils.hardware import _resolve
 
 DEFAULT_BENCHMARK_ITERATIONS = 3
 BENCHMARK_TIMEOUT_SECONDS = int(os.getenv("DEPTHLENS_BENCHMARK_TIMEOUT_SECONDS", "180"))
-_ACTIVE_BENCHMARKS = 0
-_ACTIVE_BENCHMARKS_LOCK = threading.Lock()
 log = logging.getLogger("depthlens")
 
 
 def benchmark_busy() -> bool:
-    with _ACTIVE_BENCHMARKS_LOCK:
-        return _ACTIVE_BENCHMARKS > 0
+    return _runtime_benchmark_busy()
 
 
 _AUTO_EXPORT_LOCKS: dict[str, threading.Lock] = {}
@@ -222,11 +221,9 @@ def run_benchmark(
 ) -> dict[str, Any]:
     """Return PyTorch-vs-ONNX latency, throughput, and memory benchmark matrices."""
 
-    global _ACTIVE_BENCHMARKS
     model = normalize_model_id(model)
     spec = get_model_spec(model)
-    with _ACTIVE_BENCHMARKS_LOCK:
-        _ACTIVE_BENCHMARKS += 1
+    set_benchmark_busy(True)
     log.info("BENCHMARK_START model=%s device=%s iterations=%s", model, device, iterations)
     try:
         iterations = max(1, min(iterations, 20))
@@ -468,5 +465,4 @@ def run_benchmark(
         )
         return result
     finally:
-        with _ACTIVE_BENCHMARKS_LOCK:
-            _ACTIVE_BENCHMARKS = max(0, _ACTIVE_BENCHMARKS - 1)
+        set_benchmark_busy(False)

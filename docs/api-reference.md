@@ -273,3 +273,11 @@ Optional fields include `remediation`, `field`, and `retryable`. Batch and compa
 
 ### Adaptive engine mode
 Depth routes (`/estimate`, `/batch`, `/compare`, `/api/reconstruct`, and aliases) accept optional `engine` form values: `auto` (default), `pytorch`, or `onnxruntime` (`onnx` alias). Responses add `engine_requested`, `engine_used`, `engine_selection`, `fallback_used`, and `fallback_reason` while preserving existing fields. `/benchmark` accepts query `engine=both|auto|pytorch|onnxruntime` (default `both`) and returns warmup-aware timing fields such as `latency_ms.samples`, `first_run_ms`/`cold_start_ms`, `warmup_iterations`, plus `comparison.recommended_engine`, `comparison.recommendation_reason`, and `comparison.display_label`.
+
+### `GET /api/detect/status`
+
+Returns local camera detector readiness without requiring an image upload. By default this is a lightweight status check and does not load the detector. Pass `?warmup=true` or call `POST /api/detect/warmup` to perform a single-flight detector warmup. Response fields include `available`, `state`, `device_requested`, `device_used`, `model`, `message`, `last_error`, and `warmup_in_progress`.
+
+### Liveness versus readiness
+
+`GET /live` is process liveness only and does not import inference runtimes or scan model assets. Use `/ready`, `/health`, and `/onnx/status` for deeper diagnostics. ONNX status distinguishes an asset being present from a verified runtime session; forced ONNX Runtime attempts the preferred provider first, then a CPUExecutionProvider ONNX fallback before using PyTorch fallback.
