@@ -929,6 +929,22 @@ async def compare(
     )
 
 
+@router.get("/api/detect/status")
+async def detect_status(device: str = "auto", warmup: bool = False) -> JSONResponse:
+    resolved = _validated_device_or_422(device)
+    from backend.services.object_detection import detector_status as detector_status_impl
+
+    return JSONResponse(await run_in_threadpool(detector_status_impl, resolved, warmup=warmup))
+
+
+@router.post("/api/detect/warmup")
+async def detect_warmup(device: str = "auto") -> JSONResponse:
+    resolved = _validated_device_or_422(device)
+    from backend.services.object_detection import detector_status as detector_status_impl
+
+    return JSONResponse(await run_in_threadpool(detector_status_impl, resolved, warmup=True))
+
+
 @router.post("/api/detect")
 @router.post("/detect")
 async def detect(

@@ -176,13 +176,16 @@ def _infer_with_metadata(
                 "device_used": provider,
                 "fallback_used": False,
                 "fallback_reason": None,
+                "provider_fallback_used": bool(selection.get("provider_fallback_used")),
+                "providers_used": selection.get("providers_used"),
+                "provider_failure_chain": selection.get("provider_failure_chain"),
                 "engine_selection": selection,
                 "warnings": warnings,
                 "onnx": resolved,
             }
         except Exception as exc:
             fallback_reason = f"{type(exc).__name__}: {exc}"
-            warnings.append("ONNX unavailable; used PyTorch fallback")
+            warnings.append("ONNX session failed; used PyTorch fallback")
             resolved = {**resolved, "runtime_error": fallback_reason}
             selection = {
                 **selection,
@@ -200,6 +203,8 @@ def _infer_with_metadata(
                     "device_used": device_str,
                     "fallback_used": True,
                     "fallback_reason": fallback_reason,
+                    "onnx_failure_reason": fallback_reason,
+                    "provider_failure_chain": selection.get("provider_failure_chain"),
                     "engine_selection": selection,
                     "onnx_path": resolved.get("onnx_path") or resolved.get("expected_path"),
                     "warnings": warnings,
@@ -207,7 +212,7 @@ def _infer_with_metadata(
                 }
 
     if requested == "onnxruntime" and selected_engine != "onnxruntime":
-        warnings.append("ONNX unavailable; used PyTorch fallback")
+        warnings.append("ONNX session failed; used PyTorch fallback")
         fallback_reason = selection.get("reason") or "ONNX unavailable"
 
     depth = _infer_torch(img_bgr, model_id, device_str)

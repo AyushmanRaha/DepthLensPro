@@ -808,6 +808,12 @@
               <select id="compareDevice" class="select-input">
                 <option value="auto">Auto</option>
               </select>
+              <label for="compareEngine" class="cmap-label">Engine</label>
+              <select id="compareEngine" class="select-input">
+                <option value="auto">Auto Recommended</option>
+                <option value="onnxruntime">Force ONNX Runtime</option>
+                <option value="pytorch">Force PyTorch</option>
+              </select>
             </div>
             <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>
               Run All Models

@@ -248,3 +248,18 @@ API errors include `detail.error_code` and `detail.message`; batch and compare i
 ## Blank chart panels
 
 Charts are rendered locally by `frontend/js/charts.js`. If Workspace, Performance, Benchmark, or Compare chart panels are blank, check the browser/Electron console for `DepthLens Pro:` chart diagnostics, confirm `frontend/js/charts.js` is present, run Electron resource verification, and ensure no stale `vendor/chart.umd.min.js` placeholder script is being loaded.
+
+## Packaged ONNX runtime diagnostics
+
+`/live` is intentionally lightweight: it reports process liveness and benchmark busy state without importing inference, model, Torch, OpenCV, NumPy, ONNX Runtime, or scanning model assets. Use deeper endpoints for runtime checks:
+
+```bash
+curl http://127.0.0.1:8765/live
+curl 'http://127.0.0.1:8765/ready?depth=quick'
+curl 'http://127.0.0.1:8765/onnx/status?depth=deep&force=true'
+curl http://127.0.0.1:8765/api/detect/status
+```
+
+ONNX asset availability is not the same as ONNX Runtime session availability. Packaged builds may contain `.onnx` files while a preferred execution provider is unavailable or unable to create a session. When **Force ONNX Runtime** is selected, DepthLens tries the preferred provider first and then retries a generic `CPUExecutionProvider` ONNX Runtime session when available. PyTorch fallback is used only when ONNX Runtime cannot create any valid session, the file is missing or empty, or `onnxruntime` cannot be imported.
+
+The Compare tab includes its own engine selector and forwards that choice to every model run. The 3D camera detector now exposes `/api/detect/status` and warms up the TorchVision detector before polling frames; capture remains usable if detector dependencies or weights are unavailable. Packaged builds should include detector weights under the documented Torch cache or run setup with detector prefetch enabled.

@@ -99,6 +99,9 @@ GENERIC_LABELS = {label for label in COCO_LABELS if label != "__background__"}
 
 _model_lock = threading.Lock()
 _model_cache: dict[str, Any] = {}
+_warmup_lock = threading.Lock()
+_warmup_in_progress = False
+_last_status: dict[str, Any] = {"state": "idle", "last_error": None}
 
 
 class DetectorUnavailableError(RuntimeError):
@@ -116,6 +119,84 @@ def _resolve_device(requested: str) -> str:
         raise
     except Exception:
         return "cpu"
+
+
+def detector_status(device: str = "auto", *, warmup: bool = False) -> dict[str, Any]:
+    """Return detector readiness; optionally single-flight warmup."""
+    global _warmup_in_progress, _last_status
+    requested = device
+    resolved = _resolve_device(device)
+    if resolved.startswith("mps"):
+        resolved = "cpu"
+    if str(resolved) in _model_cache:
+        return {
+            "available": True,
+            "state": "ready",
+            "device_requested": requested,
+            "device_used": str(resolved),
+            "model": MODEL_NAME,
+            "message": "Detector ready",
+            "last_error": None,
+            "warmup_in_progress": False,
+        }
+    if not warmup:
+        return {
+            "available": False,
+            "state": _last_status.get("state", "idle"),
+            "device_requested": requested,
+            "device_used": str(resolved),
+            "model": MODEL_NAME,
+            "message": "Detector not loaded",
+            "last_error": _last_status.get("last_error"),
+            "warmup_in_progress": _warmup_in_progress,
+        }
+    if not _warmup_lock.acquire(blocking=False):
+        return {
+            "available": False,
+            "state": "warming",
+            "device_requested": requested,
+            "device_used": str(resolved),
+            "model": MODEL_NAME,
+            "message": "Detector warmup already in progress",
+            "last_error": _last_status.get("last_error"),
+            "warmup_in_progress": True,
+        }
+    _warmup_in_progress = True
+    _last_status = {"state": "warming", "last_error": None}
+    try:
+        _model, used, _torch = get_detector(device)
+        _last_status = {"state": "ready", "last_error": None}
+        return {
+            "available": True,
+            "state": "ready",
+            "device_requested": requested,
+            "device_used": used,
+            "model": MODEL_NAME,
+            "message": "Detector ready",
+            "last_error": None,
+            "warmup_in_progress": False,
+        }
+    except DetectorUnavailableError as exc:
+        code = getattr(exc, "error_code", "DETECTOR_UNAVAILABLE")
+        state = (
+            "dependency_missing"
+            if code == "DETECTOR_DEPENDENCY_MISSING"
+            else "missing_weights" if code == "DETECTOR_WEIGHTS_UNAVAILABLE" else "error"
+        )
+        _last_status = {"state": state, "last_error": str(exc)}
+        return {
+            "available": False,
+            "state": state,
+            "device_requested": requested,
+            "device_used": str(resolved),
+            "model": MODEL_NAME,
+            "message": str(exc),
+            "last_error": str(exc),
+            "warmup_in_progress": False,
+        }
+    finally:
+        _warmup_in_progress = False
+        _warmup_lock.release()
 
 
 def get_detector(device: str = "auto") -> tuple[Any, str, Any]:

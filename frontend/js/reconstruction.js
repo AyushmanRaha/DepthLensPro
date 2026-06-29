@@ -100,7 +100,7 @@ async function openReconstructCaptureModal() {
   el.captureBackdrop.hidden = false;
   el.captureBackdrop.classList.remove("is-open");
   if (el.capturePlaceholder) { el.capturePlaceholder.hidden = false; el.capturePlaceholder.textContent = "Starting camera…"; }
-  renderCaptureDetections([]);
+  renderCaptureDetections({ status: "Warming detector…" });
   requestAnimationFrame(() => el.captureBackdrop?.classList.add("is-open"));
   el.captureCloseBtn?.focus();
   await startReconstructCaptureStream();
@@ -140,7 +140,7 @@ async function startReconstructCaptureStream() {
     }
     if (el.capturePlaceholder) el.capturePlaceholder.hidden = true;
     setCaptureStatus("Camera ready", "ready");
-    scheduleCaptureDetection(250);
+    warmupCaptureDetector();
   } catch (err) {
     const name = err?.name || "";
     const message = name === "NotAllowedError" ? "Permission denied" : name === "NotFoundError" ? "No camera found" : "Camera unavailable";
@@ -169,7 +169,7 @@ function stopReconstructCaptureStream() {
   }
 }
 
-async function captureFrameFile({ maxDim = 640, quality = 0.82 } = {}) {
+async function captureFrameFile({ maxDim = 512, quality = 0.82 } = {}) {
   const video = el.captureVideo;
   const canvas = el.captureCanvas;
   if (!video || !canvas || !video.videoWidth || !video.videoHeight) throw new Error("Camera frame is not ready");
@@ -198,9 +198,29 @@ async function captureReconstructStill() {
 
 function scheduleCaptureDetection(delay = 750) {
   const cap = state.reconstruct.capture;
+  if (cap.detecting) return;
   clearTimeout(cap.detectTimer);
   if (!withCaptureModalOpen() || document.hidden) return;
   cap.detectTimer = setTimeout(runCaptureDetectionOnce, delay);
+}
+
+async function warmupCaptureDetector() {
+  const cap = state.reconstruct.capture;
+  if (!withCaptureModalOpen() || cap.detecting) return;
+  cap.detecting = true;
+  renderCaptureDetections({ status: "Warming detector…" });
+  try {
+    const controller = new AbortController();
+    cap.detectAbort = controller;
+    const res = await apiFetch(`/api/detect/status?warmup=true&device=${encodeURIComponent(selDevice?.() || "auto")}`, { signal: requestSignal(controller.signal, 60000) });
+    const payload = await res.json();
+    if (payload.available || payload.state === "ready") { renderCaptureDetections({ status: "Detector ready" }); scheduleCaptureDetection(250); }
+    else { renderCaptureDetections({ error: payload.message || "Detector unavailable — capture still works" }); scheduleCaptureDetection(5000); }
+  } catch (err) {
+    if (err?.name !== "AbortError") renderCaptureDetections({ error: "Detector unavailable — capture still works" });
+  } finally {
+    cap.detecting = false;
+  }
 }
 
 async function runCaptureDetectionOnce() {
@@ -208,7 +228,7 @@ async function runCaptureDetectionOnce() {
   if (!withCaptureModalOpen() || cap.detecting || document.hidden) return;
   cap.detecting = true;
   try {
-    const file = await captureFrameFile({ maxDim: 640, quality: 0.78 });
+    const file = await captureFrameFile({ maxDim: 512, quality: 0.76 });
     cap.detectAbort?.abort();
     const controller = new AbortController();
     cap.detectAbort = controller;
@@ -217,19 +237,20 @@ async function runCaptureDetectionOnce() {
     form.append("device", selDevice?.() || "auto");
     form.append("threshold", "0.35");
     form.append("max_detections", "5");
-    const response = await apiFetch("/api/detect", { method: "POST", body: form, signal: requestSignal(controller.signal, 15000) });
+    const response = await apiFetch("/api/detect", { method: "POST", body: form, signal: requestSignal(controller.signal, 20000) });
     const payload = await response.json();
     renderCaptureDetections(payload.detections || []);
   } catch (err) {
-    if (err?.name !== "AbortError") renderCaptureDetections({ error: err?.payload?.detail || err?.message || "detector_unavailable" });
+    if (err?.name !== "AbortError") { cap.detectionFailures = (cap.detectionFailures || 0) + 1; renderCaptureDetections({ error: err?.payload?.detail || err?.message || "Detector unavailable — capture still works" }); }
   } finally {
     cap.detecting = false;
-    if (withCaptureModalOpen()) scheduleCaptureDetection(900);
+    if (withCaptureModalOpen()) scheduleCaptureDetection(cap.detectionFailures ? Math.min(8000, 1500 * cap.detectionFailures) : 900);
   }
 }
 
 function renderCaptureDetections(detections) {
   if (!el.captureDetections) return;
+  if (detections && !Array.isArray(detections) && detections.status) { el.captureDetections.textContent = detections.status; return; }
   if (detections && !Array.isArray(detections) && detections.error) {
     const detail = typeof detections.error === "object" ? (detections.error.message || detections.error.error_code || "Detector unavailable") : detections.error;
     el.captureDetections.textContent = String(detail).includes("offline") ? "Backend offline" : detail;

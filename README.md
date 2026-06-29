@@ -464,3 +464,7 @@ DepthLens Pro builds on excellent open-source projects:
 </div>
 
 ONNX native builds package the exported ONNX assets, while Auto Recommended chooses the fastest healthy engine per model/device instead of blindly forcing ONNX. Performance benchmarks are warmup-aware and report a recommended engine. Standard builds keep ONNX optional; ONNX native builds require assets, but runtime auto-selection may still choose PyTorch when it is faster or ONNX is unstable.
+
+### Runtime diagnostics notes
+
+The `/live` endpoint is deliberately lightweight and should remain safe even when Torch, OpenCV, ONNX Runtime, model assets, or detector weights are missing. Use `/ready`, `/health`, and `/onnx/status` for deeper diagnostics. ONNX files being present only proves asset availability; DepthLens verifies ONNX Runtime session availability separately and can use CPUExecutionProvider as an ONNX provider fallback before falling back to PyTorch. The Compare tab has an engine selector, and the 3D camera detector warms up through `/api/detect/status` while keeping image capture usable if detection is unavailable.
