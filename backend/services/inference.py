@@ -16,6 +16,7 @@ from backend.depth_models import ONNXExecutionEngine
 from backend.model_metadata import SUPPORTED_MODELS
 from backend.model_registry import get_model_spec, normalize_model_id, resolve_onnx_path
 from backend.services import observability
+from backend.services.engine_selector import normalize_engine_mode, select_engine_for_inference
 from backend.services.ground_truth import (
     GroundTruthError,
     compute_ground_truth_metrics,
@@ -155,36 +156,60 @@ def _infer_with_metadata(
 
     model_id = normalize_model_id(model_name)
     spec = get_model_spec(model_id)
-    requested = (engine_requested or "auto").lower()
+    requested = normalize_engine_mode(engine_requested)
     warnings: list[str] = []
-    onnx_detail: dict[str, Any] | None = None
-    if requested in {"auto", "onnx", "onnxruntime"}:
-        resolved = resolve_onnx_path(model_id)
-        onnx_detail = resolved
-        if resolved.get("exists") and int(resolved.get("size_bytes") or 0) > 0:
-            try:
-                depth = _infer_onnx(img_bgr, model_id, device_str)
+    resolved = resolve_onnx_path(model_id)
+    selection = select_engine_for_inference(model_id, device_str, requested, resolved)
+    selected_engine = str(selection.get("selected_engine") or selection.get("engine") or "pytorch")
+    fallback_reason: str | None = None
+
+    if selected_engine == "onnxruntime":
+        try:
+            depth = _infer_onnx(img_bgr, model_id, device_str)
+            provider = getattr(_load_onnx_engine(model_id, device_str), "provider", "onnxruntime")
+            return depth, {
+                "model_id": model_id,
+                "model_display_name": spec.display_name,
+                "engine_requested": requested,
+                "engine_used": "onnxruntime",
+                "device_requested": device_str,
+                "device_used": provider,
+                "fallback_used": False,
+                "fallback_reason": None,
+                "engine_selection": selection,
+                "warnings": warnings,
+                "onnx": resolved,
+            }
+        except Exception as exc:
+            fallback_reason = f"{type(exc).__name__}: {exc}"
+            warnings.append("ONNX unavailable; used PyTorch fallback")
+            resolved = {**resolved, "runtime_error": fallback_reason}
+            selection = {
+                **selection,
+                "source": "fallback",
+                "reason": "ONNX unavailable; PyTorch selected",
+            }
+            if requested == "onnxruntime" or selected_engine == "onnxruntime":
+                depth = _infer_torch(img_bgr, model_id, device_str)
                 return depth, {
                     "model_id": model_id,
                     "model_display_name": spec.display_name,
                     "engine_requested": requested,
-                    "engine_used": "onnxruntime",
+                    "engine_used": "pytorch",
                     "device_requested": device_str,
-                    "device_used": getattr(
-                        _load_onnx_engine(model_id, device_str), "provider", "onnxruntime"
-                    ),
-                    "fallback_used": False,
+                    "device_used": device_str,
+                    "fallback_used": True,
+                    "fallback_reason": fallback_reason,
+                    "engine_selection": selection,
+                    "onnx_path": resolved.get("onnx_path") or resolved.get("expected_path"),
                     "warnings": warnings,
                     "onnx": resolved,
                 }
-            except Exception as exc:
-                warnings.append(f"ONNX unavailable ({type(exc).__name__}); used PyTorch fallback")
-                fallback_reason = f"{type(exc).__name__}: {exc}"
-                onnx_detail = {**resolved, "runtime_error": fallback_reason}
-        else:
-            warnings.append("ONNX model missing; used PyTorch fallback")
-            if model_id not in _ONNX_MISSING_WARNED:
-                _ONNX_MISSING_WARNED.add(model_id)
+
+    if requested == "onnxruntime" and selected_engine != "onnxruntime":
+        warnings.append("ONNX unavailable; used PyTorch fallback")
+        fallback_reason = selection.get("reason") or "ONNX unavailable"
+
     depth = _infer_torch(img_bgr, model_id, device_str)
     return depth, {
         "model_id": model_id,
@@ -193,12 +218,12 @@ def _infer_with_metadata(
         "engine_used": "pytorch",
         "device_requested": device_str,
         "device_used": device_str,
-        "fallback_used": requested in {"auto", "onnx", "onnxruntime"} and bool(warnings),
-        "fallback_reason": warnings[-1] if warnings else None,
-        "onnx_path": (onnx_detail or {}).get("onnx_path")
-        or (onnx_detail or {}).get("expected_path"),
+        "fallback_used": requested == "onnxruntime" and bool(warnings),
+        "fallback_reason": fallback_reason,
+        "engine_selection": selection,
+        "onnx_path": resolved.get("onnx_path") or resolved.get("expected_path"),
         "warnings": warnings,
-        "onnx": onnx_detail,
+        "onnx": resolved,
     }
 
 
@@ -221,7 +246,8 @@ def infer_depth_arrays(
 
     model_id = normalize_model_id(model)
     spec = get_model_spec(model_id)
-    depth_key = _depth_cache_key(raw, model_id, device, max_dim)
+    engine_requested = normalize_engine_mode(engine_requested)
+    depth_key = _depth_cache_key(raw, model_id, device, max_dim, engine_requested)
     with observability.trace_span(
         "inference",
         "depth_cache_lookup",
@@ -263,6 +289,12 @@ def infer_depth_arrays(
             "device_requested": device,
             "device_used": device,
             "fallback_used": False,
+            "fallback_reason": None,
+            "engine_selection": {
+                "selected_engine": "cache",
+                "source": "cache",
+                "reason": "Depth cache hit",
+            },
             "warnings": [],
         }
 
@@ -295,12 +327,20 @@ def process_image(
     gt_required: bool = False,
     gt_scale: float | None = None,
     gt_invalid_value: float | None = None,
+    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Decode, infer, colorize, and package one image response."""
 
     model_label = model
     try:
-        arrays = infer_depth_arrays(raw, model, device, filename=filename, max_dim=max_dim)
+        arrays = infer_depth_arrays(
+            raw,
+            model,
+            device,
+            filename=filename,
+            max_dim=max_dim,
+            engine_requested=engine_requested,
+        )
         model_id = arrays["model_id"]
         model_label = model_id
         spec = get_model_spec(model_id)
@@ -448,6 +488,7 @@ async def process_image_async(
     gt_required: bool = False,
     gt_scale: float | None = None,
     gt_invalid_value: float | None = None,
+    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Run the blocking decode/inference/encode pipeline off the ASGI event loop."""
 
@@ -469,5 +510,6 @@ async def process_image_async(
                 gt_required,
                 gt_scale,
                 gt_invalid_value,
+                engine_requested,
             ),
         )

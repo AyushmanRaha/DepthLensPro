@@ -12,6 +12,7 @@ from backend.config import settings
 from backend.constants import MAX_UPLOAD_SIZE_MB
 from backend.model_metadata import COLORMAP_NAMES
 from backend.model_registry import UnknownModelError, normalize_model_id
+from backend.services.engine_selector import normalize_engine_mode
 
 GT_EXTENSIONS = {".png", ".tif", ".tiff", ".npy"}
 
@@ -144,3 +145,12 @@ def normalize_request_metrics_and_outputs(
     metrics_value = settings.DEPTHLENS_DEFAULT_METRICS if metrics is None else metrics
     outputs_value = settings.DEPTHLENS_DEFAULT_OUTPUTS if outputs is None else outputs
     return str(normalize_metrics_mode(metrics_value)), ",".join(parse_outputs(outputs_value))
+
+
+def normalize_request_engine(value: str | None, *, allow_both: bool = False) -> str:
+    """Normalize engine form/query values for inference and benchmark routes."""
+
+    try:
+        return normalize_engine_mode(value, allow_both=allow_both)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc

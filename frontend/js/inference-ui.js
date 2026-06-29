@@ -5,6 +5,9 @@
 function selModel()  { return $('input[name="model"]:checked')?.value    || "MiDaS_small"; }
 function selCmap()   { return $('input[name="colormap"]:checked')?.value || "inferno"; }
 function selDevice() { return $('input[name="device"]:checked')?.value || "auto"; }
+function selEngine() { return el.engineMode?.value || "auto"; }
+function prettyEngineName(engine) { const e=String(engine||"").toLowerCase(); if (e==="onnxruntime"||e==="onnx") return "ONNX Runtime"; if (e==="pytorch") return "PyTorch"; if (e==="auto") return "Auto"; if (e==="cache") return "Cached"; return e ? e.replace(/_/g," ") : "—"; }
+function formatEngineStatus(result) { const req=result?.engine_requested||"auto", used=result?.engine_used; const lat=Number.isFinite(Number(result?.latency_ms)) ? `${result.latency_ms} ms` : "—"; if (result?.fallback_used) return `${lat} · ONNX unavailable → ${prettyEngineName(used)} fallback`; if (used==="cache") { const selected=result?.engine_selection?.selected_engine; return `${lat} · Cached${selected&&selected!=="cache" ? ` · ${prettyEngineName(selected)}` : ""}`; } if (req==="auto" && used) return `${lat} · Auto → ${prettyEngineName(used)}`; return `${lat} · ${prettyEngineName(used||req)}`; }
 
 function setProgress(pct,status,eta,currentFile,countStr) {
   el.progressFill.style.width = `${pct}%`;
@@ -60,7 +63,7 @@ async function runBatch() {
   setProgress(0,"Starting batch","","",`0 / ${pending.length}`);
 
   const batchStart=Date.now();
-  const model=selModel(), colormap=selCmap(), device=selDevice();
+  const model=selModel(), colormap=selCmap(), device=selDevice(), engine=selEngine();
 
   try {
   for (let i=0;i<pending.length;i++) {
@@ -80,11 +83,11 @@ async function runBatch() {
 
     try {
       if (settings.warnOnDegradedEngine && backendOnline && !inferenceReady) toastOnce("Depth engine readiness is degraded; inference may fail", "warning", 6000);
-      const result=await inferOne(entry.file,model,colormap,device,state.abort.signal,state.gtMode?"full":"fast",state.gtMode?"color,gray":"color",state.gtMode?state.gtFile:null,state.gtMode,getInteractiveMaxDim());
+      const result=await inferOne(entry.file,model,colormap,device,state.abort.signal,state.gtMode?"full":"fast",state.gtMode?"color,gray":"color",state.gtMode?state.gtFile:null,state.gtMode,getInteractiveMaxDim(),engine);
       clearInterval(tick);
       updateEstimate("workspace",model,device,result.latency_ms);
       entry.result=result; entry.status=result.fallback_used?"completed_with_warning":"done";
-      setFileSt(entry.id,result.fallback_used?"warning":"done",`${result.fallback_used?"⚠":"✓"} ${result.latency_ms}ms${result.engine_used?` · ${result.engine_used}`:""}`);
+      setFileSt(entry.id,result.fallback_used?"warning":"done",`${result.fallback_used?"⚠":"✓"} ${formatEngineStatus(result)}`);
       if (result.fallback_used) {
         toastOnce(settings.allowFallbackEngine ? "Depth map generated with PyTorch fallback · ONNX unavailable" : "PyTorch fallback is disabled in Settings · review result", "warning", 4500);
         if (!settings.allowFallbackEngine) entry.status = "completed_with_warning";
@@ -127,12 +130,13 @@ async function runBatch() {
   }
 }
 
-async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs="color",gtFile=null,gtRequired=false,maxDim=null) {
+async function inferOne(file,model,colormap,device,signal,metrics="fast",outputs="color",gtFile=null,gtRequired=false,maxDim=null,engine="auto") {
   const fd=new FormData();
   fd.append("file",file); fd.append("model",model);
   fd.append("colormap",colormap); fd.append("device",device);
   fd.append("metrics", metrics);
   fd.append("outputs", outputs);
+  fd.append("engine", engine || "auto");
   if (gtFile) fd.append("gt_file", gtFile);
   if (gtRequired) fd.append("gt_required", "true");
   if (maxDim) fd.append("max_dim", String(maxDim));

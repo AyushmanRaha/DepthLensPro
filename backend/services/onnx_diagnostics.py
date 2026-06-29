@@ -56,6 +56,39 @@ def _onnx_providers_for_device(device: str, available: list[str]) -> list[str]:
     return selected or normalized_available
 
 
+def provider_entries_for_session(providers: list[str], model_id: str, device: str) -> list[Any]:
+    """Return ONNX Runtime provider entries with conservative optional settings."""
+
+    entries: list[Any] = []
+    cache_dir = (
+        Path(os.getenv("DEPTHLENS_CACHE_DIR", Path.home() / ".depthlens")) / "onnxruntime-coreml"
+    )
+    for provider in providers:
+        if provider == "CoreMLExecutionProvider":
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            entries.append(
+                (
+                    provider,
+                    {
+                        "ModelFormat": "MLProgram",
+                        "MLComputeUnits": "ALL",
+                        "RequireStaticInputShapes": "1",
+                        "ModelCacheDirectory": os.fspath(cache_dir),
+                    },
+                )
+            )
+        else:
+            entries.append(provider)
+    return entries
+
+
+def _provider_names(entries: list[Any]) -> list[str]:
+    return [str(item[0] if isinstance(item, tuple) else item) for item in entries]
+
+
 def export_command(model: str) -> str:
     return f"python backend/scripts/export_onnx.py --model {model} --force"
 
@@ -206,11 +239,19 @@ def create_onnx_session(
         }
 
     try:
-        session = ort.InferenceSession(path, sess_options=session_options, providers=providers)
+        provider_entries = provider_entries_for_session(providers, spec.model_id, device)
+        try:
+            session = ort.InferenceSession(
+                path, sess_options=session_options, providers=provider_entries
+            )
+            providers_used = _provider_names(provider_entries)
+        except Exception:
+            session = ort.InferenceSession(path, sess_options=session_options, providers=providers)
+            providers_used = providers
         return {
             "ok": True,
             "session": session,
-            "providers_used": providers,
+            "providers_used": providers_used,
             "available_providers": available,
             "path": resolved,
             "model_id": spec.model_id,

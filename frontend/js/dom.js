@@ -50,6 +50,7 @@ const el = {
   deviceInfoBanner: $("#deviceInfoBanner"),
   deviceTypeToggle: $("#deviceTypeToggle"),
   deviceSelector:   $("#deviceSelector"),
+  engineMode:       $("#engineMode"),
 
   // Upload queue
   dropZone:  $("#dropZone"),
@@ -113,10 +114,13 @@ const el = {
   // Benchmark
   benchmarkModel:      $("#benchmarkModel"),
   benchmarkDevice:     $("#benchmarkDevice"),
+  benchmarkEngine:     $("#benchmarkEngine"),
   benchmarkRunBtn:     $("#benchmarkRunBtn"),
   benchTorchLatency:   $("#benchTorchLatency"),
   benchOnnxLatency:    $("#benchOnnxLatency"),
   benchSpeedup:        $("#benchSpeedup"),
+  benchRecommendedEngine: $("#benchRecommendedEngine"),
+  benchRecommendationReason: $("#benchRecommendationReason"),
   benchThroughput:     $("#benchThroughput"),
   benchMemory:         $("#benchMemory"),
   benchProvider:       $("#benchProvider"),

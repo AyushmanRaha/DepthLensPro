@@ -51,7 +51,7 @@ const DEFAULT_SETTINGS = {
   palette: "depthlens", accentIntensity: 1, glassIntensity: "normal", compactUi: false, highContrast: false, largerText: false, backgroundGrid: true,
   motion: "full", panelPhysics: true, animatedBorders: true, reduceMotionOverride: false,
   backendUrl: "", autoCheckEngine: true, diagnosticsRefresh: "normal", refreshDiagnosticsOnOpen: true, showAdvancedDiagnostics: false, warnOnDegradedEngine: true, allowFallbackEngine: true, autoRetryEngineChecks: true,
-  useInferenceCache: true, showCacheBadges: true, maxInteractiveDim: "default",
+  useInferenceCache: true, showCacheBadges: true, maxInteractiveDim: "default", engineMode: "auto",
   warnLargeFiles: true, autoClearQueueAfterBatch: false, autoClearResultsOnClose: false, stripFilenamesFromExports: false, pauseWebcamWhenHidden: true, stopCameraOnTabSwitch: false,
   toastLevel: "all", toastDuration: "normal", dedupeWarnings: true, endpointTimingLogs: false, verboseConsoleLogs: false,
   rememberLastTab: true, skipWelcome: false, closePanelsOnOutsideClick: true, navDragSensitivity: "normal"
@@ -73,7 +73,8 @@ function persistedSettingsPayload() {
     targetFps: getWebcamTargetFps?.() || 2,
     webcamFrameMaxDimension: getWebcamMaxDim?.() || 384,
     smoothingPreference: getWebcamSmoothingAlpha?.() || 0.25,
-    recentBenchmarkSettings: { model: el.benchmarkModel?.value || "MiDaS_small", device: el.benchmarkDevice?.value || "auto", iterations: 3 },
+    recentBenchmarkSettings: { model: el.benchmarkModel?.value || "MiDaS_small", device: el.benchmarkDevice?.value || "auto", engine: el.benchmarkEngine?.value || "both", iterations: 3 },
+    engineMode: el.engineMode?.value || settings.engineMode || "auto",
     onnxPreference: settings.onnxPreference || "auto",
     onnxStatus: state?.engineStatus?.onnx?.status || "unknown",
     ui: { palette: settings.palette, motion: settings.motion, compactUi: settings.compactUi },
@@ -88,6 +89,7 @@ async function hydratePersistedSettings() {
     if (persisted.selectedModel) document.querySelector(`input[name="model"][value="${CSS.escape(persisted.selectedModel)}"]`)?.click?.();
     if (persisted.selectedDevice) document.querySelector(`input[name="device"][value="${CSS.escape(persisted.selectedDevice)}"]`)?.click?.();
     if (persisted.selectedColormap) document.querySelector(`input[name="colormap"][value="${CSS.escape(persisted.selectedColormap)}"]`)?.click?.();
+    if (el.engineMode && persisted.engineMode) el.engineMode.value = persisted.engineMode;
     if (el.webcamTargetFps && persisted.targetFps) el.webcamTargetFps.value = String(persisted.targetFps);
     if (el.webcamMaxDim && persisted.webcamFrameMaxDimension) el.webcamMaxDim.value = String(persisted.webcamFrameMaxDimension);
     if (el.webcamSmoothing && persisted.smoothingPreference !== undefined) el.webcamSmoothing.value = String(persisted.smoothingPreference);

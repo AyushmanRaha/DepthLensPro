@@ -270,3 +270,6 @@ Route-level failures return FastAPI-compatible envelopes under `detail`:
 ```
 
 Optional fields include `remediation`, `field`, and `retryable`. Batch and compare keep their existing per-item/per-model success flow and legacy `error` strings where present, while also adding `error_detail` with the same structured fields. Timeout codes are route-specific: `/benchmark` returns `BENCHMARK_TIMEOUT`, `/reconstruct` returns `RECONSTRUCTION_TIMEOUT`, and `/estimate`, `/compare`, `/batch`, and `/detect` return `REQUEST_TIMEOUT`.
+
+### Adaptive engine mode
+Depth routes (`/estimate`, `/batch`, `/compare`, `/api/reconstruct`, and aliases) accept optional `engine` form values: `auto` (default), `pytorch`, or `onnxruntime` (`onnx` alias). Responses add `engine_requested`, `engine_used`, `engine_selection`, `fallback_used`, and `fallback_reason` while preserving existing fields. `/benchmark` accepts query `engine=both|auto|pytorch|onnxruntime` (default `both`) and returns warmup-aware timing fields such as `latency_ms.samples`, `first_run_ms`/`cold_start_ms`, `warmup_iterations`, plus `comparison.recommended_engine`, `comparison.recommendation_reason`, and `comparison.display_label`.

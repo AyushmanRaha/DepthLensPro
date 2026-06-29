@@ -260,7 +260,7 @@
     </div>
 
     <div class="engine-status-section engine-status-device-details">
-      <div class="engine-status-section-title">Device Details</div>
+      <div class="engine-status-section-title">Compute Runtime</div>
       <div class="device-info-banner" id="deviceInfoBanner">
         <span class="device-info-icon" aria-hidden="true"></span>
         <span>Connect the inference engine to detect GPU/CPU</span>
@@ -362,6 +362,16 @@
                   </div>
                 </label>
               </div>
+              <details id="advancedRuntimeOptions" class="advanced-runtime-options">
+                <summary>Advanced runtime options</summary>
+                <label for="engineMode" class="cmap-label">Engine Mode</label>
+                <select id="engineMode" class="select-input">
+                  <option value="auto">Auto Recommended</option>
+                  <option value="pytorch">Force PyTorch</option>
+                  <option value="onnxruntime">Force ONNX Runtime</option>
+                </select>
+                <p class="muted">Auto chooses the fastest healthy engine for the selected model and device. Force modes are for debugging and benchmarking.</p>
+              </details>
               <div class="device-note" id="deviceNote">
                 <span class="note-label">MiDaS Small</span> → CPU or GPU
                 &nbsp;·&nbsp; <span class="note-label">DPT Hybrid</span> → GPU
@@ -945,6 +955,16 @@
                 </select>
               </div>
 
+              <div class="performance-field">
+                <label for="benchmarkEngine" class="cmap-label">Engine</label>
+                <select id="benchmarkEngine" class="select-input">
+                  <option value="both">Compare Both</option>
+                  <option value="auto">Auto Recommended</option>
+                  <option value="pytorch">PyTorch Only</option>
+                  <option value="onnxruntime">ONNX Runtime Only</option>
+                </select>
+              </div>
+
               <button class="btn btn-primary btn-sm" id="benchmarkRunBtn" type="button">
                 Run Benchmark
               </button>
@@ -967,6 +987,12 @@
                 <span class="metric-value" id="benchSpeedup">—</span>
                 <span class="metric-label">Speedup</span>
                 <span class="metric-desc">PyTorch latency divided by ONNX latency</span>
+              </div>
+
+              <div class="metric-cell">
+                <span class="metric-value" id="benchRecommendedEngine">—</span>
+                <span class="metric-label">Recommended Engine</span>
+                <span class="metric-desc" id="benchRecommendationReason">Awaiting benchmark run</span>
               </div>
 
               <div class="metric-cell">

@@ -462,3 +462,5 @@ DepthLens Pro builds on excellent open-source projects:
 `com.ayushmanraha.depthlens-pro`
 
 </div>
+
+ONNX native builds package the exported ONNX assets, while Auto Recommended chooses the fastest healthy engine per model/device instead of blindly forcing ONNX. Performance benchmarks are warmup-aware and report a recommended engine. Standard builds keep ONNX optional; ONNX native builds require assets, but runtime auto-selection may still choose PyTorch when it is faster or ONNX is unstable.

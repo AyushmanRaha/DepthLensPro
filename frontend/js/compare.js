@@ -54,7 +54,7 @@ async function runComparison() {
       el.compareProgressEta.textContent=`ETA ${fmtDuration(rem)}`;
     },120);
     try {
-      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray",null,false,getInteractiveMaxDim());
+      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray",null,false,getInteractiveMaxDim(),"auto");
       clearInterval(tick); updateEstimate("compare",model,device,r.latency_ms);
       results.push(r); renderCompareCard(r);
     } catch(err) {
@@ -86,7 +86,8 @@ function renderCompareCard(r) {
   const card=document.createElement("div"); card.className="compare-card";
   const lbl=esc(r.model_display_name || r.model?.replace("midas_","MiDaS ").replace("dpt_","DPT ").replace("MiDaS_","").replace("DPT_","DPT ") || "Model");
   const latency = Number.isFinite(Number(r.latency_ms)) ? `${Number(r.latency_ms)} ms` : "—";
-  const warning = r.fallback_used ? `<div class="compare-warning">ONNX unavailable · ${esc(r.engine_used || "PyTorch")} fallback · ${esc(r.device_used || "")}</div>` : `<div class="compare-warning">${esc(r.engine_used || "")} · ${esc(r.device_used || "")}</div>`;
+  const engineText = formatEngineStatus(r).replace(/^.*? · /, "");
+  const warning = `<div class="compare-warning">${esc(engineText)} · ${esc(r.device_used || "")}</div>`;
   card.innerHTML=`
     <div class="compare-card-header">${lbl} <span class="latency-badge">${esc(latency)}</span></div>
     ${warning}

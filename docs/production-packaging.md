@@ -123,3 +123,5 @@ Packaged backend environments use runtime dependencies from `backend/requirement
 
 
 Packaged frontend resources must include `frontend/js/charts.js`, which provides the local Canvas 2D chart renderer verified by Electron resource checks.
+
+Packaged ONNX assets are availability inputs for Auto Recommended engine selection, not a forced runtime policy.

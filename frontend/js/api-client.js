@@ -714,5 +714,5 @@ function renderDeviceSelector(deviceEntries, primary, saved, devs, { force = fal
 
 function updateDeviceInfoBanner(text) {
   const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
-  if (bannerText) bannerText.textContent = `Detected ${text} · choose compute target below`;
+  if (bannerText) bannerText.textContent = `Detected compute: ${text}`;
 }

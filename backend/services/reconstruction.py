@@ -119,6 +119,7 @@ def depth_to_point_cloud(
     sampling: str = "grid",
     include_rgb: bool = True,
     coordinate_system: str = "y_up",
+    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Project a normalized monocular depth map into an approximate colored point cloud."""
 
@@ -314,6 +315,7 @@ def reconstruct_point_cloud(
     sampling: str = "grid",
     include_rgb: bool = True,
     coordinate_system: str = "y_up",
+    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Infer depth, reconstruct a point cloud, and return a JSON-safe export payload."""
 
@@ -336,6 +338,7 @@ def reconstruct_point_cloud(
         device=device,
         filename=filename,
         max_dim=max_dim,
+        engine_requested=engine_requested,
     )
     cloud = depth_to_point_cloud(
         inferred["img_bgr"],
@@ -377,8 +380,11 @@ def reconstruct_point_cloud(
         "model_id": inferred["model_id"],
         "model_display_name": inferred["model_display_name"],
         "device_used": inferred["device_used"],
+        "engine_requested": inferred.get("engine_requested", engine_requested),
         "engine_used": inferred["engine_used"],
+        "engine_selection": inferred.get("engine_selection"),
         "fallback_used": bool(inferred.get("fallback_used", False)),
+        "fallback_reason": inferred.get("fallback_reason"),
         "depth_cached": bool(inferred.get("depth_cached", False)),
         "latency_ms": inferred["latency_ms"],
         "total_latency_ms": round((time.perf_counter() - started) * 1000, 1),

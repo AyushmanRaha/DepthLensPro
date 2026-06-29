@@ -22,10 +22,14 @@ def _raw_hash(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _depth_cache_key(raw: bytes, model: str, dev: str, max_dim: int | None) -> str:
+def _depth_cache_key(
+    raw: bytes, model: str, dev: str, max_dim: int | None, engine: str = "auto"
+) -> str:
     """Cache normalized depth independently from color/output/metric options."""
     limit = max(256, int(max_dim or MAX_DIM))
-    return hashlib.sha1(f"depth:{model}:{dev}:{limit}:{_raw_hash(raw)}".encode()).hexdigest()
+    return hashlib.sha1(
+        f"depth:{model}:{dev}:{engine}:{limit}:{_raw_hash(raw)}".encode()
+    ).hexdigest()
 
 
 def _fhash(
@@ -36,13 +40,14 @@ def _fhash(
     metrics: str = "full",
     outputs: str = "color,gray",
     max_dim: int | None = None,
+    engine: str = "auto",
 ) -> str:
     """Build a stable cache key for request image bytes and response options."""
     limit = max(256, int(max_dim or MAX_DIM))
     output_key = ",".join(parse_outputs(outputs))
     metric_key = normalize_metrics_mode(metrics)
     return hashlib.sha1(
-        f"{model}:{cmap}:{dev}:{metric_key}:{output_key}:{limit}:{_raw_hash(raw)}".encode()
+        f"{model}:{cmap}:{dev}:{engine}:{metric_key}:{output_key}:{limit}:{_raw_hash(raw)}".encode()
     ).hexdigest()
 
 

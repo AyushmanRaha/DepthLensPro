@@ -29,8 +29,10 @@ function renderBenchmark(data) {
   const onnx = benchmarkResult(data, "onnxruntime");
   el.benchTorchLatency.textContent = fmtBenchLatency(torch);
   el.benchOnnxLatency.textContent = fmtBenchLatency(onnx);
-  el.benchSpeedup.textContent = data?.comparison?.speedup ? `${data.comparison.speedup}×` : "—";
+  el.benchSpeedup.textContent = data?.comparison?.display_label || (data?.comparison?.speedup ? `${data.comparison.speedup}×` : "—");
   const onnxThroughput = onnx?.throughput_fps ?? data?.onnx?.throughput_fps;
+  if (el.benchRecommendedEngine) el.benchRecommendedEngine.textContent = prettyEngineName(data?.comparison?.recommended_engine || "");
+  if (el.benchRecommendationReason) el.benchRecommendationReason.textContent = data?.comparison?.recommendation_reason || "Awaiting benchmark run";
   el.benchThroughput.textContent = Number.isFinite(Number(onnxThroughput)) ? `${Number(onnxThroughput).toFixed(2)} fps` : "Unavailable";
   el.benchMemory.textContent = data?.memory_snapshot?.process_rss_mb ? `${data.memory_snapshot.process_rss_mb} MB` : "—";
   const provider = onnx?.provider || onnx?.diagnostics?.runtime?.selected_provider || data?.onnx_diagnostics?.runtime?.selected_provider;
@@ -48,6 +50,7 @@ async function runBenchmark() {
   state.benchmarkAbort = new AbortController();
   const model = el.benchmarkModel?.value || "MiDaS_small";
   const device = el.benchmarkDevice?.value || "auto";
+  const engine = el.benchmarkEngine?.value || "both";
   el.benchmarkRunBtn.disabled = true;
   el.benchmarkRunBtn.textContent = "Running";
   el.benchStatus.textContent = "Loading models and measuring latency";
@@ -57,7 +60,7 @@ async function runBenchmark() {
       const ok = await checkHealth();
       if (!ok) throw new Error(`Depth engine is unavailable at ${API || DEFAULT_API_BASE_URL}`);
     }
-    const res = await apiFetch(`/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3`, {
+    const res = await apiFetch(`/api/benchmark?model=${encodeURIComponent(model)}&device=${encodeURIComponent(device)}&iterations=3&engine=${encodeURIComponent(engine)}`, {
       signal: anySignal([state.benchmarkAbort.signal, timeoutSignal(240_000)]),
     });
     renderBenchmark(await res.json());

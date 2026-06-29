@@ -37,6 +37,7 @@ from backend.api.live import SERVICE_VERSION
 from backend.api.system_telemetry import disk_telemetry, memory_telemetry, telemetry_status
 from backend.api.validation import (
     normalize_request_colormap,
+    normalize_request_engine,
     normalize_request_metrics_and_outputs,
     normalize_request_model,
     validate_detection_params,
@@ -90,10 +91,10 @@ def _cache_service() -> Any:
     return cache_service
 
 
-def run_benchmark(model: str, device: str, iterations: int) -> dict[str, Any]:
+def run_benchmark(model: str, device: str, iterations: int, engine: str = "both") -> dict[str, Any]:
     from backend.services.benchmarks import run_benchmark as impl
 
-    return impl(model=model, device=device, iterations=iterations)
+    return impl(model=model, device=device, iterations=iterations, engine=engine)
 
 
 def onnx_status_payload(
@@ -342,6 +343,7 @@ async def process_image_async(
     gt_required: bool = False,
     gt_scale: float | None = None,
     gt_invalid_value: float | None = None,
+    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Offload blocking image inference while preserving route-level monkeypatching."""
 
@@ -365,6 +367,7 @@ async def process_image_async(
             gt_required,
             gt_scale,
             gt_invalid_value,
+            engine_requested,
         ),
     )
 
@@ -393,6 +396,7 @@ async def reconstruct_point_cloud_async(
     sampling: str = "grid",
     include_rgb: bool = True,
     coordinate_system: str = "y_up",
+    engine_requested: str = "auto",
 ) -> dict[str, Any]:
     """Offload blocking point-cloud reconstruction while preserving route monkeypatching."""
 
@@ -416,6 +420,7 @@ async def reconstruct_point_cloud_async(
             sampling=sampling,
             include_rgb=include_rgb,
             coordinate_system=coordinate_system,
+            engine_requested=engine_requested,
         ),
     )
 
@@ -558,15 +563,18 @@ async def list_colormaps() -> dict[str, list[str]]:
 @router.get("/api/benchmark")
 @router.get("/benchmark")
 async def benchmark(
-    model: str = "MiDaS_small", device: str = "auto", iterations: int = 3
+    model: str = "MiDaS_small", device: str = "auto", iterations: int = 3, engine: str = "both"
 ) -> dict[str, Any]:
     """Return PyTorch and ONNX Runtime performance matrices for the UI."""
 
     try:
         from backend.services.benchmarks import BENCHMARK_TIMEOUT_SECONDS
 
+        engine = normalize_request_engine(engine, allow_both=True)
         result: dict[str, Any] = await asyncio.wait_for(
-            run_in_threadpool(run_benchmark, model=model, device=device, iterations=iterations),
+            run_in_threadpool(
+                run_benchmark, model=model, device=device, iterations=iterations, engine=engine
+            ),
             timeout=BENCHMARK_TIMEOUT_SECONDS,
         )
         return result
@@ -603,10 +611,15 @@ async def estimate(
     gt_required: bool = Form(False),
     gt_scale: float | None = Form(None),
     gt_invalid_value: float | None = Form(None),
+    engine: str = Form("auto"),
 ) -> JSONResponse:
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
     validate_max_dim(max_dim)
+    try:
+        engine = normalize_request_engine(engine)
+    except ValueError as exc:
+        raise validation_error(str(exc), code="INVALID_ENGINE", field="engine") from exc
     try:
         metrics, outputs = normalize_request_metrics_and_outputs(
             metrics,
@@ -655,7 +668,7 @@ async def estimate(
     ck = (
         None
         if gt_raw is not None or gt_required
-        else _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
+        else _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim, engine)
     )
     output_set = parse_outputs(outputs)
     cached = _cache_service().get(ck) if ck is not None else None
@@ -698,6 +711,7 @@ async def estimate(
                 gt_required,
                 gt_scale,
                 gt_invalid_value,
+                engine,
             ),
             "/estimate",
             model,
@@ -772,10 +786,15 @@ async def compare(
     metrics: str = Form("full"),
     outputs: str = Form("color,gray"),
     max_dim: int | None = Form(None),
+    engine: str = Form("auto"),
 ) -> JSONResponse:
     model_ids = _normalize_compare_models(models)
     colormap = normalize_request_colormap(colormap)
     validate_max_dim(max_dim)
+    try:
+        engine = normalize_request_engine(engine)
+    except ValueError as exc:
+        raise validation_error(str(exc), code="INVALID_ENGINE", field="engine") from exc
     try:
         metrics, outputs = normalize_request_metrics_and_outputs(
             metrics,
@@ -812,7 +831,7 @@ async def compare(
     ):
         for model_id in model_ids:
             try:
-                ck = _fhash(raw, model_id, colormap, resolved, metrics, outputs, max_dim)
+                ck = _fhash(raw, model_id, colormap, resolved, metrics, outputs, max_dim, engine)
                 cached = _cache_service().get(ck)
                 observability.safe_observe(
                     "cache_event",
@@ -839,7 +858,20 @@ async def compare(
 
                 result = await _with_route_timeout(
                     process_image_async(
-                        raw, model_id, colormap, resolved, file.filename, metrics, outputs, max_dim
+                        raw,
+                        model_id,
+                        colormap,
+                        resolved,
+                        file.filename,
+                        metrics,
+                        outputs,
+                        max_dim,
+                        None,
+                        None,
+                        False,
+                        None,
+                        None,
+                        engine,
                     ),
                     "/compare",
                     model_id,
@@ -973,10 +1005,15 @@ async def reconstruct(
     sampling: str = Form("grid"),
     include_rgb: bool = Form(True),
     coordinate_system: str = Form("y_up"),
+    engine: str = Form("auto"),
 ) -> JSONResponse:
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
     validate_max_dim(max_dim)
+    try:
+        engine = normalize_request_engine(engine)
+    except ValueError as exc:
+        raise validation_error(str(exc), code="INVALID_ENGINE", field="engine") from exc
     validate_reconstruction_params(
         max_points,
         preview_points,
@@ -1014,6 +1051,7 @@ async def reconstruct(
                 sampling=sampling,
                 include_rgb=include_rgb,
                 coordinate_system=coordinate_system,
+                engine_requested=engine,
             ),
             "/reconstruct",
             model,
@@ -1074,12 +1112,17 @@ async def batch(
     metrics: str = Form(settings.DEPTHLENS_DEFAULT_METRICS),
     outputs: str = Form(settings.DEPTHLENS_DEFAULT_OUTPUTS),
     max_dim: int | None = Form(None),
+    engine: str = Form("auto"),
 ) -> JSONResponse:
     if len(files) > 10:
         raise validation_error("Batch limit is 10 images", field="files")
     model = normalize_request_model(model)
     colormap = normalize_request_colormap(colormap)
     validate_max_dim(max_dim)
+    try:
+        engine = normalize_request_engine(engine)
+    except ValueError as exc:
+        raise validation_error(str(exc), code="INVALID_ENGINE", field="engine") from exc
     try:
         metrics, outputs = normalize_request_metrics_and_outputs(
             metrics,
@@ -1113,7 +1156,7 @@ async def batch(
                 validate_image_upload_content_type(upload)
                 raw = await upload.read()
                 validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
-                ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim)
+                ck = _fhash(raw, model, colormap, resolved, metrics, outputs, max_dim, engine)
                 cached = _cache_service().get(ck)
                 if cached is not None:
                     observability.record_cache_event("hit", "route")
@@ -1132,7 +1175,20 @@ async def batch(
 
                 res = await _with_batch_item_timeout(
                     process_image_async(
-                        raw, model, colormap, resolved, upload.filename, metrics, outputs, max_dim
+                        raw,
+                        model,
+                        colormap,
+                        resolved,
+                        upload.filename,
+                        metrics,
+                        outputs,
+                        max_dim,
+                        None,
+                        None,
+                        False,
+                        None,
+                        None,
+                        engine,
                     )
                 )
                 _cache_service().set(ck, res)

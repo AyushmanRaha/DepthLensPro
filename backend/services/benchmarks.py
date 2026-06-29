@@ -16,6 +16,11 @@ import numpy as np
 from backend.depth_models import onnx_model_path
 from backend.model_registry import get_model_spec, normalize_model_id
 from backend.services import observability
+from backend.services.engine_selector import (
+    ENGINE_SELECTION_MARGIN,
+    record_benchmark_decision,
+    select_engine_for_inference,
+)
 from backend.services.inference import _infer_onnx, _infer_torch
 from backend.services.onnx_diagnostics import onnx_model_status
 from backend.utils.hardware import _resolve
@@ -147,6 +152,12 @@ def _synthetic_frame(size: int = 384) -> np.ndarray:
 def _measure(label: str, runner: Callable[[], np.ndarray], iterations: int) -> dict[str, Any]:
     latencies: list[float] = []
     start_memory = _memory_snapshot()
+    t0 = time.perf_counter()
+    runner()
+    first_run_ms = (time.perf_counter() - t0) * 1000
+    warmup_iterations = 1 if iterations > 1 else 0
+    for _ in range(warmup_iterations):
+        runner()
     for _ in range(iterations):
         t0 = time.perf_counter()
         runner()
@@ -158,6 +169,15 @@ def _measure(label: str, runner: Callable[[], np.ndarray], iterations: int) -> d
         "status": "ok",
         "state": "available",
         "iterations": iterations,
+        "warmup_iterations": warmup_iterations,
+        "first_run_ms": round(first_run_ms, 2),
+        "cold_start_ms": round(first_run_ms, 2),
+        "steady_state_latency_ms": round(avg, 2),
+        "steady_state_throughput_fps": round(1000 / avg, 2) if avg else 0.0,
+        "timing_mode": "warm_steady_state",
+        "measurement_notes": (
+            "First call recorded separately; warmup runs excluded from steady samples."
+        ),
         "latency_ms": {
             "avg": round(avg, 2),
             "min": round(min(latencies), 2),
@@ -195,7 +215,10 @@ def _unavailable(
 
 
 def run_benchmark(
-    model: str = "MiDaS_small", device: str = "auto", iterations: int = DEFAULT_BENCHMARK_ITERATIONS
+    model: str = "MiDaS_small",
+    device: str = "auto",
+    iterations: int = DEFAULT_BENCHMARK_ITERATIONS,
+    engine: str = "both",
 ) -> dict[str, Any]:
     """Return PyTorch-vs-ONNX latency, throughput, and memory benchmark matrices."""
 
@@ -207,20 +230,36 @@ def run_benchmark(
     log.info("BENCHMARK_START model=%s device=%s iterations=%s", model, device, iterations)
     try:
         iterations = max(1, min(iterations, 20))
+        engine = (engine or "both").strip().lower()
+        if engine == "onnx":
+            engine = "onnxruntime"
+        if engine == "compare":
+            engine = "both"
+        if engine not in {"both", "auto", "pytorch", "onnxruntime"}:
+            raise ValueError("engine must be one of: auto, both, onnxruntime, pytorch")
         resolved = str(_resolve(device))
         frame = _synthetic_frame()
 
-        try:
-            pytorch_result = _measure(
-                "pytorch", lambda: _infer_torch(frame, model, resolved), iterations
+        if engine == "onnxruntime":
+            pytorch_result = _unavailable(
+                "pytorch", "PyTorch benchmark not requested", "not_requested"
             )
-        except Exception as exc:
-            pytorch_result = _unavailable("pytorch", str(exc))
+        else:
+            try:
+                pytorch_result = _measure(
+                    "pytorch", lambda: _infer_torch(frame, model, resolved), iterations
+                )
+            except Exception as exc:
+                pytorch_result = _unavailable("pytorch", str(exc))
 
         weights_path = onnx_model_path(model)
         onnx_diag = _ensure_onnx_weights(model, onnx_model_status(model, resolved))
         state = onnx_diag.get("state")
-        if state == "available":
+        if engine == "pytorch":
+            onnx_result = _unavailable(
+                "onnxruntime", "ONNX Runtime benchmark not requested", "not_requested"
+            )
+        elif state == "available":
             try:
                 onnx_result = _measure(
                     "onnxruntime", lambda: _infer_onnx(frame, model, resolved), iterations
@@ -286,11 +325,55 @@ def run_benchmark(
         comparison: dict[str, Any] = {}
         pt_avg = (pytorch_result.get("latency_ms") or {}).get("avg")
         onnx_avg = (onnx_result.get("latency_ms") or {}).get("avg")
-        if isinstance(pt_avg, (int, float)) and isinstance(onnx_avg, (int, float)) and onnx_avg > 0:
+        provider = onnx_result.get("provider") or onnx_diag.get("runtime", {}).get(
+            "selected_provider"
+        )
+        if (
+            isinstance(pt_avg, (int, float))
+            and isinstance(onnx_avg, (int, float))
+            and onnx_avg > 0
+            and pt_avg > 0
+        ):
+            speedup = round(pt_avg / onnx_avg, 2)
+            onnx_factor = round(pt_avg / onnx_avg, 2)
+            pytorch_factor = round(onnx_avg / pt_avg, 2)
+            faster = "onnxruntime" if onnx_avg < pt_avg else "pytorch"
+            recommended = (
+                "onnxruntime" if onnx_avg <= pt_avg * ENGINE_SELECTION_MARGIN else "pytorch"
+            )
+            factor = onnx_factor if faster == "onnxruntime" else pytorch_factor
+            display = (
+                f"{'ONNX Runtime' if faster == 'onnxruntime' else 'PyTorch'} {factor:.1f}× faster"
+            )
+            reason = (
+                ("ONNX Runtime faster by %.1f×" % onnx_factor)
+                if recommended == "onnxruntime"
+                else "PyTorch faster on this model/device"
+            )
             comparison = {
                 "latency_delta_ms": round(pt_avg - onnx_avg, 2),
-                "speedup": round(pt_avg / onnx_avg, 2),
-                "faster_engine": "onnxruntime" if onnx_avg < pt_avg else "pytorch",
+                "speedup": speedup,
+                "faster_engine": faster,
+                "recommended_engine": recommended,
+                "recommendation_reason": reason,
+                "recommendation_source": "benchmark",
+                "display_label": display,
+                "onnx_faster_factor": onnx_factor if onnx_avg < pt_avg else None,
+                "pytorch_faster_factor": pytorch_factor if pt_avg <= onnx_avg else None,
+                "selection_margin": ENGINE_SELECTION_MARGIN,
+                "uses_cpu_fallback": bool(onnx_result.get("uses_cpu_fallback")),
+                "provider": provider,
+            }
+        else:
+            sel = select_engine_for_inference(model, resolved, "auto", onnx_diag)
+            comparison = {
+                "recommended_engine": sel.get("selected_engine"),
+                "recommendation_reason": sel.get("reason"),
+                "recommendation_source": sel.get("source"),
+                "display_label": "—",
+                "selection_margin": ENGINE_SELECTION_MARGIN,
+                "uses_cpu_fallback": bool(onnx_diag.get("runtime", {}).get("uses_cpu_fallback")),
+                "provider": provider,
             }
 
         result = {
@@ -301,6 +384,7 @@ def run_benchmark(
             "device_requested": device,
             "device_resolved": resolved,
             "iterations": iterations,
+            "engine_requested": engine,
             "frame_shape": list(frame.shape),
             "weights": {
                 "onnx_path": os.fspath(weights_path),
@@ -352,6 +436,12 @@ def run_benchmark(
             ),
             "memory_snapshot": _memory_snapshot(),
         }
+        if (
+            engine == "both"
+            and pytorch_result.get("status") == "ok"
+            and onnx_result.get("status") == "ok"
+        ):
+            record_benchmark_decision(result)
         pytorch_summary = cast(dict[str, Any], result.get("pytorch", {}))
         onnx_summary = cast(dict[str, Any], result.get("onnx", {}))
         providers_used = cast(list[str | None], onnx_summary.get("providers_used") or [None])
