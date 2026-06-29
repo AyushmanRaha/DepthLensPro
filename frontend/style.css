@@ -651,32 +651,28 @@ body.macos .window-drag-strip {
 }
 
 .engine-status-orb {
-  --orb-main: rgba(255, 77, 77, 0.76);
-  --orb-deep: rgba(80, 14, 25, 0.92);
-  --orb-core: var(--error);
-  --orb-ring: rgba(255, 77, 77, 0.82);
-  --orb-glow: rgba(255, 77, 77, 0.34);
-  --orb-halo: rgba(255, 77, 77, 0.14);
   --orb-tilt-x: 0deg;
   --orb-tilt-y: 0deg;
 
   position: relative;
+  display: grid;
+  place-items: center;
   width: 100%;
   height: 100%;
-  border: 1.5px solid rgba(0, 200, 255, 0.22);
+  border: 1px solid var(--border-hi);
   border-radius: 50%;
   padding: 0;
   overflow: hidden;
+  color: var(--accent);
   background:
-    radial-gradient(circle at 31% 24%, rgba(255,255,255,0.68) 0 5%, rgba(255,255,255,0.18) 8% 16%, transparent 18%),
-    radial-gradient(circle at 50% 52%, var(--orb-main) 0 17%, rgba(255,255,255,0.08) 19% 24%, transparent 26%),
-    radial-gradient(circle at 50% 118%, var(--orb-halo), transparent 52%),
-    linear-gradient(145deg, rgba(16,30,46,0.98), rgba(5,10,19,0.98) 68%, var(--orb-deep));
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.34), transparent 30%),
+    linear-gradient(145deg, rgba(16,30,46,.82), rgba(5,10,19,.78));
   box-shadow:
-    0 0 0 1px rgba(255,255,255,0.045) inset,
-    0 8px 22px var(--orb-glow),
-    inset 0 1px 8px rgba(255,255,255,0.18),
-    inset 0 -8px 16px rgba(0,0,0,0.36);
+    0 0 0 1px rgba(255,255,255,.045) inset,
+    0 8px 22px var(--accent-glow),
+    inset 0 1px 8px rgba(255,255,255,.13);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
   transform:
     perspective(700px)
     rotateX(var(--orb-tilt-x))
@@ -687,67 +683,42 @@ body.macos .window-drag-strip {
     transform 0.32s cubic-bezier(0.34,1.56,0.64,1),
     box-shadow 0.24s ease,
     filter 0.24s ease,
-    background 0.28s ease,
     border-color 0.24s ease;
+  -webkit-app-region: no-drag;
 }
 
 .engine-status-orb::before {
   content: "";
   position: absolute;
-  inset: 4px;
+  inset: 0;
   border-radius: 50%;
-  background:
-    conic-gradient(
-      from 0deg,
-      transparent 0deg,
-      transparent 38deg,
-      var(--orb-ring) 58deg,
-      transparent 86deg,
-      transparent 176deg,
-      rgba(255,255,255,0.20) 218deg,
-      transparent 268deg,
-      transparent 360deg
-    );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-  opacity: 0.78;
-  animation: engineOrbSpin 4.8s linear infinite;
+  background: radial-gradient(circle at 50% 50%, var(--accent-glow), transparent 62%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.24s ease;
 }
 
 .engine-status-orb::after {
   content: "";
   position: absolute;
-  inset: 3px;
+  inset: 2px;
   border-radius: 50%;
   background:
-    linear-gradient(150deg, rgba(255,255,255,0.28), transparent 36%),
-    radial-gradient(circle at 66% 72%, rgba(255,255,255,0.10), transparent 34%),
-    radial-gradient(circle at 50% 115%, var(--orb-halo), transparent 44%);
+    linear-gradient(150deg, rgba(255,255,255,0.22), transparent 38%),
+    radial-gradient(circle at 70% 74%, rgba(255,255,255,0.08), transparent 34%);
   pointer-events: none;
 }
 
-.engine-status-orb.online {
-  --orb-main: rgba(0, 229, 160, 0.54);
-  --orb-deep: rgba(0, 84, 68, 0.88);
-  --orb-core: var(--success);
-  --orb-ring: rgba(0, 229, 160, 0.88);
-  --orb-glow: rgba(0, 229, 160, 0.34);
-  --orb-halo: rgba(0, 200, 255, 0.16);
-  border-color: rgba(0, 229, 160, 0.30);
-}
-
+.engine-status-orb.online,
 .engine-status-orb.offline,
 .engine-status-orb.connecting {
-  --orb-main: rgba(255, 77, 77, 0.56);
-  --orb-deep: rgba(86, 14, 26, 0.9);
-  --orb-core: var(--error);
-  --orb-ring: rgba(255, 77, 77, 0.86);
-  --orb-glow: rgba(255, 77, 77, 0.34);
-  --orb-halo: rgba(255, 77, 77, 0.14);
-  border-color: rgba(255, 77, 77, 0.30);
+  border-color: var(--border-hi);
+  color: var(--accent);
 }
 
-.engine-status-orb:hover {
+.engine-status-orb:hover,
+.engine-status-orb:focus-visible {
+  border-color: var(--border-focus);
   transform:
     perspective(700px)
     rotateX(var(--orb-tilt-x))
@@ -755,6 +726,12 @@ body.macos .window-drag-strip {
     translateY(-3px)
     scale(1.1);
   filter: saturate(1.08) brightness(1.08);
+  outline: none;
+}
+
+.engine-status-orb:hover::before,
+.engine-status-orb:focus-visible::before {
+  opacity: 1;
 }
 
 .engine-status-orb:active {
@@ -768,30 +745,46 @@ body.macos .window-drag-strip {
 }
 
 .engine-status-orb .status-dot {
-  position: absolute;
-  inset: 11px;
-  width: auto;
-  height: auto;
-  border-radius: 50%;
+  position: relative;
+  inset: auto;
+  width: 58%;
+  height: 58%;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: currentColor;
+  animation: none;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.engine-status-orb .status-dot svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0.92;
+  filter: drop-shadow(0 0 7px var(--accent-glow));
+}
+
+.engine-status-orb .status-dot.online,
+.engine-status-orb .status-dot.offline,
+.engine-status-orb .status-dot.connecting {
+  color: currentColor;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+
+[data-theme="light"] .engine-status-orb {
   background:
-    radial-gradient(circle, rgba(255,255,255,0.95) 0 16%, var(--orb-core) 38%, rgba(255,255,255,0.12) 62%, transparent 72%);
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.9), transparent 36%),
+    linear-gradient(145deg, rgba(255,255,255,.94), rgba(236,243,250,.9));
   box-shadow:
-    0 0 10px var(--orb-glow),
-    0 0 22px var(--orb-halo);
-  animation: engineOrbPulse 2.4s ease-in-out infinite;
-}
-
-.engine-status-orb.connecting .status-dot {
-  animation-duration: 0.85s;
-}
-
-@keyframes engineOrbSpin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes engineOrbPulse {
-  0%, 100% { opacity: 0.72; transform: scale(0.78); }
-  50% { opacity: 0.28; transform: scale(1.25); }
+    0 8px 22px rgba(0,50,120,.12),
+    0 0 0 1px rgba(255,255,255,.70) inset,
+    inset 0 1px 8px rgba(255,255,255,.55);
 }
 
 .engine-status-panel {
