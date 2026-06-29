@@ -186,14 +186,16 @@ Response shape:
 
 ### `POST /detect` and `POST /api/detect`
 
-Runs local object detection for the RGB Camera / 3D workflow. Detector weights and optional dependencies may be unavailable on a machine; in that case the endpoint returns a structured detector-unavailable error with remediation details instead of silently falling back.
+Runs local TorchVision COCO object detection for the RGB Camera / 3D workflow using `fasterrcnn_mobilenet_v3_large_320_fpn`. It is an RGB preview/capture aid, not a depth model. Detector weights and optional dependencies may be unavailable on a machine; in that case the endpoint returns a structured detector-unavailable error with remediation details instead of silently falling back.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `file` | file | **required** | Input image; max upload limit follows the backend upload limit |
+| `file` | file | **required** | Input image; max upload limit follows the backend upload limit and detector processing caps the internal long edge at 960 px |
 | `device` | string | `auto` | Runtime device selection |
 | `threshold` | float | `0.35` | Detection confidence threshold; valid range `0.05` to `0.95` |
 | `max_detections` | integer | `5` | Maximum detections to return; valid range `1` to `20` |
+
+The response includes `detections`, `model`, `device_used`, `latency_ms`, and the processed `resolution`. MPS requests are resolved to CPU for this detector, and failed non-CPU inference is retried once on CPU.
 
 ---
 

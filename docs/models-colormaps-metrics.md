@@ -4,13 +4,13 @@
 
 ### Supported Models
 
-| Canonical ID | Display name | Architecture | Input size | Recommended use |
-|---|---|---|---:|---|
-| `midas_small` | MiDaS Small | MiDaS small / EfficientNet-Lite | 256×256 | Fast previews, CPU-only, webcam |
-| `dpt_hybrid` | DPT Hybrid | DPT Hybrid / ViT-Hybrid | 384×384 | Balanced quality and speed |
-| `dpt_large` | DPT Large | DPT Large / ViT-Large | 384×384 | Maximum detail; GPU required for practical speed |
+| Canonical ID | Display name | Architecture | Input size | ONNX file | Recommended use |
+|---|---|---|---:|---|---|
+| `midas_small` | MiDaS Small | MiDaS small / EfficientNet-Lite | 256×256 | `midas_small.onnx` | Fast previews, CPU-friendly runs, webcam |
+| `dpt_hybrid` | DPT Hybrid | DPT Hybrid / ViT-Hybrid | 384×384 | `dpt_hybrid.onnx` | Balanced quality/speed when a GPU or fast CPU is available |
+| `dpt_large` | DPT Large | DPT Large / ViT-Large | 384×384 | `dpt_large.onnx` | Highest-detail option; GPU-preferred for practical latency |
 
-Model names are normalised to canonical IDs automatically. All of these resolve to `midas_small`:
+Model names are normalised to canonical IDs automatically. Standard PyTorch use does not require ONNX files; ONNX Runtime is used only when requested or automatic selection finds a valid local graph. All of these resolve to `midas_small`:
 
 ```
 MiDaS_small  /  MiDaS Small  /  midas_small  /  midas-small  /  MiDaS-Small

@@ -53,6 +53,7 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX Runtime p
 - [What DepthLens Pro does](#what-depthlens-pro-does)
 - [Why it is technically strong](#why-it-is-technically-strong)
 - [What I built vs third-party components](#what-i-built-vs-third-party-components)
+- [Model and detector specifications](#model-and-detector-specifications)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Feature tour](#feature-tour)
 - [Quick Start](#quick-start)
@@ -120,6 +121,21 @@ DepthLens Pro is an application-engineering project built around established mon
 | 3D export workflow | Approximate point-cloud generation controls, PLY/OBJ export flow, preview sampling, and coordinate-system options. | NumPy/OpenCV-style image and array processing. |
 | Testing and packaging | Lightweight backend tests, Electron contract tests, CI gates, setup/build scripts, and packaged-resource verification. | GitHub Actions, pytest, npm tooling, Pillow, and first-party Canvas 2D chart helpers. |
 
+
+---
+
+
+## Model and detector specifications
+
+DepthLens Pro exposes three MiDaS/DPT depth backbones through one registry and can optionally use locally generated ONNX Runtime graphs for the same model IDs.
+
+| Model | Runtime ID / ONNX file | Input | Best fit |
+|---|---|---:|---|
+| MiDaS Small | `midas_small` / `midas_small.onnx` | 256×256 | Fast previews, CPU-friendly runs, and quick comparisons. |
+| DPT Hybrid | `dpt_hybrid` / `dpt_hybrid.onnx` | 384×384 | Balanced quality/speed when a GPU or fast CPU is available. |
+| DPT Large | `dpt_large` / `dpt_large.onnx` | 384×384 | Highest-detail option; best treated as GPU-preferred for practical latency. |
+
+ONNX files are optional for standard PyTorch use and are validated locally before ONNX builds. The 3D tab’s camera capture preview uses a separate local TorchVision COCO detector, `fasterrcnn_mobilenet_v3_large_320_fpn`, on downscaled RGB frames to surface object labels before capture; it does not replace the depth model used for point-cloud reconstruction.
 
 ---
 
