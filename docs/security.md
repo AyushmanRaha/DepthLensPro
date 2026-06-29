@@ -24,7 +24,7 @@ DepthLens Pro is designed as a local-first desktop ML tool. The security model a
 
 - Uploaded images are processed locally and never leave the machine.
 - The backend listens on `127.0.0.1` by default; Docker mode exposes the port according to your Compose port mapping.
-- First-time PyTorch model loading may download model weights from Torch Hub (GitHub/CDN) if they are not already cached at `~/.cache/torch/hub`.
+- First-time PyTorch model loading or RGB detector setup may download model weights from Torch Hub/TorchVision sources if they are not already cached in the configured Torch cache.
 - ONNX files are generated locally and stored under `models/onnx/`.
 
 ### Reporting Vulnerabilities
@@ -50,4 +50,4 @@ See [`SECURITY.md`](../SECURITY.md) for the full policy.
 
 The packaged frontend renders charts with first-party Canvas 2D helpers in `frontend/js/charts.js`; runtime chart rendering does not require a CDN script or vendored Chart.js bundle. Backend CORS defaults to local Electron/browser development origins (`localhost`, `127.0.0.1`, and file/null-origin flows) with credentials disabled. Set `DEPTHLENS_CORS_ALLOWED_ORIGINS` for additional comma-separated local origins or `DEPTHLENS_CORS_ALLOW_ALL=1` only for isolated development troubleshooting.
 
-JSON logs and observability crash messages are sanitized before storage/output. Log messages, exception messages, stack traces, stack info, and structured extra fields redact home directories, Windows/Unix paths, image filenames, cache-like tokens, token-like strings, and long base64-like strings from default diagnostics. Electron settings IPC accepts only the persisted settings schema and rejects unknown keys, prototype-pollution-like payloads, functions, symbols, and unexpected nested objects.
+JSON logs and observability crash messages are sanitized before storage/output; raw image payloads are not logged by the application telemetry paths. Log messages, exception messages, stack traces, stack info, and structured extra fields redact home directories, Windows/Unix paths, image filenames, cache-like tokens, token-like strings, and long base64-like strings from default diagnostics. Electron settings IPC accepts only the persisted settings schema and rejects unknown keys, prototype-pollution-like payloads, functions, symbols, and unexpected nested objects.
