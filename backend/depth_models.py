@@ -173,7 +173,22 @@ class ONNXExecutionEngine:
                 tuple(batch.shape),
                 exc,
             )
-            raise RuntimeError("ONNX Runtime inference failed") from exc
+            diagnostics = {
+                "onnx_failure_stage": "execution",
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "providers_used": list(self.providers),
+                "input_names": [i.name for i in self.session.get_inputs()],
+                "output_names": [o.name for o in self.session.get_outputs()],
+                "input_shape": list(batch.shape),
+                "input_dtype": str(batch.dtype),
+                "model_id": self.model_id,
+                "device_requested": self.provider,
+            }
+            err: Any = RuntimeError(f"ONNX Runtime execution failed: {type(exc).__name__}: {exc}")
+            err.onnx_failure_stage = "execution"
+            err.diagnostics = diagnostics
+            raise err from exc
         pred = np.asarray(outputs[0], dtype=np.float32)
         pred = np.squeeze(pred)
         return resize_onnx_depth(pred, img_rgb.shape[:2])

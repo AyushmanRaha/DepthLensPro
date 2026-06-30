@@ -185,14 +185,67 @@ def _infer_with_metadata(
             }
         except Exception as exc:
             fallback_reason = f"{type(exc).__name__}: {exc}"
-            warnings.append("ONNX session failed; used PyTorch fallback")
+            onnx_diag = getattr(exc, "diagnostics", {}) or {}
+            cpu_available = "CPUExecutionProvider" in (
+                onnx_diag.get("available_providers")
+                or selection.get("available_providers")
+                or selection.get("providers_used")
+                or []
+            )
+            current_providers = selection.get("providers_used") or []
+            provider_used = current_providers[0] if current_providers else ""
+            if cpu_available and provider_used != "CPUExecutionProvider":
+                try:
+                    cpu_engine, cpu_lock = _load_onnx_engine_with_lock(model_id, "cpu")
+                    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                    with cpu_lock:
+                        depth = cpu_engine.forward(rgb)
+                    warnings.append(
+                        "ONNX preferred provider failed; used CPUExecutionProvider fallback"
+                    )
+                    return _normalize_depth(depth), {
+                        "model_id": model_id,
+                        "model_display_name": spec.display_name,
+                        "engine_requested": requested,
+                        "engine_used": "onnxruntime",
+                        "device_requested": device_str,
+                        "device_used": "CPUExecutionProvider",
+                        "fallback_used": False,
+                        "fallback_reason": None,
+                        "provider_fallback_used": True,
+                        "providers_used": ["CPUExecutionProvider"],
+                        "onnx_failure_stage": getattr(exc, "onnx_failure_stage", "execution"),
+                        "onnx_diagnostics": onnx_diag,
+                        "provider_failure_chain": [fallback_reason],
+                        "engine_selection": {**selection, "provider_fallback_used": True},
+                        "warnings": warnings,
+                        "onnx": resolved,
+                    }
+                except Exception as cpu_exc:
+                    fallback_reason = (
+                        f"{fallback_reason}; CPUExecutionProvider retry failed: "
+                        f"{type(cpu_exc).__name__}: {cpu_exc}"
+                    )
+                    onnx_diag = getattr(cpu_exc, "diagnostics", onnx_diag)
+            warnings.append("ONNX execution failed; used PyTorch fallback")
             resolved = {**resolved, "runtime_error": fallback_reason}
             selection = {
                 **selection,
                 "source": "fallback",
                 "reason": "ONNX unavailable; PyTorch selected",
             }
-            if requested == "onnxruntime" or selected_engine == "onnxruntime":
+            if requested == "onnxruntime_strict":
+                strict: Any = RuntimeError(
+                    f"ONNX Runtime failed during execution: {fallback_reason}"
+                )
+                strict.error_code = "ONNX_RUNTIME_FAILED"
+                strict.onnx_failure_stage = getattr(exc, "onnx_failure_stage", "execution")
+                strict.onnx_diagnostics = getattr(exc, "diagnostics", resolved)
+                raise strict from exc
+            if (
+                requested in {"onnxruntime", "onnxruntime_prefer"}
+                or selected_engine == "onnxruntime"
+            ):
                 depth = _infer_torch(img_bgr, model_id, device_str)
                 return depth, {
                     "model_id": model_id,
@@ -204,6 +257,8 @@ def _infer_with_metadata(
                     "fallback_used": True,
                     "fallback_reason": fallback_reason,
                     "onnx_failure_reason": fallback_reason,
+                    "onnx_failure_stage": getattr(exc, "onnx_failure_stage", "execution"),
+                    "onnx_diagnostics": getattr(exc, "diagnostics", resolved),
                     "provider_failure_chain": selection.get("provider_failure_chain"),
                     "engine_selection": selection,
                     "onnx_path": resolved.get("onnx_path") or resolved.get("expected_path"),
@@ -211,7 +266,7 @@ def _infer_with_metadata(
                     "onnx": resolved,
                 }
 
-    if requested == "onnxruntime" and selected_engine != "onnxruntime":
+    if requested in {"onnxruntime", "onnxruntime_prefer"} and selected_engine != "onnxruntime":
         warnings.append("ONNX session failed; used PyTorch fallback")
         fallback_reason = selection.get("reason") or "ONNX unavailable"
 
@@ -223,7 +278,7 @@ def _infer_with_metadata(
         "engine_used": "pytorch",
         "device_requested": device_str,
         "device_used": device_str,
-        "fallback_used": requested == "onnxruntime" and bool(warnings),
+        "fallback_used": requested in {"onnxruntime", "onnxruntime_prefer"} and bool(warnings),
         "fallback_reason": fallback_reason,
         "engine_selection": selection,
         "onnx_path": resolved.get("onnx_path") or resolved.get("expected_path"),

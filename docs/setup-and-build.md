@@ -602,3 +602,8 @@ docker compose down
 Root npm installs are not part of the project setup. Use `npm --prefix electron-app ...`; the expected lockfile is `electron-app/package-lock.json`.
 
 Note: ONNX builds verify and package all ONNX assets, but Auto Recommended may choose PyTorch for models/providers where PyTorch is faster.
+
+
+### Four-step setup verification updates
+
+The four repeatable steps remain clone, setup, build, and launch. Setup creates the expected `venv`, installs backend runtime/dev requirements, installs Electron dependencies, caches MiDaS/DPT Torch Hub assets and detector weights unless explicitly skipped, and validates or exports ONNX files when ONNX setup is selected. Setup and packaged runtime set `DEPTHLENSPRO_MODEL_DIR`, `DEPTHLENS_ONNX_DIR`, `TORCH_HOME`, and packaged/offline flows set `DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1`. Finish release preparation with `npm --prefix electron-app run verify:resources -- --mode release --onnx require-all --models all --torch-cache required --detector-cache required`.

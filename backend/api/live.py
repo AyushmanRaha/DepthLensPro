@@ -35,15 +35,21 @@ async def live() -> dict[str, Any]:
         _FIRST_LIVE_REQUEST_LOGGED = True
     now = time.time()
     try:
-        from backend.services.runtime_state import benchmark_busy
+        from backend.services.runtime_state import snapshot
 
-        busy = benchmark_busy()
+        runtime = snapshot()
     except Exception:
-        busy = False
+        runtime = {"busy": False, "active_operations": {}, "total_active_operations": 0}
+    busy = bool(runtime.get("busy"))
     return {
         "status": "ok",
         "busy": busy,
         "state": "busy" if busy else "idle",
+        "active_operations": runtime.get("active_operations", {}),
+        "total_active_operations": runtime.get("total_active_operations", 0),
+        "last_operation": runtime.get("last_operation"),
+        "last_operation_started_at": runtime.get("last_operation_started_at"),
+        "last_operation_finished_at": runtime.get("last_operation_finished_at"),
         "service": "DepthLens Pro API",
         "version": SERVICE_VERSION,
         "pid": os.getpid(),

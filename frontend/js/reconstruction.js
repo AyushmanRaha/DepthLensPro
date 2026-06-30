@@ -214,7 +214,7 @@ async function warmupCaptureDetector() {
     cap.detectAbort = controller;
     const res = await apiFetch(`/api/detect/status?warmup=true&device=${encodeURIComponent(selDevice?.() || "auto")}`, { signal: requestSignal(controller.signal, 60000) });
     const payload = await res.json();
-    if (payload.available || payload.state === "ready") { renderCaptureDetections({ status: "Detector ready" }); scheduleCaptureDetection(250); }
+    if (payload.available || payload.state === "ready") { renderCaptureDetections({ status: "Detector loaded · detecting…" }); scheduleCaptureDetection(250); }
     else { renderCaptureDetections({ error: payload.message || "Detector unavailable — capture still works" }); scheduleCaptureDetection(5000); }
   } catch (err) {
     if (err?.name !== "AbortError") renderCaptureDetections({ error: "Detector unavailable — capture still works" });
@@ -239,7 +239,8 @@ async function runCaptureDetectionOnce() {
     form.append("max_detections", "5");
     const response = await apiFetch("/api/detect", { method: "POST", body: form, signal: requestSignal(controller.signal, 20000) });
     const payload = await response.json();
-    renderCaptureDetections(payload.detections || []);
+    cap.detectionFailures = 0;
+    renderCaptureDetections(payload);
   } catch (err) {
     if (err?.name !== "AbortError") { cap.detectionFailures = (cap.detectionFailures || 0) + 1; renderCaptureDetections({ error: err?.payload?.detail || err?.message || "Detector unavailable — capture still works" }); }
   } finally {
@@ -257,9 +258,11 @@ function renderCaptureDetections(detections) {
     return;
   }
   if (detections === null) { el.captureDetections.textContent = "Detector unavailable"; return; }
-  const visible = (detections || []).filter(d => Number(d.score) >= 0.35).slice(0, 3);
+  const threshold = Number(detections?.threshold || 0.35);
+  const items = Array.isArray(detections) ? detections : (detections?.detections || []);
+  const visible = (items || []).filter(d => Number(d.score) >= threshold).slice(0, 3);
   state.reconstruct.capture.lastDetections = visible;
-  if (!visible.length) { el.captureDetections.textContent = withCaptureModalOpen() ? "No object detected" : "Detecting…"; return; }
+  if (!visible.length) { el.captureDetections.textContent = withCaptureModalOpen() ? `No object detected · threshold ${threshold}` : "Detecting…"; return; }
   el.captureDetections.innerHTML = visible.map(d => `<div class="capture-detection-label"><span>${esc(d.label || "object")}</span><span>${Math.round(Number(d.score || 0) * 100)}%</span></div>`).join("");
 }
 

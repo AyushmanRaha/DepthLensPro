@@ -22,7 +22,8 @@ async function runComparison() {
   if (!state.compareFile) return;
   const cmap=el.compareCmap.value, device=el.compareDevice.value;
   const engine = el.compareEngine?.value || selEngine?.() || "auto";
-  const models=["midas_small","dpt_hybrid","dpt_large"];
+  const includeLarge = Boolean(el.compareIncludeLarge?.checked);
+  const models=["midas_small","dpt_hybrid",...(includeLarge?["dpt_large"]:[])];
   state.compareAbort=new AbortController();
   el.compareRunBtn.disabled=true; el.compareCancelBtn.hidden=false;
   state.compareView.results=[];
@@ -36,46 +37,44 @@ async function runComparison() {
       return;
     }
   }
-  const results=[], t0=Date.now();
+  const t0=Date.now();
+  const tick=setInterval(()=>{
+    const elapsed=Date.now()-t0;
+    const pct=Math.min(98, (elapsed / Math.max(1, models.reduce((acc,m)=>acc+getEstimate("compare",m,device),0))) * 100);
+    el.compareProgressFill.style.width=`${pct}%`;
+    el.compareProgressPct.textContent=`${Math.round(pct)}%`;
+    el.compareProgressText.textContent=`Running comparison · ${prettyEngineName(engine)}`;
+    el.compareProgressEta.textContent=`Elapsed ${fmtDuration(elapsed)}`;
+  },120);
   try {
-  for (let i=0;i<models.length;i++) {
-    if (state.compareAbort.signal.aborted) break;
-    const model=models[i];
-    const estCurrent=getEstimate("compare",model,device);
-    const estRemainingStatic=models.slice(i+1).reduce((acc,m)=>acc+getEstimate("compare",m,device),0);
-    const modelStart=Date.now();
-    const tick=setInterval(()=>{
-      const elapsedCurrent=Date.now()-modelStart;
-      const unitDone=i+Math.min(elapsedCurrent/estCurrent,0.98);
-      const pct=Math.min((unitDone/models.length)*100,99);
-      const rem=Math.max(0,estCurrent-elapsedCurrent+estRemainingStatic);
-      el.compareProgressFill.style.width=`${pct}%`;
-      el.compareProgressPct.textContent=`${Math.round(pct)}%`;
-      el.compareProgressText.textContent=`Running ${model} · ${prettyEngineName(engine)}`;
-      el.compareProgressEta.textContent=`ETA ${fmtDuration(rem)}`;
-    },120);
-    try {
-      const r=await inferOne(state.compareFile,model,cmap,device,state.compareAbort.signal,"full","color,gray",null,false,getInteractiveMaxDim(),engine);
-      clearInterval(tick); updateEstimate("compare",model,device,r.latency_ms);
-      results.push(r); renderCompareCard(r);
-    } catch(err) {
-      clearInterval(tick);
-      if (err.name!=="AbortError") toast(`${model} failed · ${err.message}`,"error");
-    }
-  }
-  el.compareProgressFill.style.width="100%"; el.compareProgressPct.textContent="100%";
-  el.compareProgressText.textContent=state.compareAbort.signal.aborted?"Cancelled":"Comparison complete";
-  el.compareProgressEta.textContent=`Total ${fmtDuration(Date.now()-t0)}`;
-  if (results.length) {
+    const fd=new FormData();
+    fd.append("file", state.compareFile);
+    fd.append("models", models.join(","));
+    fd.append("colormap", cmap);
+    fd.append("device", device);
+    fd.append("metrics", "full");
+    fd.append("outputs", "color,gray");
+    fd.append("engine", engine);
+    const res=await apiFetch("/api/compare", { method:"POST", body:fd, signal: requestSignal(state.compareAbort.signal, includeLarge ? 300000 : 180000) });
+    const payload=await res.json();
+    const results=payload.results || [];
+    const errors=payload.errors || [];
+    clearInterval(tick);
+    el.compareProgressFill.style.width="100%"; el.compareProgressPct.textContent="100%";
+    el.compareProgressText.textContent=errors.length ? "Comparison completed with failures" : "Comparison complete";
+    el.compareProgressEta.textContent=`Total ${fmtDuration(Date.now()-t0)}`;
+    results.forEach(r => { updateEstimate("compare", r.model_id || r.model, device, r.latency_ms || getEstimate("compare", r.model_id || r.model, device)); renderCompareCard(r); });
+    errors.forEach(renderCompareErrorCard);
     state.compareView.results=results;
-    renderCompareSummary(results);
-    renderCompareChart(results,state.compareView.metricKey);
-    toast("Comparison complete","success");
-  }
+    if (results.length) { renderCompareSummary(results); renderCompareChart(results,state.compareView.metricKey); }
+    if (errors.length) toast(`Comparison completed with failures · ${errors.length}/${payload.total || models.length} failed`,"warning",7000);
+    else toast("Comparison complete","success");
   } catch (err) {
-    el.compareProgressText.textContent="Comparison failed";
-    el.compareProgressEta.textContent=err.message || "Depth inference failed";
-    toast(`Comparison failed · ${err.message}`, "error", 6000);
+    clearInterval(tick);
+    const aborted = err.name==="AbortError" || state.compareAbort?.signal.aborted;
+    el.compareProgressText.textContent=aborted ? "Comparison cancelled" : "Comparison failed";
+    el.compareProgressEta.textContent=aborted ? "Cancelled by user" : (err.message || "Depth inference failed");
+    if (!aborted) toast(`Comparison failed · ${err.message}`, "error", 6000);
   } finally {
     setTimeout(()=>{ el.compareProgressBlock.hidden=true; },2500);
     el.compareRunBtn.disabled=false; el.compareCancelBtn.hidden=true; state.compareAbort=null;
@@ -96,5 +95,14 @@ function renderCompareCard(r) {
   el.compareResults.appendChild(card);
 }
 
+
+function renderCompareErrorCard(error) {
+  $(".compare-placeholder")?.remove();
+  const card=document.createElement("div"); card.className="compare-card compare-card-error";
+  const name=error.model_display_name || error.model || error.model_id || "Model";
+  const reason=error.message || error.technical_detail || error.error || "Model failed";
+  card.innerHTML=`<div class="compare-card-header">${esc(name)} <span class="latency-badge">failed</span></div><div class="compare-warning">${esc(reason)}</div>`;
+  el.compareResults.appendChild(card);
+}
 
 // ══════════════════════════════════════════════════════════════

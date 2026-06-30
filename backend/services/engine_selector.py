@@ -12,7 +12,7 @@ from backend.model_registry import normalize_model_id, resolve_onnx_path
 from backend.services.onnx_diagnostics import create_onnx_session, onnx_runtime_info
 
 ENGINE_SELECTION_MARGIN = 0.90
-ENGINE_CHOICES = {"auto", "pytorch", "onnxruntime"}
+ENGINE_CHOICES = {"auto", "pytorch", "onnxruntime", "onnxruntime_prefer", "onnxruntime_strict"}
 _SERVICE_VERSION = "engine-selector-v1"
 _DECISIONS: dict[str, dict[str, Any]] = {}
 _LOCK = threading.RLock()
@@ -20,7 +20,14 @@ _LOCK = threading.RLock()
 
 def normalize_engine_mode(value: str | None, *, allow_both: bool = False) -> str:
     mode = (value or "auto").strip().lower().replace("-", "_")
-    aliases = {"onnx": "onnxruntime", "ort": "onnxruntime"}
+    aliases = {
+        "onnx": "onnxruntime",
+        "ort": "onnxruntime",
+        "onnx_prefer": "onnxruntime_prefer",
+        "ort_prefer": "onnxruntime_prefer",
+        "onnx_strict": "onnxruntime_strict",
+        "ort_strict": "onnxruntime_strict",
+    }
     if allow_both:
         aliases.update({"compare": "both"})
     mode = aliases.get(mode, mode)
@@ -192,13 +199,15 @@ def select_engine_for_inference(
 
     if mode == "pytorch":
         return decision("pytorch", "forced", "PyTorch forced by request")
-    if mode == "onnxruntime":
+    if mode in {"onnxruntime", "onnxruntime_prefer", "onnxruntime_strict"}:
         if state["session_available"]:
             reason = "ONNX Runtime forced by request"
             if state["provider_fallback_used"]:
                 reason += "; preferred provider failed, using ONNX CPU provider fallback"
             return decision("onnxruntime", "forced", reason)
         reason = state["onnx_failure_reason"] or "ONNX Runtime session unavailable"
+        if mode == "onnxruntime_strict":
+            return decision("onnxruntime", "strict_unavailable", reason, None)
         return decision("pytorch", "forced_fallback", reason, "pytorch")
 
     key = decision_key(model_id, device, sig, fp)

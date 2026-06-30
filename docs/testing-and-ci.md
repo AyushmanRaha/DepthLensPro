@@ -95,3 +95,8 @@ Do not run `npm install` at the repository root. The tracked npm lockfile belong
 Electron frontend contract tests also verify chart canvas presence, script ordering, no runtime chart CDN/placeholder dependency, and first-party chart rendering with lightweight fake Canvas 2D contexts.
 
 - CI covers adaptive engine selector behavior, benchmark warmup/recommendation metadata, and frontend contract coverage for the new runtime controls.
+
+
+### Runtime regression coverage
+
+Tests cover import-light `/live`, runtime activity counters, Compare partial failures, ONNX prefer/strict fallback copy, DPT Large opt-in contracts, detector loaded/detecting/no-object UI states, and resource verification modes. Keep these tests deterministic with mocked models/sessions and downloads disabled.
