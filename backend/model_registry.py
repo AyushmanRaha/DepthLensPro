@@ -33,6 +33,11 @@ class ModelSpec:
     onnx_supported: bool
     onnx_filename: str
     recommended_device: str
+    heavy_model: bool = False
+    recommended_for_batch: bool = True
+    recommended_for_compare_default: bool = True
+    minimum_memory_hint: str | None = None
+    expected_runtime_hint: str | None = None
     notes: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -85,7 +90,15 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         onnx_supported=True,
         onnx_filename="dpt_large.onnx",
         recommended_device="gpu_required_for_speed",
-        notes="Largest supported model; ONNX export is optional and may fail on some runtimes.",
+        heavy_model=True,
+        recommended_for_batch=False,
+        recommended_for_compare_default=False,
+        minimum_memory_hint="8 GB+ system memory; GPU/accelerator strongly recommended",
+        expected_runtime_hint="High quality but slow; can take much longer on CPU/MPS",
+        notes=(
+            "Largest supported model; opt in for Compare/benchmarks because it is slow "
+            "and memory-heavy."
+        ),
     ),
 }
 

@@ -281,3 +281,14 @@ Returns local camera detector readiness without requiring an image upload. By de
 ### Liveness versus readiness
 
 `GET /live` is process liveness only and does not import inference runtimes or scan model assets. Use `/ready`, `/health`, and `/onnx/status` for deeper diagnostics. ONNX status distinguishes an asset being present from a verified runtime session; forced ONNX Runtime attempts the preferred provider first, then a CPUExecutionProvider ONNX fallback before using PyTorch fallback.
+
+
+### Liveness, readiness, and activity
+
+`GET /live` is import-light process liveness. It returns `busy`, `state`, `active_operations`, `total_active_operations`, timestamps, PID, service, version, and uptime. It does not import Torch, OpenCV, NumPy, ONNX Runtime, inference services, detector services, or model assets. `GET /ready` reports runtime readiness, and `GET /health` reports diagnostics that may be stale or degraded without meaning the engine is dead.
+
+Compare responses include `results[]`, `errors[]`, `succeeded`, `failed`, and `total`. Per-model errors include the model id/display name, `error_code`, user message, technical detail, requested engine/device, and elapsed time when available.
+
+Inference engine values are `auto`, `pytorch`, `onnxruntime_prefer`, and `onnxruntime_strict`; the legacy `onnxruntime` value remains accepted as prefer-mode compatibility. ONNX execution failures report stage-specific diagnostics such as `onnx_failure_stage=execution`, provider names, inputs/outputs, input shape/dtype, exception type, and root exception message.
+
+`/api/detect/status` uses `ready` to mean the detector model is loaded. `/api/detect` reports `detections`, `detection_count`, `threshold`, `max_detections`, `model_loaded`, `device_used`, and `latency_ms`; an empty list is a successful “no object detected” result.

@@ -125,3 +125,8 @@ Packaged backend environments use runtime dependencies from `backend/requirement
 Packaged frontend resources must include `frontend/js/charts.js`, which provides the local Canvas 2D chart renderer verified by Electron resource checks.
 
 Packaged ONNX assets are availability inputs for Auto Recommended engine selection, not a forced runtime policy.
+
+
+### Release resource verification
+
+Resource verification supports `basic`, `native`, and `release` modes. `release` is the packaging gate: it fails when backend/frontend files, the venv/Python executable, required PyTorch model cache, detector cache, or advertised ONNX files are missing. Optional checks may warn and pass for development only; they should not be used for release packaging. If the UI advertises ONNX acceleration, package all required ONNX files or run release verification with ONNX disabled only for a build that hides that feature.

@@ -100,6 +100,7 @@ const el = {
   compareCmap:           $("#compareCmap"),
   compareDevice:         $("#compareDevice"),
   compareEngine:         $("#compareEngine"),
+  compareIncludeLarge:   $("#compareIncludeLarge"),
   compareResults:        $("#compareResults"),
   compareProgressBlock:  $("#compareProgressBlock"),
   compareProgressFill:   $("#compareProgressFill"),

@@ -468,3 +468,8 @@ ONNX native builds package the exported ONNX assets, while Auto Recommended choo
 ### Runtime diagnostics notes
 
 The `/live` endpoint is deliberately lightweight and should remain safe even when Torch, OpenCV, ONNX Runtime, model assets, or detector weights are missing. Use `/ready`, `/health`, and `/onnx/status` for deeper diagnostics. ONNX files being present only proves asset availability; DepthLens verifies ONNX Runtime session availability separately and can use CPUExecutionProvider as an ONNX provider fallback before falling back to PyTorch. The Compare tab has an engine selector, and the 3D camera detector warms up through `/api/detect/status` while keeping image capture usable if detection is unavailable.
+
+
+### Runtime reliability changes
+
+DepthLens now treats `/live` as lightweight process liveness plus activity only. The renderer reports **Depth engine live**, **busy**, **delayed**, or **offline** separately from `/ready` runtime readiness and `/health` diagnostics. A delayed live probe during an active inference/compare/reconstruct/detect/benchmark operation does not mark the backend offline. Compare defaults to MiDaS Small and DPT Hybrid; DPT Large remains supported but is opt-in because it is high quality, slow, memory-heavy, and may require a GPU. ONNX engine choices are Auto, Prefer ONNX Runtime, Force ONNX Runtime Strict, and Force PyTorch. Prefer mode can use ONNX CPU provider fallback before PyTorch fallback; Strict mode returns a structured ONNX error instead of silently returning PyTorch.

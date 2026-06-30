@@ -263,3 +263,24 @@ curl http://127.0.0.1:8765/api/detect/status
 ONNX asset availability is not the same as ONNX Runtime session availability. Packaged builds may contain `.onnx` files while a preferred execution provider is unavailable or unable to create a session. When **Force ONNX Runtime** is selected, DepthLens tries the preferred provider first and then retries a generic `CPUExecutionProvider` ONNX Runtime session when available. PyTorch fallback is used only when ONNX Runtime cannot create any valid session, the file is missing or empty, or `onnxruntime` cannot be imported.
 
 The Compare tab includes its own engine selector and forwards that choice to every model run. The 3D camera detector now exposes `/api/detect/status` and warms up the TorchVision detector before polling frames; capture remains usable if detector dependencies or weights are unavailable. Packaged builds should include detector weights under the documented Torch cache or run setup with detector prefetch enabled.
+
+
+### Depth engine delayed/offline
+
+“Depth engine delayed” means the last live probe timed out or was slow, but recent liveness/readiness or an active frontend operation still indicates the backend may be working. Do not restart solely because inference is running. “Depth engine offline” is reserved for stronger failures such as connection refusal or repeated failures with no active operation and no recent readiness.
+
+### ONNX failures
+
+Prefer ONNX Runtime first tries the selected provider, then CPUExecutionProvider when safe, then PyTorch fallback if allowed. Force ONNX Runtime Strict does not fall back to PyTorch; it returns structured diagnostics with the ONNX failure stage and root exception.
+
+### DPT Large
+
+DPT Large is opt-in in Compare. It is high quality but slow and memory-heavy, especially on CPU/MPS. A DPT Large timeout is a model-specific failure, not evidence that the backend is offline.
+
+### Detector loaded but no labels
+
+“Detector loaded · detecting…” means the TorchVision model is available and polling frames. “No object detected” is a successful empty detection result at the shown threshold. Capture remains available even if the detector is unavailable.
+
+### Missing packaged resources
+
+Run `npm --prefix electron-app run verify:resources -- --mode release --onnx require-all --models all --torch-cache required --detector-cache required` before release packaging. Release mode fails on missing backend/frontend resources, venv/Python, PyTorch model cache, detector cache, or advertised ONNX files.

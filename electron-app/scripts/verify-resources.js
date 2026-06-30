@@ -5,7 +5,7 @@ const { spawnSync } = require("child_process");
 
 const DEFAULT_ROOT = path.resolve(path.join(__dirname, "..", ".."));
 const VALID_ROOT_KINDS = new Set(["repo", "packaged"]);
-const VALID_MODES = new Set(["basic", "native"]);
+const VALID_MODES = new Set(["basic", "native", "release"]);
 const VALID_ONNX_MODES = new Set(["off", "optional", "required", "require-all"]);
 const VALID_CACHE_MODES = new Set(["off", "optional", "required"]);
 const ONNX_MODELS = ["midas_small", "dpt_hybrid", "dpt_large"];
@@ -47,7 +47,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (!VALID_ROOT_KINDS.has(options.rootKind)) throw new Error(`Invalid --root-kind ${options.rootKind}; expected repo or packaged.`);
-  if (!VALID_MODES.has(options.mode)) throw new Error(`Invalid --mode ${options.mode}; expected basic or native.`);
+  if (!VALID_MODES.has(options.mode)) throw new Error(`Invalid --mode ${options.mode}; expected basic, native, or release.`);
   if (!VALID_ONNX_MODES.has(options.onnxMode)) throw new Error(`Invalid --onnx ${options.onnxMode}; expected off, optional, required, or require-all.`);
   if (!VALID_CACHE_MODES.has(options.torchCache)) throw new Error(`Invalid --torch-cache ${options.torchCache}; expected off, optional, or required.`);
   if (!VALID_CACHE_MODES.has(options.detectorCache)) throw new Error(`Invalid --detector-cache ${options.detectorCache}; expected off, optional, or required.`);
@@ -56,7 +56,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    "Usage: node scripts/verify-resources.js [--json] [--root-kind repo|packaged] [--mode basic|native] [--torch-cache off|optional|required] [--detector-cache off|optional|required] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
+    "Usage: node scripts/verify-resources.js [--json] [--root-kind repo|packaged] [--mode basic|native|release] [--torch-cache off|optional|required] [--detector-cache off|optional|required] [--onnx off|optional|required|require-all] [--models midas_small|dpt_hybrid|dpt_large|all|comma-list] [resource-root]",
     "",
     "Examples:",
     "  node scripts/verify-resources.js --root-kind repo --mode native --onnx optional ..",
@@ -142,8 +142,9 @@ function verifyResourceRoot(options = {}) {
   const mode = options.mode || "basic";
   const onnxMode = options.onnxMode || "optional";
   const onnxModels = options.onnxModels || ["midas_small"];
-  const torchCacheMode = options.torchCache || (mode === "native" ? "required" : "optional");
-  const detectorCacheMode = options.detectorCache || "optional";
+  const releaseMode = mode === "release";
+  const torchCacheMode = options.torchCache || (mode === "native" || releaseMode ? "required" : "optional");
+  const detectorCacheMode = options.detectorCache || (releaseMode ? "required" : "optional");
   const platform = options.platform || process.platform;
   const checks = [];
   const infos = [];
@@ -178,10 +179,10 @@ function verifyResourceRoot(options = {}) {
     label: `${platformPython.join(" or ")} (platform Python)`,
     full: root,
     ok: pythonOk,
-    required: true,
+    required: mode !== "basic",
   });
 
-  const requiresModelDirs = mode === "native" || onnxMode !== "off";
+  const requiresModelDirs = mode === "native" || releaseMode || onnxMode !== "off";
   addCheck("models", requiresModelDirs, isDirectory);
   addCheck(path.join("models", "onnx"), requiresModelDirs, isDirectory);
 
@@ -195,10 +196,13 @@ function verifyResourceRoot(options = {}) {
     checks.push({ rel: path.join("models", "torch-cache", "hub", "checkpoints"), label: "detector checkpoint cache", full: detectorStatus.checkpoints, ok: detectorStatus.ok, required: detectorCacheMode === "required" });
   }
 
+  const effectiveOnnxMode = releaseMode && onnxMode === "optional" ? "require-all" : onnxMode;
+  // Keep the explicit onnxMode expression for install contract tests and readability.
   const requiredModels = onnxMode === "off" || onnxMode === "optional" ? [] : (onnxMode === "require-all" ? ONNX_MODELS : onnxModels);
+  const effectiveRequiredModels = effectiveOnnxMode === "off" || effectiveOnnxMode === "optional" ? [] : (effectiveOnnxMode === "require-all" ? ONNX_MODELS : onnxModels);
   const onnxFiles = ONNX_MODELS.map((model) => ({
     rel: path.join("models", "onnx", `${model}.onnx`),
-    required: requiredModels.includes(model),
+    required: effectiveRequiredModels.includes(model),
   }));
   for (const item of onnxFiles) {
     const full = path.join(root, item.rel);
@@ -208,11 +212,11 @@ function verifyResourceRoot(options = {}) {
     if (item.required) checks.push({ rel: item.rel, label: item.rel, full, ok: exists && size > 0, required: true });
   }
 
-  const launchability = mode === "native" ? launchabilityChecks(root, pythonChecks) : null;
+  const launchability = mode === "native" || releaseMode ? launchabilityChecks(root, pythonChecks) : null;
   if (launchability) {
     checks.push({ rel: "python launch", label: "packaged/repo Python executable runs", full: launchability.python?.full || root, ok: launchability.pythonRuns.ok, required: true, detail: launchability.pythonRuns });
     checks.push({ rel: "backend.app import", label: "backend.app imports from resources", full: root, ok: launchability.backendAppImport.ok, required: true, detail: launchability.backendAppImport });
-    checks.push({ rel: "runtime imports", label: "torch/onnxruntime/cv2 import from resources", full: root, ok: launchability.requiredImports.ok, required: rootKind === "packaged", detail: launchability.requiredImports });
+    checks.push({ rel: "runtime imports", label: "torch/onnxruntime/cv2 import from resources", full: root, ok: launchability.requiredImports.ok, required: rootKind === "packaged" || releaseMode, detail: launchability.requiredImports });
   }
 
   const failed = checks.filter((check) => check.required && !check.ok);

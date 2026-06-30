@@ -782,8 +782,7 @@
               <span class="card-icon" aria-hidden="true"></span> Model Comparison
             </h2>
             <p class="compare-desc">
-              Upload one image to run all three MiDaS models side-by-side and
-              compare quality vs. speed.
+              Upload one image to compare default models side-by-side. DPT Large is opt-in because it is slow and may require a GPU.
             </p>
             <div class="drop-zone drop-zone-sm" id="compareDropZone" role="button" tabindex="0" aria-label="Upload image for comparison">
               <div class="drop-zone-inner">
@@ -811,12 +810,15 @@
               <label for="compareEngine" class="cmap-label">Engine</label>
               <select id="compareEngine" class="select-input">
                 <option value="auto">Auto Recommended</option>
-                <option value="onnxruntime">Force ONNX Runtime</option>
+                <option value="onnxruntime_prefer">Prefer ONNX Runtime</option>
+                <option value="onnxruntime_strict">Force ONNX Runtime Strict</option>
                 <option value="pytorch">Force PyTorch</option>
               </select>
+              <label class="cmap-label"><input type="checkbox" id="compareIncludeLarge" /> Include DPT Large</label>
             </div>
+            <p class="compare-desc">DPT Large is high quality but slow and may require a GPU. It can take much longer on CPU/MPS.</p>
             <button class="btn btn-primary w-full" id="compareRunBtn" type="button" disabled>
-              Run All Models
+              Run Comparison
             </button>
             <button class="btn btn-danger btn-sm w-full" id="compareCancelBtn" type="button" hidden>
               Cancel Comparison

@@ -140,7 +140,7 @@ function assertStartupCriticalPathIsFailureIsolated() {
   assert(initBody.includes('await checkReadiness'), 'startup must perform /ready checks when live succeeds');
   assert(initBody.includes('await checkDiagnostics'), 'startup must perform diagnostics/device discovery when live succeeds');
   const apiClient = readFrontendScript('js/api-client.js');
-  assert(apiClient.includes('statusMap = { offline: "offline", starting: "connecting", live: "online", diagnostics_pending: "online", ready: "online", degraded: "online"'), 'frontend must use explicit engine status states');
+  assert(apiClient.includes('statusMap = { offline: "offline", starting: "connecting", live: "online", busy: "online", delayed: "degraded", diagnostics_pending: "online", ready: "online", degraded: "degraded"'), 'frontend must use explicit engine status states');
   assert(apiClient.includes('/ready?depth=quick'), 'startup readiness must use quick diagnostics');
   assert(apiClient.includes('/health?depth=quick'), 'startup health must use quick diagnostics');
   assert(initBody.indexOf('runOptionalInitializer("latency chart", initLatencyChart)') < initBody.indexOf('await resolveApiBaseUrl()'), 'optional chart setup must not wrap backend startup');
@@ -262,8 +262,8 @@ function assertRequestConstructionAndErrorParsing() {
   let f = fields(req.body); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.model, 'MiDaS_small'); assert.strictEqual(f.colormap, 'inferno'); assert.strictEqual(f.device, 'cpu'); assert.strictEqual(f.metrics, 'full'); assert.strictEqual(f.outputs, 'color,gray'); assert.strictEqual(f.max_dim, '512');
   req = contracts.buildEstimateRequest({ file, gtFile:gt, gtRequired:true, gtScale:2, gtInvalidValue:-1 });
   f = fields(req.body); assert.strictEqual(f.gt_file.size, gt.size); assert.strictEqual(f.gt_required, 'true'); assert.strictEqual(f.gt_scale, '2'); assert.strictEqual(f.gt_invalid_value, '-1');
-  req = contracts.buildCompareRequest({ file, models:['a','b'], device:'auto', colormap:'magma', maxDim:384 });
-  f = fields(req.body); assert.strictEqual(req.endpoint, '/compare'); assert.strictEqual(f.models, 'a,b'); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.device, 'auto'); assert.strictEqual(f.colormap, 'magma'); assert.strictEqual(f.max_dim, '384');
+  req = contracts.buildCompareRequest({ file, models:['a','b'], device:'auto', colormap:'magma', maxDim:384, engine:'onnxruntime_prefer' });
+  f = fields(req.body); assert.strictEqual(req.endpoint, '/compare'); assert.strictEqual(f.models, 'a,b'); assert.strictEqual(f.file.size, file.size); assert.strictEqual(f.device, 'auto'); assert.strictEqual(f.colormap, 'magma'); assert.strictEqual(f.max_dim, '384'); assert.strictEqual(f.engine, 'onnxruntime_prefer');
   req = contracts.buildBenchmarkRequest({ model:'MiDaS_small', device:'cpu', iterations:3 });
   assert(req.endpoint.startsWith('/benchmark?')); assert(req.endpoint.includes('model=MiDaS_small')); assert(req.endpoint.includes('device=cpu')); assert(req.endpoint.includes('iterations=3'));
   req = contracts.buildDetectRequest({ file, threshold:0.4, maxDetections:7, device:'cpu' });
@@ -278,6 +278,14 @@ function assertRequestConstructionAndErrorParsing() {
   req = contracts.buildReconstructRequest({ file, includeRgb:false });
   f = fields(req.body); assert.strictEqual(f.include_rgb, 'false');
   assert.deepStrictEqual(contracts.buildCacheClearRequest(), { endpoint:'/cache/clear', method:'POST' });
+  const compareJs = readFrontendScript('js/compare.js');
+  assert(compareJs.includes('Comparison completed with failures'), 'compare must report partial failures');
+  assert(compareJs.includes('renderCompareErrorCard'), 'compare must render failed model cards');
+  assert(compareJs.includes('fd.append("engine", engine)'), 'compareEngine must be passed to backend');
+  const html = fs.readFileSync(path.join(__dirname, "..", "frontend", "index.html"), "utf8");
+  assert(html.includes('Include DPT Large'), 'DPT Large must be opt-in in Compare');
+  assert(html.includes('Force ONNX Runtime Strict'), 'strict ONNX mode copy must exist');
+
   assert.deepStrictEqual(contracts.buildObservabilityRequest(), { endpoint:'/observability', method:'GET' });
   assert.strictEqual(contracts.normalizeApiError({ detail:{ error_code:'INVALID_MODEL', message:'Bad model', retryable:false } }).errorCode, 'INVALID_MODEL');
   assert.strictEqual(contracts.normalizeApiError({ detail:'legacy detail' }).message, 'legacy detail');

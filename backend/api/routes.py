@@ -54,6 +54,7 @@ from backend.model_registry import MODEL_REGISTRY, supported_models_payload
 from backend.services import observability
 from backend.services.benchmark_config import BENCHMARK_TIMEOUT_SECONDS
 from backend.services.model_assets import ModelAssetsUnavailableError
+from backend.services.runtime_state import track_operation
 
 
 def _available_devices() -> dict[str, Any]:
@@ -199,8 +200,13 @@ async def _with_batch_item_timeout(awaitable: Any, route: str = "/batch") -> Any
 
 
 def _normalize_compare_models(models: str | None) -> list[str]:
+    default_models = [
+        model_id
+        for model_id, spec in MODEL_REGISTRY.items()
+        if getattr(spec, "recommended_for_compare_default", True)
+    ]
     raw_models = (
-        list(MODEL_REGISTRY)
+        default_models
         if models is None or not models.strip()
         else [item.strip() for item in models.split(",")]
     )
@@ -264,12 +270,19 @@ def _safe_compare_error(model: str, exc: Exception) -> dict[str, Any]:
     else:
         message = "Depth inference failed"
     detail = embedded_error(str(code), message)
+    spec = MODEL_REGISTRY.get(model)
     return {
+        "model": model,
         "model_id": model,
+        "model_display_name": spec.display_name if spec else model,
         "error_code": detail["error_code"],
         "message": detail["message"],
         "error": detail["message"],
         "error_detail": detail,
+        "technical_detail": detail["message"],
+        "engine_requested": None,
+        "device_requested": None,
+        "elapsed_ms": None,
     }
 
 
@@ -574,12 +587,13 @@ async def benchmark(
 
     try:
         engine = normalize_request_engine(engine, allow_both=True)
-        result: dict[str, Any] = await asyncio.wait_for(
-            run_in_threadpool(
-                run_benchmark, model=model, device=device, iterations=iterations, engine=engine
-            ),
-            timeout=BENCHMARK_TIMEOUT_SECONDS,
-        )
+        with track_operation("benchmark", f"benchmark:{model}"):
+            result: dict[str, Any] = await asyncio.wait_for(
+                run_in_threadpool(
+                    run_benchmark, model=model, device=device, iterations=iterations, engine=engine
+                ),
+                timeout=BENCHMARK_TIMEOUT_SECONDS,
+            )
         return result
     except asyncio.TimeoutError as exc:
         observability.record_benchmark(
@@ -699,27 +713,28 @@ async def estimate(
         return JSONResponse({**cached, "cached": True})
 
     try:
-        result = await _with_route_timeout(
-            process_image_async(
-                raw,
+        with track_operation("inference", f"estimate:{model}"):
+            result = await _with_route_timeout(
+                process_image_async(
+                    raw,
+                    model,
+                    colormap,
+                    resolved,
+                    file.filename,
+                    metrics,
+                    outputs,
+                    max_dim,
+                    gt_raw,
+                    gt_filename,
+                    gt_required,
+                    gt_scale,
+                    gt_invalid_value,
+                    engine,
+                ),
+                "/estimate",
                 model,
-                colormap,
                 resolved,
-                file.filename,
-                metrics,
-                outputs,
-                max_dim,
-                gt_raw,
-                gt_filename,
-                gt_required,
-                gt_scale,
-                gt_invalid_value,
-                engine,
-            ),
-            "/estimate",
-            model,
-            resolved,
-        )
+            )
     except asyncio.TimeoutError as exc:
         log.warning("Benchmark timed out", extra={"model": model, "device": device})
         raise benchmark_timeout_error() from exc
@@ -824,13 +839,16 @@ async def compare(
     output_set = parse_outputs(outputs)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
-    with observability.trace_span(
-        "api",
-        "compare",
-        {
-            "device_type": observability.normalize_device_type(resolved),
-            "model_count": len(model_ids),
-        },
+    with (
+        track_operation("compare", "compare"),
+        observability.trace_span(
+            "api",
+            "compare",
+            {
+                "device_type": observability.normalize_device_type(resolved),
+                "model_count": len(model_ids),
+            },
+        ),
     ):
         for model_id in model_ids:
             try:
@@ -937,6 +955,11 @@ async def detect_status(device: str = "auto", warmup: bool = False) -> JSONRespo
     resolved = _validated_device_or_422(device)
     from backend.services.object_detection import detector_status as detector_status_impl
 
+    if warmup:
+        with track_operation("detection", "detect:warmup"):
+            return JSONResponse(
+                await run_in_threadpool(detector_status_impl, resolved, warmup=warmup)
+            )
     return JSONResponse(await run_in_threadpool(detector_status_impl, resolved, warmup=warmup))
 
 
@@ -945,7 +968,8 @@ async def detect_warmup(device: str = "auto") -> JSONResponse:
     resolved = _validated_device_or_422(device)
     from backend.services.object_detection import detector_status as detector_status_impl
 
-    return JSONResponse(await run_in_threadpool(detector_status_impl, resolved, warmup=True))
+    with track_operation("detection", "detect:warmup"):
+        return JSONResponse(await run_in_threadpool(detector_status_impl, resolved, warmup=True))
 
 
 @router.post("/api/detect")
@@ -962,18 +986,19 @@ async def detect(
     raw = await file.read()
     validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
     try:
-        result = await _with_route_timeout(
-            detect_objects_async(
-                raw=raw,
-                filename=file.filename,
-                device=resolved,
-                threshold=threshold,
-                max_detections=max_detections,
-            ),
-            "/detect",
-            "object_detection",
-            resolved,
-        )
+        with track_operation("detection", "detect"):
+            result = await _with_route_timeout(
+                detect_objects_async(
+                    raw=raw,
+                    filename=file.filename,
+                    device=resolved,
+                    threshold=threshold,
+                    max_detections=max_detections,
+                ),
+                "/detect",
+                "object_detection",
+                resolved,
+            )
         observability.record_inference(
             "object_detection",
             "detector",
@@ -1052,32 +1077,33 @@ async def reconstruct(
     validate_upload_size(raw, max_size_mb=MAX_UPLOAD_SIZE_MB)
 
     try:
-        result = await _with_route_timeout(
-            reconstruct_point_cloud_async(
-                raw=raw,
-                filename=file.filename,
-                model=model,
-                device=resolved,
-                colormap=colormap,
-                max_dim=max_dim,
-                export_format=export_format,
-                max_points=max_points,
-                preview_points=preview_points,
-                focal_scale=focal_scale,
-                depth_scale=depth_scale,
-                depth_near_percentile=depth_near_percentile,
-                depth_far_percentile=depth_far_percentile,
-                sampling=sampling,
-                include_rgb=include_rgb,
-                coordinate_system=coordinate_system,
-                engine_requested=engine,
-            ),
-            "/reconstruct",
-            model,
-            resolved,
-            timeout_factory=reconstruction_timeout_error,
-            timeout_code="RECONSTRUCTION_TIMEOUT",
-        )
+        with track_operation("reconstruction", f"reconstruct:{model}"):
+            result = await _with_route_timeout(
+                reconstruct_point_cloud_async(
+                    raw=raw,
+                    filename=file.filename,
+                    model=model,
+                    device=resolved,
+                    colormap=colormap,
+                    max_dim=max_dim,
+                    export_format=export_format,
+                    max_points=max_points,
+                    preview_points=preview_points,
+                    focal_scale=focal_scale,
+                    depth_scale=depth_scale,
+                    depth_near_percentile=depth_near_percentile,
+                    depth_far_percentile=depth_far_percentile,
+                    sampling=sampling,
+                    include_rgb=include_rgb,
+                    coordinate_system=coordinate_system,
+                    engine_requested=engine,
+                ),
+                "/reconstruct",
+                model,
+                resolved,
+                timeout_factory=reconstruction_timeout_error,
+                timeout_code="RECONSTRUCTION_TIMEOUT",
+            )
     except asyncio.TimeoutError as exc:
         log.warning("Reconstruction timed out", extra={"model": model, "device": device})
         raise reconstruction_timeout_error() from exc
@@ -1165,10 +1191,13 @@ async def batch(
     resolved = _validated_device_or_422(device)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
-    with observability.trace_span(
-        "api",
-        "batch",
-        {"model_id": model, "device_type": observability.normalize_device_type(resolved)},
+    with (
+        track_operation("inference", f"batch:{model}"),
+        observability.trace_span(
+            "api",
+            "batch",
+            {"model_id": model, "device_type": observability.normalize_device_type(resolved)},
+        ),
     ):
         for upload in files:
             try:

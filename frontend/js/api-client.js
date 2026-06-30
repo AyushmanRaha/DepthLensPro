@@ -4,7 +4,7 @@
 // SERVER HEALTH & DEVICE LIST
 // ══════════════════════════════════════════════════════════════
 function setStatus(cls, label, sub, deviceText) {
-  const statusMap = { offline: "offline", starting: "connecting", live: "online", diagnostics_pending: "online", ready: "online", degraded: "online", online: "online", connecting: "connecting" };
+  const statusMap = { offline: "offline", starting: "connecting", live: "online", busy: "online", delayed: "degraded", diagnostics_pending: "online", ready: "online", degraded: "degraded", online: "online", connecting: "connecting" };
   const safeCls = statusMap[cls] || "offline";
 
   state.engineStatus.status = cls;
@@ -70,8 +70,9 @@ function formatEngineBytes(bytes) {
 
 function engineStatusStateText() {
   const { cls, live, status } = state.engineStatus;
-  if (status === "offline" || cls === "offline") return "Depth engine unavailable";
-  if (status === "degraded" || cls === "degraded") return "Depth engine delayed";
+  if (status === "offline" || cls === "offline") return "Depth engine offline";
+  if (status === "busy" || state.engineStatus.live?.busy) return "Depth engine busy";
+  if (status === "delayed" || status === "degraded" || cls === "degraded") return "Depth engine delayed";
   if (status === "starting" || cls === "connecting") return "Connecting to depth engine";
   if (live?.busy) return "Depth engine busy";
   if (status === "ready" || inferenceReady) return "Depth engine ready";
@@ -83,7 +84,7 @@ function engineStatusStateText() {
 function engineReadinessText() {
   const readiness = state.engineStatus.readiness || readinessDetails || state.engineStatus.health?.readiness;
 
-  if (inferenceReady) return "Inference runtime ready";
+  if (inferenceReady) return `Runtime ready${state.engineStatus.lastReadyOkAt ? `, last checked ${Math.max(1, Math.round((Date.now() - state.engineStatus.lastReadyOkAt) / 1000))}s ago` : ""}`;
   if (readiness?.required) return readinessSummary(readiness);
   if (state.engineStatus.status === "degraded" || state.engineStatus.cls === "degraded") return "Inference runtime ready · live probe delayed";
   if (state.engineStatus.status === "offline" || state.engineStatus.cls === "offline") return "Inference runtime unavailable";
@@ -93,7 +94,7 @@ function engineReadinessText() {
 function engineDiagnosticsText() {
   const health = state.engineStatus.health;
   if (!health) {
-    return backendOnline ? "Waiting for diagnostics" : "Diagnostics unavailable";
+    return backendOnline ? "Diagnostics stale" : "Diagnostics stale";
   }
 
   const status = health.diagnostics_status || health.status || "unknown";
@@ -134,7 +135,7 @@ function engineSystemText() {
   const system = health?.system;
   const telemetry = health?.telemetry;
 
-  if (!system && !telemetry) return "Waiting for diagnostics";
+  if (!system && !telemetry) return "Diagnostics stale";
 
   const parts = [];
   if (system?.os) parts.push(system.os);
@@ -402,6 +403,8 @@ async function checkReadiness({ quiet = true } = {}) {
     const res = await apiFetch("/ready?depth=quick", { signal: timeoutSignal(12000) });
     const data = await res.json();
     state.engineStatus.readiness = data;
+    state.engineStatus.lastReadyOkAt = Date.now();
+    state.engineStatus.readinessStale = false;
     readinessDetails = data;
     inferenceReady = Boolean(data.inference_ready);
     if (inferenceReady) {
@@ -419,9 +422,7 @@ async function checkReadiness({ quiet = true } = {}) {
     return inferenceReady;
   } catch (err) {
     logEndpointTiming("/ready", started, false, err.message);
-    readinessDetails = null;
-    inferenceReady = false;
-    state.engineStatus.readiness = null;
+    state.engineStatus.readinessStale = true;
     if (backendOnline) setStatus("diagnostics_pending", "Depth engine live", `Readiness still checking · ${err.message}`);
     else setStatus("offline", "Depth engine offline", `No /live response from ${API || DEFAULT_API_BASE_URL}`);
     if (!quiet) toastOnce(`Runtime check failed · ${err.message}`, "error", 6000);
@@ -467,7 +468,7 @@ async function checkLive({ quiet = false, signal } = {}) {
     backendOnline = data.status === "ok";
     if (!backendOnline) throw new Error("Unexpected /live response");
     if (data.busy) {
-      setStatus("online", "Depth engine busy", "Benchmark or model load running · /live ok", deviceBadge(state.devices, state.primaryDevice));
+      setStatus("busy", "Depth engine busy", "Active backend operation running · /live ok", deviceBadge(state.devices, state.primaryDevice));
     } else {
       setStatus("live","Depth engine detected",`Engine detected · checking runtime`, deviceBadge(state.devices, state.primaryDevice));
     }
@@ -481,19 +482,21 @@ async function checkLive({ quiet = false, signal } = {}) {
     state.engineStatus.lastLiveError = err?.message || String(err);
     const lastOk = Number(state.engineStatus.lastLiveOkAt || 0);
     const recentlyAlive = lastOk && Date.now() - lastOk < 60_000;
+    const hasActiveFrontendOperation = Boolean(state.abort || state.compareAbort || state.reconstruct?.abort || state.reconstruct?.capture?.detecting);
     const hardDown = /ECONNREFUSED|Failed to fetch|NetworkError/i.test(state.engineStatus.lastLiveError || "");
-    if ((recentlyAlive || inferenceReady) && state.engineStatus.consecutiveLiveFailures < 2 && !hardDown) {
+    if (hasActiveFrontendOperation || ((recentlyAlive || inferenceReady) && state.engineStatus.consecutiveLiveFailures < 4 /* consecutiveLiveFailures < 2 legacy hysteresis was too aggressive */ && !hardDown)) {
       backendOnline = true;
       const lastSeen = lastOk ? ` · last seen ${Math.max(1, Math.round((Date.now() - lastOk) / 1000))}s ago` : "";
-      setStatus("degraded", "Depth engine delayed", `Live probe delayed${lastSeen}`);
+      setStatus(hasActiveFrontendOperation ? "busy" : "delayed", hasActiveFrontendOperation ? "Depth engine busy" : "Depth engine delayed", `${hasActiveFrontendOperation ? "Live probe delayed · inference running" : "Live probe delayed"}${lastSeen}`);
       syncQueueControls();
       return false;
     }
     backendOnline = false;
+    if (!hardDown && (recentlyAlive || inferenceReady)) { backendOnline = true; setStatus("delayed", "Depth engine delayed", "Live probe delayed; last-known runtime data is stale"); return false; }
     inferenceReady = false;
     state.engineStatus.live = null;
-    state.engineStatus.readiness = null;
-    state.engineStatus.health = null;
+    state.engineStatus.readinessStale = Boolean(state.engineStatus.readiness);
+    state.engineStatus.healthStale = Boolean(state.engineStatus.health);
     setStatus("offline","Depth engine offline",`No /live response from ${API || DEFAULT_API_BASE_URL}`);
     const bannerText = el.deviceInfoBanner?.querySelector("span:last-child");
     if (bannerText) bannerText.textContent = `Depth engine unavailable at ${API || DEFAULT_API_BASE_URL}`;
@@ -514,6 +517,8 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
     const res = await apiFetch("/health?depth=quick", { signal: anySignal([requestSignal, timeoutSignal(12000)]) });
     const data = await res.json();
     state.engineStatus.health = data;
+    state.engineStatus.lastHealthOkAt = Date.now();
+    state.engineStatus.healthStale = false;
     applyCacheMetrics(data.cache_metrics);
     const devs = data.devices || state.devices || {};
     const primary = data.primary_device || state.primaryDevice || "cpu";
@@ -530,7 +535,7 @@ async function checkDiagnostics({ quiet = true, signal } = {}) {
     logEndpointTiming("/health", started, false, err.message);
     if (backendOnline) {
       setStatus("online","Depth engine online",`Diagnostics degraded · ${err.message}`, deviceBadge(state.devices, state.primaryDevice));
-      if (!quiet) toastOnce(`Diagnostics unavailable · ${err.message}`, "warning", 5000);
+      if (!quiet) toastOnce(`Diagnostics stale · ${err.message}`, "warning", 5000);
     }
     state.engineStatus.health = {
     status: "degraded",
