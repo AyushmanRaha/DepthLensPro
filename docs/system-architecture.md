@@ -24,7 +24,11 @@ flowchart TB
         Live["/live\nLightweight liveness"]
         Ready["/ready\nRuntime dependency readiness"]
         Health["/health\nFull diagnostics"]
-        Routes["/estimate · /batch · /reconstruct · /benchmark"]
+        Routes["Depth routes<br/>/estimate · /batch · /compare"]
+        ReconstructionRoutes["Reconstruction<br/>/reconstruct · /api/reconstruct"]
+        DetectionRoutes["Detection<br/>/detect · /api/detect"]
+        BenchmarkRoutes["Benchmark<br/>/benchmark · /api/benchmark"]
+        CacheRoutes["Cache / telemetry<br/>/cache/metrics · /cache · /cache/clear · /metrics · /observability"]
         Inference["Inference Service\nImage decode · model dispatch · depth encode"]
         Diagnostics["Diagnostics\nONNX · devices · cache · telemetry"]
     end
@@ -35,6 +39,7 @@ flowchart TB
         ONNX["ONNX Runtime\nOptional acceleration — provider auto-selection"]
         GT["Ground Truth Evaluator\nResize · mask · median-scale align · metrics"]
         Reconstruct["Point Cloud Builder\nPinhole projection · PLY / OBJ"]
+        Detector["TorchVision Detector\nFaster R-CNN MobileNetV3 COCO preview labels"]
     end
 
     subgraph Cache["Local Cache"]
@@ -47,6 +52,12 @@ flowchart TB
     Main -->|"polls /live every ~1.2 s"| Live
     Renderer -->|"localhost fetch"| Routes
     Routes --> Inference
+    ReconstructionRoutes --> Reconstruct
+    ReconstructionRoutes --> Inference
+    DetectionRoutes --> Detector
+    BenchmarkRoutes --> Registry
+    BenchmarkRoutes --> ONNX
+    CacheRoutes --> Diagnostics
     Routes --> Diagnostics
     Inference --> Registry
     Registry --> Torch

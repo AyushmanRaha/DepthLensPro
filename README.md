@@ -261,7 +261,7 @@ curl http://127.0.0.1:8765/live
 curl http://127.0.0.1:8765/ready
 ```
 
-Expected `/live` shape:
+Expected `/live` shape (the numeric fields are runtime-dependent):
 
 ```json
 {
@@ -269,7 +269,10 @@ Expected `/live` shape:
   "busy": false,
   "state": "idle",
   "service": "DepthLens Pro API",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "pid": 12345,
+  "timestamp": 1760000000.123,
+  "uptime_seconds": 1.234
 }
 ```
 
@@ -379,11 +382,12 @@ Read the full endpoint documentation in [API Reference](docs/api-reference.md).
 ## Testing and CI
 
 ```bash
-python -m py_compile backend/api/live.py backend/main.py
-python -m pytest backend/tests/test_lightweight_live.py
+python scripts/validate_docs.py
+scripts/ci.sh docs-contract
+python -m py_compile backend/api/live.py backend/api/routes.py backend/main.py backend/app.py scripts/validate_docs.py
+python -m pytest -q backend/tests/test_lightweight_live.py backend/tests/test_routes.py backend/tests/test_refactor_contract.py
 npm --prefix electron-app test
 npm run verify:resources
-rg -n "4\\.0\\.0|3\\.1\\.0"
 ```
 
 The test strategy favors lightweight unit tests and stubs for Torch, ONNX Runtime, Redis, model downloads, and platform-specific packaging behavior. Read the full policy in [Testing and CI](docs/testing-and-ci.md).

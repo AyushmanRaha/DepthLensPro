@@ -123,6 +123,7 @@ DepthLensPro/
 │   ├── setup-and-build.md
 │   ├── system-architecture.md
 │   ├── system-design-decisions.md
+│   ├── resource-path-contract.md
 │   ├── terminal-only-development.md
 │   ├── testing-and-ci.md
 │   └── troubleshooting.md
@@ -142,7 +143,7 @@ DepthLensPro/
 
 ### Backend route organization
 
-The inference service `backend/services/inference.py` preserves the existing public imports and response payloads delegates image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
+The inference service `backend/services/inference.py` preserves existing public imports and response payloads while delegating image I/O, cache keys, PyTorch runtime, ONNX fallback handling, and metrics to focused sibling modules.
 
 The FastAPI route layer stays thin: public route declarations and high-level orchestration remain in `backend/api/routes.py`, while reusable validation, error mapping, device/readiness cache, and health telemetry helpers live in the neighboring `backend/api/` modules listed above. Public API routes, request fields, status codes, and response shapes are documented in the API Reference.
 
