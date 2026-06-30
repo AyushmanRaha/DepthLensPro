@@ -36,7 +36,7 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX Runtime p
 
 ### Quick Preview
 
-<video src="https://github.com/user-attachments/assets/6baef599-df4c-4d48-9fa5-7cbe43a08449" controls muted playsinline width="100%">
+<video src="https://github.com/user-attachments/assets/852a9b5c-c820-4944-827d-4888b7c410c4" controls muted playsinline width="100%">
   Your browser does not support the video tag.
 </video>
 
