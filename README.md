@@ -60,6 +60,7 @@ Images are processed through a local Electron + FastAPI + PyTorch/ONNX Runtime p
 - [Choose your setup path](#choose-your-setup-path)
 - [Installation and build matrix](#installation-and-build-matrix)
 - [ONNX acceleration note](#onnx-acceleration-note)
+- [Benchmark snapshot](#benchmark-snapshot)
 - [Docs and deep dives](#docs-and-deep-dives)
 - [API quick reference](#api-quick-reference)
 - [Testing and CI](#testing-and-ci)
@@ -319,6 +320,20 @@ For full platform prerequisites, setup reports, diagnostics, resource verificati
 > **ONNX is optional for standard PyTorch usage.** Standard builds do not require ONNX files. ONNX builds require local generation and validation of all requested ONNX model files before packaging.
 >
 > ONNX export and benchmarking can use sustained CPU/GPU resources, high RAM, and large model files. Use a powerful, well-cooled machine with active cooling/fans, sufficient free disk space, and adequate memory. Avoid long export or benchmark runs on thermally constrained laptops or systems with limited cooling headroom.
+
+---
+
+## Benchmark snapshot
+
+The following local benchmark was captured from a **standard native build** on a **15-inch MacBook Air with Apple M3**. The app used auto device selection preferring Apple acceleration / Apple M3 Metal, with an optional ONNX Runtime file installed only for **MiDaS Small**.
+
+| Model | PyTorch avg latency | ONNX avg latency | Speedup | ONNX throughput | Process RSS | ONNX status |
+|---|---:|---:|---:|---:|---:|---|
+| MiDaS Small | 164.2 ms | 20.4 ms | 8.06× | 49.09 fps | 2717.91 MB | Ready via `CoreMLExecutionProvider` |
+| DPT Hybrid | 301.2 ms | Not benchmarked | — | — | 2717.91 MB | ONNX file not installed |
+| DPT Large | 301.2 ms | Not benchmarked | — | — | 2717.91 MB | ONNX file not installed |
+
+> **Benchmark note:** These numbers are a local snapshot from one synthetic `384×384` frame and are not a universal performance guarantee. Standard builds do not require ONNX files; PyTorch remains the default execution path. Only MiDaS Small had optional ONNX installed for this run. DPT Hybrid and DPT Large ONNX runs were skipped on this fanless MacBook Air to avoid sustained heat, lag, and memory pressure during heavier ONNX export/benchmark workloads.
 
 ---
 
