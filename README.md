@@ -143,7 +143,7 @@ ONNX files are optional for standard PyTorch use and are validated locally befor
 ## Architecture at a glance
 
 <p align="center">
-  <img src="docs/architecture/depthlens-system-architecture.svg" alt="DepthLens Pro local-first architecture diagram" width="900">
+  <img src="docs/architecture/depthlens-system-architecture.png" alt="DepthLens Pro local-first architecture diagram" width="900">
 </p>
 
 | Layer | Responsibility |
