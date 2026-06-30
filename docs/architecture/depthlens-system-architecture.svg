@@ -40,10 +40,12 @@
 
   <rect class="card" x="90" y="328" width="920" height="104" />
   <text class="label" x="120" y="361">FastAPI Backend</text>
-  <text class="small" x="120" y="390">/estimate</text>
-  <text class="small" x="335" y="390">/batch</text>
-  <text class="small" x="535" y="390">/benchmark</text>
-  <text class="small" x="765" y="390">/reconstruct</text>
+  <text class="small" x="120" y="388">/live · /ready · /health</text>
+  <text class="small" x="120" y="412">/estimate · /batch · /compare</text>
+  <text class="small" x="430" y="388">/benchmark · /api/benchmark</text>
+  <text class="small" x="430" y="412">/reconstruct · /api/reconstruct</text>
+  <text class="small" x="735" y="388">/detect · /api/detect</text>
+  <text class="small" x="735" y="412">/metrics · /observability · cache</text>
 
   <path class="arrow" d="M550 434 V476" />
 
@@ -52,7 +54,7 @@
   <text class="small" x="120" y="540">PyTorch Torch Hub MiDaS/DPT</text>
   <text class="small" x="120" y="562">ONNX Runtime optional path</text>
   <text class="small" x="315" y="540">Ground truth evaluator</text>
-  <text class="small" x="315" y="562">Point cloud builder</text>
+  <text class="small" x="315" y="562">Point cloud builder · COCO detector</text>
 
   <rect class="card" x="575" y="478" width="435" height="104" />
   <text class="label" x="605" y="511">Local Outputs / Storage</text>

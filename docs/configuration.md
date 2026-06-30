@@ -31,6 +31,10 @@ DEPTHLENS_TRACE_HISTORY_LIMIT=200
 DEPTHLENS_CRASH_HISTORY_LIMIT=100
 DEPTHLENS_BENCHMARK_HISTORY_LIMIT=50
 DEPTHLENS_TRACE_SAMPLE_RATE=1.0
+DEPTHLENS_ROUTE_TIMEOUT_SECONDS=300
+DEPTHLENS_BATCH_ITEM_TIMEOUT_SECONDS=300
+DEPTHLENS_CORS_ALLOW_ALL=false
+DEPTHLENS_CORS_ALLOWED_ORIGINS=
 ```
 
 ### Server
@@ -68,7 +72,7 @@ DEPTHLENS_TRACE_SAMPLE_RATE=1.0
 | `DEPTHLENS_MAX_DIM` | `1536` | Maximum long image edge before down-scaling |
 | `DEPTHLENS_DEFAULT_METRICS` | `fast` | `none`, `fast`, or `full` |
 | `DEPTHLENS_DEFAULT_OUTPUTS` | `color` | `color`, `gray`, or `color,gray` |
-| `INFERENCE_MAX_CONCURRENCY` | `2` | Max concurrent inference operations (asyncio semaphore) |
+| `INFERENCE_MAX_CONCURRENCY` | `2` | Max concurrent service-level async inference operations. HTTP routes offload work through route-level threadpool wrappers, so this mostly applies to direct service helper usage and Docker defaults. |
 | `DEPTHLENS_OBSERVABILITY_ENABLED` | `true` | Enable local observability snapshots and instrumentation |
 | `DEPTHLENS_PROMETHEUS_ENABLED` | `true` | Enable `/metrics` Prometheus exposition when `prometheus-client` is available |
 | `DEPTHLENS_TELEMETRY_MAX_EVENTS` | `200` | Bounded recent HTTP/inference event history size |
@@ -78,6 +82,9 @@ DEPTHLENS_TRACE_SAMPLE_RATE=1.0
 | `DEPTHLENS_TRACE_SAMPLE_RATE` | `1.0` | Trace sampling ratio from `0.0` to `1.0` |
 | `ORT_INTRA_OP_NUM_THREADS` | CPU-dependent / Docker `2` | ONNX Runtime intra-op thread pool |
 | `ORT_INTER_OP_NUM_THREADS` | `1` | ONNX Runtime inter-op thread pool |
+| `DEPTHLENS_BENCHMARK_TIMEOUT_SECONDS` | `180` | Benchmark route timeout used by `backend/services/benchmarks.py` |
+| `DEPTHLENS_AUTO_EXPORT_ONNX` | `false` | Benchmark-only escape hatch to export a missing ONNX file before timing; standard setup/build docs do not require this |
+| `DEPTHLENS_ONNX_STATUS_TTL_SECONDS` | `30` | Cache TTL for ONNX status diagnostics |
 
 ### Paths
 
@@ -87,7 +94,6 @@ DEPTHLENS_TRACE_SAMPLE_RATE=1.0
 | `DEPTHLENSPRO_MODEL_DIR` | unset | Custom model directory; ONNX files searched in `{dir}/onnx/` |
 | `DEPTHLENS_ONNX_DIR` | unset | Direct ONNX directory override |
 | `ONNX_WEIGHTS_DIR` | unset | Legacy ONNX directory (lowest priority) |
-| `DEPTHLENS_AUTO_EXPORT_ONNX` | `false` | Auto-export ONNX during benchmark when weights are missing |
 
 ### Observability Privacy
 
@@ -101,6 +107,7 @@ Telemetry is local-only: DepthLens Pro does not send analytics to cloud services
 | `CI=1` | CI marker used by test fixtures |
 | `CODEX_ENV=1` | Automation/sandboxed environment marker |
 | `DEPTHLENS_DISABLE_MODEL_DOWNLOADS=1` | Prevents torch.hub from downloading weights (used in offline CI) |
+| `DEPTHLENS_CACHE_BACKEND=memory` | Set by CI/setup helper environments as a policy hint; the runtime cache service actually attempts Redis when the `redis` package and connection are available, then falls back to memory on import/connection failure. |
 
 <div align="right"><sub><a href="../README.md#depthlens-pro">⬆ back to README</a></sub></div>
 

@@ -53,7 +53,7 @@ Generates a depth map for one image.
 | `device` | string | `auto` | `auto`, `cpu`, `mps`, `cuda:0`, `xpu:0`, etc. |
 | `metrics` | string | `fast` | `none`, `fast`, or `full` |
 | `outputs` | string | `color` | `color`, `gray`, or `color,gray` |
-| `max_dim` | integer | `1536` via config | Resize long edge before inference |
+| `max_dim` | integer | optional (`None` at the route) | Optional request override; when omitted, image preprocessing uses the backend `DEPTHLENS_MAX_DIM` limit (`1536` by default). Valid override range is `64` through the configured `DEPTHLENS_MAX_DIM`. |
 | `gt_file` | file | optional | PNG/TIFF/NPY ground-truth depth file |
 | `gt_required` | boolean | `false` | Return 422 if GT file is missing |
 | `gt_scale` | float | optional | Multiplier applied to GT values (e.g. `0.001` for mm→m) |
@@ -104,7 +104,7 @@ Runs multiple supported depth models on one image and returns per-model outputs 
 | `device` | string | `auto` | `auto`, `cpu`, `mps`, `cuda:0`, `xpu:0`, etc. |
 | `metrics` | string | `full` | `none`, `fast`, or `full` |
 | `outputs` | string | `color,gray` | `color`, `gray`, or `color,gray` |
-| `max_dim` | integer | optional | Resize long edge before inference |
+| `max_dim` | integer | optional | Optional request override; valid range is `64` through configured `DEPTHLENS_MAX_DIM` (`1536` by default). |
 
 #### Example
 
